@@ -13,11 +13,14 @@ import { useAuthStore } from '@/features/auth/store';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
 import { listAllWarehouses } from '@/features/inventory/api';
 import { createGoodsReceipt, listGoodsReceipts, listPurchaseOrders } from '@/features/procurement/api';
+import GoodsReceiptTallyCell from '@/features/procurement/components/GoodsReceiptTallyCell';
+import { bagLabelsDrawerTitle, grnDrawerTitle, grnNumber } from '@/features/procurement/documentWords';
+import { lineQcLine, receiptQcLine } from '@/features/procurement/grnQc';
 import { RECEIVABLE_PO_FILTERS, isReceivableOrder } from '@/features/procurement/purchaseOrders';
 import type { GoodsReceiptNote, GoodsReceiptNoteLine, PurchaseOrderSchedule } from '@/features/procurement/types';
 import { useProductionSettings } from '@/features/production/packing';
-import { TallyLinkCell } from '@/features/sales/SalesDocumentDrawer';
 import { formatDateTime } from '@/lib/datetime';
+import { ListEmpty } from '@/lib/ListEmpty';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { itemLabel } from '@/lib/itemLabel';
 
@@ -486,7 +489,7 @@ export default function GoodsReceiptsPage() {
 
     // A link may point at a receipt older than the newest 20, so a linked view
     // asks for the whole register rather than the default first page.
-    const { data, isLoading } = useQuery({
+    const { data, isLoading, isPending, isError, error, refetch } = useQuery({
         // Following a ?grn= or ?po= link reads the WHOLE register and filters it
         // here, because the row being linked to may be anywhere in it. The
         // ordinary view pages the server instead: it used to take the default
@@ -531,11 +534,19 @@ export default function GoodsReceiptsPage() {
     );
     const orderOptions = receivableOrders.map((o) => ({ value: o.id, label: `PO #${o.id} — ${o.vendor.name}` }));
     // WS-B: `StoreGoodsReceiptRequest` refuses a RETIRED store, so an
-    // arrival can no longer be booked into one from this form.
-    const warehouseOptions = activePickerOptions(warehouses?.data, {
-        isActive: (w) => w.is_active,
-        option: (w) => ({ value: w.id, label: `${w.code} — ${w.name}` }),
-    });
+    // arrival can no longer be booked into one from this form. The
+    // Production/WIP row is kept out too (28-Aug audit finding 4): it holds
+    // material already issued to production (DEC-20260817-001), so a
+    // purchase cannot arrive there — the server refuses it; this offers the
+    // rule before the mistake instead of after it.
+    const wipWarehouseId = warehouses?.meta?.production_wip_warehouse_id ?? null;
+    const warehouseOptions = activePickerOptions(
+        warehouses?.data.filter((w) => w.id !== wipWarehouseId),
+        {
+            isActive: (w) => w.is_active,
+            option: (w) => ({ value: w.id, label: `${w.code} — ${w.name}` }),
+        },
+    );
 
     const receipts = data?.data ?? [];
     /**
@@ -851,6 +862,15 @@ export default function GoodsReceiptsPage() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={visibleReceipts}
+                locale={{
+                    emptyText: (
+                        <ListEmpty
+                            state={{ isPending, isError, error, refetch }}
+                            entity="goods receipts"
+                            empty="No goods receipts yet."
+                        />
+                    ),
+                }}
                 pagination={
                     isDeepLinked
                         ? false
@@ -869,7 +889,7 @@ export default function GoodsReceiptsPage() {
                           }
                 }
                 columns={[
-                    { title: 'ID', dataIndex: 'id' },
+                    { title: 'Receipt', render: (_, row) => grnNumber(row) },
                     {
                         title: 'PO',
                         render: (_, row) => (
@@ -885,6 +905,22 @@ export default function GoodsReceiptsPage() {
                     ...(showsRates ? [{ title: 'Unit Price', render: (_: unknown, row: GoodsReceiptNote) => unitPriceSummary(row) }] : []),
                     { title: 'Reference', dataIndex: 'reference' },
                     { title: 'Lines', render: (_, row) => row.lines.length },
+                    {
+                        // Audit finding 9: is this arrival usable yet? The
+                        // register answers without a walk to the Quality menu.
+                        title: 'QC',
+                        render: (_, row) => {
+                            const qc = receiptQcLine(row.lines);
+                            return <Tag color={qc.color} style={{ marginInlineEnd: 0 }}>{qc.text}</Tag>;
+                        },
+                    },
+                    {
+                        // Audit finding 5 (28-Aug live walk): the register said
+                        // nothing about a Receipt Note's fate — a failure was
+                        // invisible until someone opened Tally Sync.
+                        title: 'Tally',
+                        render: (_, row) => <GoodsReceiptTallyCell receipt={row} compact />,
+                    },
                     {
                         title: 'Actions',
                         render: (_, row) => (
@@ -1067,7 +1103,7 @@ export default function GoodsReceiptsPage() {
             </Modal>
 
             <Drawer
-                title={`Goods Receipt #${detailReceipt?.id}`}
+                title={grnDrawerTitle(detailReceipt)}
                 open={detailReceipt !== null}
                 onClose={() => setDetailReceipt(null)}
                 width="min(100vw, 560px)"
@@ -1098,13 +1134,13 @@ export default function GoodsReceiptsPage() {
                             </Descriptions.Item>
                             <Descriptions.Item label="Reference">{detailReceipt.reference ?? '—'}</Descriptions.Item>
                             <Descriptions.Item label="Notes">{detailReceipt.notes ?? '—'}</Descriptions.Item>
-                            {/* The Receipt Note's queue entry — the same cell
-                                the Sales pages render (status + link only). */}
-                            {detailReceipt.tally !== undefined && (
-                                <Descriptions.Item label="Tally">
-                                    <TallyLinkCell link={detailReceipt.tally} />
-                                </Descriptions.Item>
-                            )}
+                            {/* Where the Receipt Note stands — the queue entry
+                                when one exists, else the staging record's own
+                                sentence (refused with reasons / posting off /
+                                predates staging). Never a bare dash. */}
+                            <Descriptions.Item label="Tally">
+                                <GoodsReceiptTallyCell receipt={detailReceipt} />
+                            </Descriptions.Item>
                         </Descriptions>
 
                         <Typography.Title level={5} style={{ marginTop: 24 }}>
@@ -1122,6 +1158,26 @@ export default function GoodsReceiptsPage() {
                                 ...(showsRates
                                     ? [{ title: 'Unit Cost', render: (_: unknown, line: GoodsReceiptNoteLine) => line.unit_cost ?? '—' }]
                                     : []),
+                                {
+                                    // The road from the arrival to its inspection
+                                    // (audit finding 9): the line's QC standing,
+                                    // and — while nothing is recorded — the way
+                                    // to record one, pre-selected.
+                                    title: 'Incoming QC',
+                                    render: (_: unknown, line: GoodsReceiptNoteLine) => {
+                                        const qc = lineQcLine(line.qc);
+                                        return (
+                                            <Space direction="vertical" size={2}>
+                                                <Tag color={qc.color} style={{ marginInlineEnd: 0 }}>{qc.text}</Tag>
+                                                {qc.offerInspection && (
+                                                    <Link to={`/quality/incoming-inspections?line=${line.id}`}>
+                                                        Record inspection
+                                                    </Link>
+                                                )}
+                                            </Space>
+                                        );
+                                    },
+                                },
                             ]}
                         />
                     </>
@@ -1129,7 +1185,7 @@ export default function GoodsReceiptsPage() {
             </Drawer>
 
             <Drawer
-                title={`Goods receipt #${createdReceipt?.id} — bag labels ready`}
+                title={bagLabelsDrawerTitle(createdReceipt)}
                 open={createdReceipt !== null}
                 onClose={() => setCreatedReceipt(null)}
                 width="min(100vw, 980px)"

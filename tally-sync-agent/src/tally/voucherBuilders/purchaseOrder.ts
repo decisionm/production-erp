@@ -1,4 +1,4 @@
-import { envelope, escapeXml, toTallyDate } from './xmlHelpers';
+import { envelope, escapeXml, requireAllowedCompanyFor, toTallyDate } from './xmlHelpers';
 
 /**
  * Matches TallySyncService::enqueuePurchaseOrder()'s payload shape (Phase 6).
@@ -442,18 +442,10 @@ function sameDecimal(a: string, b: string): boolean {
  * has to fix the cloud config, the agent config, or both.
  */
 export function requireAllowedCompany(allowedCompany: string | null | undefined, companyName: string): void {
-    if (typeof allowedCompany !== 'string' || allowedCompany.trim() === '') {
-        throw new Error(
-            'Purchase Order payload has no allowed_company (the allowed Testing Tally company) — refusing to build: '
-            + 'this agent never posts a Purchase Order without the cloud naming the one Tally company it may post to',
-        );
-    }
-    if (allowedCompany !== companyName) {
-        throw new Error(
-            `Purchase Order payload's allowed_company ("${allowedCompany}") does not match this agent's configured `
-            + `Tally company ("${companyName}") — refusing to build: never posting a Purchase Order to the wrong Tally company`,
-        );
-    }
+    // The check itself lives in xmlHelpers (requireAllowedCompanyFor) since
+    // the Receipt Note builder gained the same lock — one comparison, worded
+    // per voucher kind, that can never drift between the two.
+    requireAllowedCompanyFor('Purchase Order', allowedCompany, companyName);
 }
 
 function required(value: string | null | undefined, what: string): string {

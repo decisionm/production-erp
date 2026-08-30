@@ -522,7 +522,10 @@ export default function DashboardPage() {
                                 <LedgerCell
                                     figure={String(summary.procurement.pending_requisitions)}
                                     label="Requisitions to approve"
-                                    to="/procurement/purchase-requisitions"
+                                    // ?status=draft: the tile counts drafts, so
+                                    // the click lands on exactly the rows it
+                                    // counted — the figure is checkable.
+                                    to="/procurement/purchase-requisitions?status=draft"
                                 />
                             </>
                         )}

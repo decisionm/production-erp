@@ -71,6 +71,7 @@ const ROUTE_TABLE = [
     '/procurement/purchase-requisitions',
     '/procurement/purchase-orders',
     '/procurement/goods-receipts',
+    '/procurement/supplier-bills',
     '/sales/customers',
     '/sales/sales-orders',
     '/sales/deliveries',

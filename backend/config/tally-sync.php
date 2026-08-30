@@ -181,12 +181,13 @@ return [
     |--------------------------------------------------------------------------
     |
     | Whether a goods receipt (GoodsReceiptNoteReceived) stages a Tally
-    | 'Receipt Note' voucher at all. WHETHER THE FACTORY USES TALLY RECEIPT
-    | NOTES IS PENDING Q63, open since 26-Aug-2026 and unanswered: no export
-    | read so far contains a GRN voucher sample, and no decision record
-    | settles it. OFF is therefore the fail-closed reading of an OPEN
-    | question, not a decision that has been taken — a fresh deployment must
-    | not stage one silently on an assumption. OFF here means the TallySyncEventServiceProvider listener
+    | 'Receipt Note' voucher at all. THE FACTORY DOES NOT USE TALLY RECEIPT
+    | NOTES — decided by the owner, DEC-20260830-001 (30-Aug-2026) — so OFF
+    | is the DECIDED state, no longer a fail-closed reading of an open
+    | question. The machinery is kept disabled rather than deleted so
+    | history and tests keep their meaning; turning this on would
+    | contradict the decision and needs a NEW owner record, never an env
+    | edit alone. OFF here means the TallySyncEventServiceProvider listener
     | no-ops (logs and returns) rather than calling
     | TallySyncService::enqueueGoodsReceiptNote() — no new queue row is
     | created. Existing/historical rows are never deleted or altered by
@@ -197,5 +198,24 @@ return [
     */
 
     'receipt_notes_enabled' => (bool) env('TALLY_SYNC_RECEIPT_NOTES_ENABLED', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Receipt Note → Tally: the allowed Tally company (fail-closed)
+    |--------------------------------------------------------------------------
+    |
+    | The Purchase Order rule (`purchase_orders_allowed_company` above) on
+    | the Receipt Note path — DEFENSE IN DEPTH ONLY. The factory does not
+    | use Tally Receipt Notes (DEC-20260830-001), the feature above stays
+    | OFF, and NOTHING needs configuring here on any deployment. The gate
+    | exists so that even a mistaken enable cannot post to an unchecked
+    | company (the 28-Aug rehearsal's failure mode): blank-after-trim or
+    | unset REFUSES staging while receipt_notes_enabled is true; the
+    | trimmed value rides the payload (`allowed_company`) and the desktop
+    | agent compares it byte-for-byte before building anything.
+    |
+    */
+
+    'receipt_notes_allowed_company' => env('TALLY_SYNC_RECEIPT_NOTES_ALLOWED_COMPANY'),
 
 ];

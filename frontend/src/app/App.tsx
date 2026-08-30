@@ -65,6 +65,7 @@ import StockPage from '@/features/inventory/pages/StockPage';
 import StoreFulfilmentPage from '@/features/inventory/pages/StoreFulfilmentPage';
 import WarehousesPage from '@/features/inventory/pages/WarehousesPage';
 import GoodsReceiptsPage from '@/features/procurement/pages/GoodsReceiptsPage';
+import SupplierBillsPage from '@/features/procurement/pages/SupplierBillsPage';
 import PurchaseOrdersPage from '@/features/procurement/pages/PurchaseOrdersPage';
 import PurchaseRequisitionsPage from '@/features/procurement/pages/PurchaseRequisitionsPage';
 import VendorsPage from '@/features/procurement/pages/VendorsPage';
@@ -207,6 +208,7 @@ export default function App() {
                                     <Route path="/procurement/purchase-requisitions" element={<PurchaseRequisitionsPage />} />
                                     <Route path="/procurement/purchase-orders" element={<PurchaseOrdersPage />} />
                                     <Route path="/procurement/goods-receipts" element={<GoodsReceiptsPage />} />
+                                    <Route path="/procurement/supplier-bills" element={<SupplierBillsPage />} />
                                     <Route path="/sales/customers" element={<CustomersPage />} />
                                     <Route path="/sales/sales-orders" element={<SalesOrdersPage />} />
                                     <Route path="/sales/deliveries" element={<DeliveriesPage />} />

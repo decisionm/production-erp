@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { listAllItems } from '@/features/inventory/api';
 import { listAllVendors, listPurchaseOrders, sendPurchaseOrder } from '@/features/procurement/api';
 import { apiMessage } from '@/features/procurement/components/apiMessage';
-import CreatePurchaseOrderModal from '@/features/procurement/components/CreatePurchaseOrderModal';
+import CreatePurchaseOrderModal, { type RaiseFromRequisition } from '@/features/procurement/components/CreatePurchaseOrderModal';
 import PurchaseOrderDetailDrawer from '@/features/procurement/components/PurchaseOrderDetailDrawer';
 import PurchaseOrderFilterBar from '@/features/procurement/components/PurchaseOrderFilterBar';
 import { AmendPurchaseOrderModal, PurchaseOrderReasonModal, type ReasonAction } from '@/features/procurement/components/PurchaseOrderLifecycleModals';
@@ -23,22 +24,16 @@ import {
     tallyStateLine,
 } from '@/features/procurement/purchaseOrders';
 import type { PurchaseOrder } from '@/features/procurement/types';
+import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { usePurchaseOrderListParams } from '@/features/procurement/usePurchaseOrderListParams';
 
 const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
 
-/**
- * What an EMPTY table says, judged on the query's state — never on the row
- * count alone (the Sales lists' rule): a list that could not be read has no
- * rows, and "No purchase orders match" over a 403 would be a permission
- * error read as an empty result.
- */
-function listEmptyText(state: { isPending: boolean; isError: boolean; error?: unknown }, filtersActive: boolean): string {
-    if (state.isError) return `Could not read purchase orders: ${apiMessage(state.error, 'unknown error')}`;
-    if (state.isPending) return 'Reading purchase orders…';
-
-    return filtersActive ? 'No purchase orders match these filters.' : 'No purchase orders yet.';
-}
+// What an EMPTY table says is judged on the query's state — never on the row
+// count alone (the Sales lists' rule): a list that could not be read has no
+// rows, and "No purchase orders match" over a 403 would be a permission
+// error read as an empty result. The judging moved to @/lib/ListEmpty so a
+// failed read also offers Try again, on every list the same way.
 
 /**
  * THE PURCHASE ORDERS LIST (Phase 6: P6-01 lifecycle, P6-02 show/trace/
@@ -52,6 +47,20 @@ function listEmptyText(state: { isPending: boolean; isError: boolean; error?: un
  */
 export default function PurchaseOrdersPage() {
     const [createOpen, setCreateOpen] = useState(false);
+    // A requisition's Raise PO arrives as router state (no refetch, no
+    // extra endpoint): open the create form prefilled, once, and clear the
+    // state so a later back/refresh does not reopen it.
+    const location = useLocation();
+    const navigate = useNavigate();
+    const [raiseFrom, setRaiseFrom] = useState<RaiseFromRequisition | null>(null);
+    useEffect(() => {
+        const arrived = (location.state as { raiseFromRequisition?: RaiseFromRequisition } | null)?.raiseFromRequisition;
+        if (arrived) {
+            setRaiseFrom(arrived);
+            setCreateOpen(true);
+            navigate(location.pathname + location.search, { replace: true, state: null });
+        }
+    }, [location, navigate]);
     const [reasonAction, setReasonAction] = useState<{ action: ReasonAction; order: PurchaseOrder } | null>(null);
     const [amendOrder, setAmendOrder] = useState<PurchaseOrder | null>(null);
     const queryClient = useQueryClient();
@@ -59,7 +68,7 @@ export default function PurchaseOrdersPage() {
     const { filters, setFilters, setPage, openId, traceId, openDetail, openTrace, closeDrawers } = usePurchaseOrderListParams();
     const filtersActive = hasActiveFilters(filters);
 
-    const { data, isLoading, isPending, isError, error } = useQuery({
+    const { data, isLoading, isPending, isError, error, refetch } = useQuery({
         queryKey: ['procurement', 'purchase-orders', 'list', filters],
         queryFn: () => listPurchaseOrders(filters),
         placeholderData: (previous) => previous,
@@ -143,12 +152,24 @@ export default function PurchaseOrdersPage() {
                 />
             )}
 
+            {/* placeholderData keeps stale rows on a failed refetch, so
+                emptyText never shows the failure — this line does. */}
+            <ListReadAlert state={{ isPending, isError, error, refetch }} entity="purchase orders" />
+
             <Table<PurchaseOrder>
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={orders}
-                locale={{ emptyText: listEmptyText({ isPending, isError, error }, filtersActive) }}
+                locale={{
+                    emptyText: (
+                        <ListEmpty
+                            state={{ isPending, isError, error, refetch }}
+                            entity="purchase orders"
+                            empty={filtersActive ? 'No purchase orders match these filters.' : 'No purchase orders yet.'}
+                        />
+                    ),
+                }}
                 pagination={
                     data?.meta
                         ? {
@@ -226,14 +247,20 @@ export default function PurchaseOrdersPage() {
 
             <CreatePurchaseOrderModal
                 open={createOpen}
-                onClose={() => setCreateOpen(false)}
+                onClose={() => {
+                    setCreateOpen(false);
+                    setRaiseFrom(null);
+                }}
                 onCreated={(order) => {
                     invalidate();
+                    queryClient.invalidateQueries({ queryKey: ['procurement', 'purchase-requisitions'] });
                     setCreateOpen(false);
+                    setRaiseFrom(null);
                     message.success(`${poNumber(order)} created as a draft.`);
                 }}
                 vendorOptions={vendorOptions}
                 itemOptions={itemOptions}
+                raiseFrom={raiseFrom}
             />
 
             <PurchaseOrderReasonModal

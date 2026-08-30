@@ -384,9 +384,17 @@ its VENDORS and when, has no module behind it: nothing tracks vendor
 bills, due dates or payments made, so no figure was faked onto the
 dashboard (PR #151 review, 09-Aug). If the owner wants vendor payments
 visible, that is a real Finance-module build to scope — bills against
-POs/GRNs, due dates, payment recording — not a dashboard cell. **Blocks:**
-nothing — the dashboard stays receivables-only until answered. *Open
-since 2026-08-09.*
+POs/GRNs, due dates, payment recording — not a dashboard cell.
+
+**Narrowed 2026-08-29 — the BILLS half landed by lead instruction.** The
+28-Aug procurement brief from the lead directed an ERP-side supplier-bill
+screen, and it shipped (PR #49): bills against POs/GRNs, recorded by
+Accounts, finance-gated (FC-06), no Tally posting (that half is the
+question below Q67). What THIS question still asks is the rest of
+accounts payable — due dates, payment recording, and any dashboard
+figure for what the factory owes. Nothing tracks a payment yet, and no
+figure was added to the dashboard. **Blocks:** nothing — the dashboard
+stays receivables-only until answered. *Open since 2026-08-09.*
 
 ## Q29 · Are the regional ledger groups all customers under Sundry Debtors? — RESOLVED
 
@@ -1623,7 +1631,16 @@ flow already built — reserve, release, re-point and send-to-production all
 require a person, and every one of them records who and why.
 *Open since 2026-08-26.*
 
-## Q63 · Does the factory use Tally Receipt Notes (GRNs) at all?
+## Q63 · Does the factory use Tally Receipt Notes (GRNs) at all? — RESOLVED
+
+**Resolved 2026-08-30 by DEC-20260830-001: the factory does NOT use Tally
+Receipt Notes.** The ERP's goods receipt stays the arrival record (inward,
+QC, barcodes, inventory); no Receipt Note voucher is posted or staged to
+Tally, and `tally-sync.receipt_notes_enabled` stays OFF as a decided state
+rather than a fail-closed reading. The related half the decision expressly
+does NOT answer — what Tally should receive when material is rejected at
+incoming QA — remains open inside DEC-20260825-001, for Accounts. Was open
+since 2026-08-26; the original entry follows for history.
 
 The 26-Aug XML export batch from the standalone Testing company was expected
 to contain a goods-receipt-note sample (`receipt_note.xml`), but its 20
@@ -1806,3 +1823,33 @@ floor-visibility owner question", and on the backend by the path of this
 file — never by its number, because this file re-mints question numbers at
 merge. A re-mint of this entry needs no code edit.
 *Open since 2026-08-27.*
+
+## Q68 · Does the accountant want ERP-recorded supplier bills to post to Tally as Purchase Invoices?
+
+The ERP now records supplier bills (28-Aug procurement build): the paper
+invoice's number, date, lines, GST figures as printed, rounding, and an
+attached scan — matched to purchase orders and arrivals, entered and
+recorded by Accounts only (FC-06). What is deliberately NOT built is any
+posting to Tally: the bill's Tally cell says so in one line.
+
+What this asks, distinct from its neighbours: once a bill is recorded in
+the ERP, should the ERP stage a Tally **Purchase Invoice** voucher (the
+way batches stage Stock Journals), or does the accountant keep keying
+purchase invoices into Tally directly, the ERP record being the factory's
+own reference? This is the purchase-side sibling of DEC-20260809-003,
+which settled that all real SALES are invoiced directly in Tally.
+
+It cannot be answered by building: even a yes needs Q39 first (which
+purchase ledger and rate a voucher names — the ERP holds the accountant's
+per-bill ledger SELECTION but derives nothing) and touches Q41 (where GST
+is filed from) and Q28 (whether a payments build follows). A no costs
+nothing — the screen already works as a record.
+
+Like Q66/Q67, the code refers to this question **by name** — the words
+"Purchase Invoice posting awaits the accountant's answers" in
+`frontend/src/features/procurement/supplierBills.ts` — never by number,
+because this file re-mints question numbers at merge.
+
+**Blocks:** only the enqueue path for a Purchase Invoice voucher. The
+supplier-bill screen, its arithmetic, its matching and its attachment work
+under either answer. *Open since 2026-08-28.*

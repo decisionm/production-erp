@@ -86,6 +86,7 @@ class ItemService
             DependencyCheck::table('goods_receipt_note_lines', 'item_id')->label('goods receipt line'),
             DependencyCheck::table('purchase_requisition_lines', 'item_id')->label('purchase requisition line'),
             DependencyCheck::table('purchase_order_lines', 'item_id')->label('purchase order line'),
+            DependencyCheck::table('supplier_bill_lines', 'item_id')->label('supplier bill line'),
             DependencyCheck::table('sales_order_lines', 'item_id')->label('sales order line'),
             // The two documents of the sales-order fulfilment flow: a hold
             // on finished goods, and the shortfall handed to the floor.

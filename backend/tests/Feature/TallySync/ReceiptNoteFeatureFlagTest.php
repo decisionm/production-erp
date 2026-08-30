@@ -17,11 +17,10 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * tally-sync.receipt_notes_enabled — the fail-closed reading of an OPEN
- * question. Whether the factory uses Tally Receipt Notes for GRN/inward at
- * all is PENDING Q63, unanswered since 26-Aug-2026: no export read so far
- * holds a GRN voucher sample, and no decision record settles it. Nothing
- * here asserts the owner has ruled. The application default (no env set)
+ * tally-sync.receipt_notes_enabled — OFF as the DECIDED state: the factory
+ * does not use Tally Receipt Notes (DEC-20260830-001, resolving Q63). The
+ * machinery is kept disabled rather than deleted, so these locks still
+ * guard the decision. The application default (no env set)
  * is OFF; this suite pins it ON (phpunit.xml) purely so the rest of the
  * TallySync suite — written against the pre-existing, always-on contract —
  * keeps passing unmodified. This file is the one place both states are
@@ -234,17 +233,20 @@ class ReceiptNoteFeatureFlagTest extends TestCase
     private function note(): GoodsReceiptNote
     {
         // Unmistakably synthetic (FC-06): no real vendor, GSTIN, item or
-        // warehouse name — this test never touches the factory's data.
+        // warehouse name — this test never touches the factory's data. The
+        // Tally identities (ledger name, item guid, godown guid) are carried
+        // because the enqueue refuses unmapped ones since the 28-Aug
+        // rehearsal fix — this suite is about the FLAG, not the identities.
         $po = new PurchaseOrder;
-        $po->setRelation('vendor', new Vendor(['name' => 'Vendor Alpha', 'gstin' => '00AAAAA0000A0Z0']));
+        $po->setRelation('vendor', new Vendor(['name' => 'Vendor Alpha', 'gstin' => '00AAAAA0000A0Z0', 'tally_ledger_name' => 'Vendor Alpha']));
 
         $line = new GoodsReceiptNoteLine(['quantity' => '100.0000', 'unit_cost' => '85.0000']);
-        $line->setRelation('item', new Item(['sku' => 'ITEM-A', 'name' => 'Item Alpha']));
+        $line->setRelation('item', new Item(['sku' => 'ITEM-A', 'name' => 'Item Alpha', 'tally_stock_item_guid' => 'itm-alpha']));
         $line->setRelation('scheduleAllocations', collect());
 
         $note = $this->existing(new GoodsReceiptNote(['received_date' => '2026-08-10']), 501);
         $note->setRelation('lines', collect([$line]));
-        $note->setRelation('warehouse', new Warehouse(['name' => 'Warehouse Alpha']));
+        $note->setRelation('warehouse', new Warehouse(['name' => 'Warehouse Alpha', 'tally_guid' => 'gd-alpha']));
         $note->setRelation('purchaseOrder', $po);
 
         return $note;

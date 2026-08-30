@@ -1,4 +1,4 @@
-import { envelope, escapeXml, toTallyDate } from './xmlHelpers';
+import { envelope, escapeXml, requireAllowedCompanyFor, toTallyDate } from './xmlHelpers';
 
 /** Matches TallySyncService::enqueueGoodsReceiptNote()'s payload shape. */
 export interface ReceiptNotePayload {
@@ -7,6 +7,16 @@ export interface ReceiptNotePayload {
     voucher_number: string;
     party_ledger: string | null;
     party_gstin: string | null;
+    /**
+     * The one Tally company this voucher may post to
+     * (tally-sync.receipt_notes_allowed_company on the cloud, stamped at
+     * enqueue). Checked byte-for-byte against this agent's configured
+     * company before anything is built — the 28-Aug rehearsal posted a
+     * Receipt Note into an obsolete company because nothing checked.
+     * Payloads staged before the field existed carry no key at all, which
+     * fails the same check: an unknown destination is refused, not assumed.
+     */
+    allowed_company?: string | null;
     godown: string | null;
     narration: string | null;
     lines: { item: string; quantity: string; rate: string; amount: string }[];
@@ -22,6 +32,8 @@ export interface ReceiptNotePayload {
  * ISDEEMEDPOSITIVE / batch / godown tag names vary by Tally version.
  */
 export function buildReceiptNoteXml(payload: ReceiptNotePayload, companyName: string): string {
+    requireAllowedCompanyFor('Receipt Note', payload.allowed_company, companyName);
+
     const inventory = payload.lines
         .map((line) => inventoryEntry(line, payload.godown, /* stockIn */ true))
         .join('\n');

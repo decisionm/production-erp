@@ -269,15 +269,15 @@ class TallySyncEntriesExportTest extends TestCase
     private function enqueueGoodsReceipt(): TallySyncEntry
     {
         $po = new PurchaseOrder;
-        $po->setRelation('vendor', new Vendor(['name' => self::VENDOR, 'gstin' => self::VENDOR_GSTIN]));
+        $po->setRelation('vendor', new Vendor(['name' => self::VENDOR, 'gstin' => self::VENDOR_GSTIN, 'tally_ledger_name' => self::VENDOR]));
 
         $line = new GoodsReceiptNoteLine(['quantity' => '100.0000', 'unit_cost' => '85.0000']);
-        $line->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin']));
+        $line->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin', 'tally_stock_item_guid' => 'itm-resin']));
         $line->setRelation('scheduleAllocations', collect());
 
         $grn = $this->existing(new GoodsReceiptNote(['received_date' => '2026-08-04']), 7);
         $grn->setRelation('lines', collect([$line]));
-        $grn->setRelation('warehouse', new Warehouse(['name' => 'RM Store']));
+        $grn->setRelation('warehouse', new Warehouse(['name' => 'RM Store', 'tally_guid' => 'gd-rm']));
         $grn->setRelation('purchaseOrder', $po);
 
         event(new GoodsReceiptNoteReceived($grn));

@@ -7,6 +7,9 @@ import type {
     PurchaseOrderListFilters,
     PurchaseOrderTrace,
     PurchaseRequisition,
+    PurchaseRequisitionListFilters,
+    SupplierBill,
+    SupplierBillListFilters,
     Vendor,
 } from './types';
 
@@ -81,9 +84,18 @@ export async function updateVendor(id: number, payload: UpdateVendorPayload): Pr
  * default page and render it with the pager switched off, so the queue showed
  * the newest 20 and gave no sign the other rows existed.
  */
-export async function listPurchaseRequisitions(page = 1, perPage = 50): Promise<Paginated<PurchaseRequisition>> {
+export async function listPurchaseRequisitions(
+    filters: PurchaseRequisitionListFilters = {},
+): Promise<Paginated<PurchaseRequisition>> {
+    // '' means "no filter" to the select; the server should not see the key.
+    const { status, q, ...rest } = filters;
     const { data } = await api.get<Paginated<PurchaseRequisition>>('/procurement/purchase-requisitions', {
-        params: { page, per_page: perPage },
+        params: {
+            per_page: 50,
+            ...rest,
+            ...(status ? { status } : {}),
+            ...(q && q.trim() !== '' ? { q: q.trim() } : {}),
+        },
     });
     return data;
 }
@@ -221,7 +233,7 @@ export async function cancelPurchaseOrder(id: number, reason: string): Promise<P
  * config, not a per-reader value, so the answer is the same for everyone.
  */
 export async function listGoodsReceipts(
-    params?: { page?: number; per_page?: number },
+    params?: { page?: number; per_page?: number; purchase_order_id?: number },
 ): Promise<Paginated<GoodsReceiptNote> & { traceability_enabled?: boolean }> {
     const { data } = await api.get<Paginated<GoodsReceiptNote> & { traceability_enabled?: boolean }>(
         '/procurement/goods-receipts',
@@ -277,5 +289,126 @@ export interface CreateGoodsReceiptPayload {
 
 export async function createGoodsReceipt(payload: CreateGoodsReceiptPayload): Promise<GoodsReceiptNote> {
     const { data } = await api.post<{ data: GoodsReceiptNote }>('/procurement/goods-receipts', payload);
+    return data.data;
+}
+
+// ---------------------------------------------------------- supplier bills --
+// FC-06: finance-gated server-side; these calls 403 for anyone else.
+
+export interface SupplierBillLinePayload {
+    goods_receipt_note_line_id?: number | null;
+    item_id: number;
+    quantity: number;
+    rate: number;
+    amount: number;
+}
+
+export interface SupplierBillPayload {
+    vendor_id: number;
+    purchase_order_id?: number | null;
+    bill_number: string;
+    bill_date: string;
+    purchase_ledger_name?: string | null;
+    subtotal: number;
+    cgst?: number;
+    sgst?: number;
+    igst?: number;
+    rounding?: number;
+    total: number;
+    notes?: string;
+    lines: SupplierBillLinePayload[];
+}
+
+export async function listSupplierBills(filters: SupplierBillListFilters = {}): Promise<Paginated<SupplierBill>> {
+    const { status, q, ...rest } = filters;
+    const { data } = await api.get<Paginated<SupplierBill>>('/procurement/supplier-bills', {
+        params: {
+            per_page: 50,
+            ...rest,
+            ...(status ? { status } : {}),
+            ...(q && q.trim() !== '' ? { q: q.trim() } : {}),
+        },
+    });
+    return data;
+}
+
+export async function createSupplierBill(payload: SupplierBillPayload): Promise<SupplierBill> {
+    const { data } = await api.post<{ data: SupplierBill }>('/procurement/supplier-bills', payload);
+    return data.data;
+}
+
+export async function updateSupplierBill(id: number, payload: SupplierBillPayload): Promise<SupplierBill> {
+    const { data } = await api.put<{ data: SupplierBill }>(`/procurement/supplier-bills/${id}`, payload);
+    return data.data;
+}
+
+export async function recordSupplierBill(id: number): Promise<SupplierBill> {
+    const { data } = await api.post<{ data: SupplierBill }>(`/procurement/supplier-bills/${id}/record`);
+    return data.data;
+}
+
+export async function cancelSupplierBill(id: number, reason: string): Promise<SupplierBill> {
+    const { data } = await api.post<{ data: SupplierBill }>(`/procurement/supplier-bills/${id}/cancel`, { reason });
+    return data.data;
+}
+
+export async function attachSupplierBillFile(id: number, file: File): Promise<SupplierBill> {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await api.post<{ data: SupplierBill }>(`/procurement/supplier-bills/${id}/attachment`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return data.data;
+}
+
+/** Vendor identities for the bill's header picker — finance-gated; identity only (id, code, name). */
+export async function listSupplierBillVendorOptions(q = ''): Promise<{ id: number; code: string; name: string }[]> {
+    const { data } = await api.get<{ data: { id: number; code: string; name: string }[] }>(
+        '/procurement/supplier-bills/vendor-options',
+        { params: q.trim() !== '' ? { q: q.trim() } : {} },
+    );
+    return data.data;
+}
+
+/** A vendor's orders for the bill's optional PO reference — finance-gated; id, date, status only. */
+export async function listSupplierBillOrderOptions(vendorId: number): Promise<{ id: number; order_date: string | null; status: string }[]> {
+    const { data } = await api.get<{ data: { id: number; order_date: string | null; status: string }[] }>(
+        '/procurement/supplier-bills/order-options',
+        { params: { vendor_id: vendorId } },
+    );
+    return data.data;
+}
+
+/** An order's arrival lines for the bill's optional matching — finance-gated. */
+export async function listSupplierBillReceiptLineOptions(
+    purchaseOrderId: number,
+): Promise<{ id: number; goods_receipt_note_id: number; item: { id: number; sku: string; name: string; uom: string | null } | null; quantity: string }[]> {
+    const { data } = await api.get<{ data: { id: number; goods_receipt_note_id: number; item: { id: number; sku: string; name: string; uom: string | null } | null; quantity: string }[] }>(
+        '/procurement/supplier-bills/receipt-line-options',
+        { params: { purchase_order_id: purchaseOrderId } },
+    );
+    return data.data;
+}
+
+/**
+ * Item identities for the bill's line picker, served inside the finance
+ * gate: an Accounts login holds no inventory permission, and /inventory/items
+ * answered it 403 — an empty picker on a screen that expressly supports
+ * unmatched bills.
+ */
+export async function listSupplierBillItemOptions(q = ''): Promise<{ id: number; sku: string; name: string; uom: string | null }[]> {
+    const { data } = await api.get<{ data: { id: number; sku: string; name: string; uom: string | null }[] }>(
+        '/procurement/supplier-bills/item-options',
+        { params: q.trim() !== '' ? { q: q.trim() } : {} },
+    );
+    return data.data;
+}
+
+/** The pulled Tally ledger names for the bill's purchase-ledger picker (the accountant selects; the ERP derives nothing — Q39). */
+export async function listSupplierBillLedgerOptions(q = ''): Promise<{ name: string; group: string | null }[]> {
+    const { data } = await api.get<{ data: { name: string; group: string | null }[] }>(
+        '/procurement/supplier-bills/ledger-options',
+        { params: q.trim() !== '' ? { q: q.trim() } : {} },
+    );
     return data.data;
 }

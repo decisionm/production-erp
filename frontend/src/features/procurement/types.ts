@@ -44,12 +44,29 @@ export interface PurchaseRequisitionLine {
 
 export interface PurchaseRequisition {
     id: number;
+    /** "PR-{id}" — the list's `q` grammar; absent on an older backend. */
+    document_number?: string;
     status: PurchaseRequisitionStatus;
     requested_by: string | null;
+    /** The decision trail — null on a requisition decided before the stamps existed. */
+    approved_by?: string | null;
+    approved_at?: string | null;
+    rejected_by?: string | null;
+    rejected_at?: string | null;
     needed_by_date: string | null;
     notes: string | null;
     lines: PurchaseRequisitionLine[];
+    /** The orders raised FROM this requisition — id + status only. */
+    purchase_orders?: { id: number; status: PurchaseOrderStatus }[];
     created_at: string;
+}
+
+/** The list's server-side filters (ListPurchaseRequisitionsRequest). */
+export interface PurchaseRequisitionListFilters {
+    status?: PurchaseRequisitionStatus | '';
+    q?: string;
+    page?: number;
+    per_page?: number;
 }
 
 export type PurchaseOrderStatus = 'draft' | 'sent' | 'partially_received' | 'closed' | 'cancelled';
@@ -282,6 +299,21 @@ export interface PurchaseOrderListFilters {
     per_page?: number;
 }
 
+/** One arrival line's standing with Incoming QC — quantities only, never rates. */
+export interface GoodsReceiptLineQc {
+    /** The line's disposition when one exists (the quality service refuses a second, so 0..1). */
+    inspection: {
+        id: number;
+        result: 'pass' | 'fail' | 'partial' | string;
+        inspected_quantity: string;
+        accepted_quantity: string;
+        rejected_quantity: string;
+        inspection_date: string | null;
+    } | null;
+    /** The physical hold, counted from the line's lots; null when the line has no bag-tracked lots. */
+    bags: { waiting_qc: number; rejected_qc: number; total: number } | null;
+}
+
 export interface GoodsReceiptNoteLine {
     id: number;
     purchase_order_line_id: number;
@@ -290,6 +322,8 @@ export interface GoodsReceiptNoteLine {
     /** Same rule as PurchaseOrderLine.unit_price: absent (not null) without finance access. */
     unit_cost?: string;
     material_lots?: MaterialLot[];
+    /** Absent on an older backend. */
+    qc?: GoodsReceiptLineQc;
 }
 
 export interface GoodsReceiptNote {
@@ -309,6 +343,13 @@ export interface GoodsReceiptNote {
     material_lots?: MaterialLot[];
     /** The Receipt Note's queue entry (status + flags + link only), null when none exists; absent on an older backend. */
     tally?: TallyLink | null;
+    /**
+     * What staging concluded at arrival (goods_receipt_notes.tally_staging,
+     * written ONLY by GoodsReceiptService::recordTallyStaging — the PO
+     * record's shape without 'dismissed'). NULL on receipts that predate the
+     * column; absent on an older backend.
+     */
+    tally_staging?: TallyStaging | null;
     created_at: string;
 }
 
@@ -531,4 +572,60 @@ export interface PurchaseOrderTrace {
     consumption?: TraceConsumption[];
     consumptions?: TraceConsumption[];
     production_entries?: TraceConsumption[];
+}
+
+// ---------------------------------------------------------- supplier bills --
+
+export type SupplierBillStatus = 'draft' | 'recorded' | 'cancelled';
+
+export interface SupplierBillLine {
+    id: number;
+    goods_receipt_note_line_id: number | null;
+    item: Item;
+    quantity: string;
+    rate: string;
+    amount: string;
+    /** The matched arrival's quantity, for the billed-vs-received variance. */
+    received_quantity?: string | null;
+}
+
+/**
+ * The vendor's invoice recorded in the ERP. Every figure is a purchase
+ * rate, so the whole surface is finance-gated (FC-06) — these types are
+ * only ever populated for Owner/Accounts logins. No Tally fields exist:
+ * Purchase Invoice posting is withheld while Q39/Q41/Q28 are open.
+ */
+export interface SupplierBill {
+    id: number;
+    /** "BILL-{id}" — the ERP's own reference; the vendor's is bill_number. */
+    document_number: string;
+    status: SupplierBillStatus;
+    vendor: { id: number; code: string; name: string };
+    purchase_order_id: number | null;
+    bill_number: string;
+    bill_date: string;
+    purchase_ledger_name: string | null;
+    subtotal: string;
+    cgst: string;
+    sgst: string;
+    igst: string;
+    rounding: string;
+    total: string;
+    attachment_name: string | null;
+    has_attachment: boolean;
+    notes: string | null;
+    cancelled_reason: string | null;
+    created_by?: string | null;
+    recorded_by?: string | null;
+    recorded_at?: string | null;
+    lines: SupplierBillLine[];
+    created_at: string;
+}
+
+export interface SupplierBillListFilters {
+    status?: SupplierBillStatus | '';
+    q?: string;
+    vendor_id?: number;
+    page?: number;
+    per_page?: number;
 }

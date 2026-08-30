@@ -39,6 +39,11 @@ class GoodsReceiptNoteResource extends JsonResource
             'material_lots' => MaterialLotResource::collection($this->whenLoaded('materialLots')),
             // TallyLink|null — status + flags + link only (TallySyncLinkService).
             'tally' => $receipt->tallyLink,
+            // What staging concluded at arrival (disabled / refused / enqueued
+            // — GoodsReceiptService::recordTallyStaging, the only writer).
+            // NULL on receipts that predate the column. FC-06 holds on the
+            // reason details by construction — see ReceiptNoteNotPostable.
+            'tally_staging' => $this->tally_staging,
             'created_at' => $this->created_at?->toIso8601String(),
         ];
     }

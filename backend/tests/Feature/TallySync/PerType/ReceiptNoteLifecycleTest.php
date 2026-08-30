@@ -42,7 +42,7 @@ class ReceiptNoteLifecycleTest extends PerTypeLifecycleTestCase
 
         $resin = Item::create(['sku' => 'RES-1', 'name' => 'PET Resin', 'uom' => 'Kgs', 'tally_stock_item_guid' => 'itm-resin']);
         $this->rmStore = Warehouse::create(['code' => 'RM', 'name' => 'RM Store', 'tally_guid' => 'gd-rm']);
-        $vendor = Vendor::create(['code' => 'SUP-1', 'name' => 'Reliance Industries', 'gstin' => '27AAACR1234A1Z5']);
+        $vendor = Vendor::create(['code' => 'SUP-1', 'name' => 'Reliance Industries', 'gstin' => '27AAACR1234A1Z5', 'tally_ledger_name' => 'Reliance Industries']);
         $this->order = PurchaseOrder::create([
             'vendor_id' => $vendor->id,
             'status' => PurchaseOrderStatus::Sent,

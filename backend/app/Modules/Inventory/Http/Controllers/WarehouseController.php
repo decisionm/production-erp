@@ -7,6 +7,7 @@ use App\Modules\Inventory\Http\Requests\StoreWarehouseRequest;
 use App\Modules\Inventory\Http\Requests\UpdateWarehouseRequest;
 use App\Modules\Inventory\Http\Resources\WarehouseResource;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Modules\Inventory\Services\ProductionWipLocationResolver;
 use App\Modules\Inventory\Services\WarehouseService;
 use App\Support\Configuration\Concerns\ServesConfigurationLifecycle;
 use App\Support\Configuration\Http\ConfigurationReasonRequest;
@@ -42,7 +43,17 @@ class WarehouseController extends Controller
         return WarehouseResource::collection($this->warehouses->paginate(
             $this->perPage($request),
             $this->searchTerm($request),
-        ));
+        ))->additional([
+            'meta' => [
+                // WHICH ROW IS PRODUCTION/WIP (DEC-20260817-001), resolved
+                // once for the whole page rather than per row. The receiving
+                // form reads this to keep the WIP row out of its picker —
+                // the server refuses it anyway (StoreGoodsReceiptRequest);
+                // this is the same rule offered before the mistake instead
+                // of after it. Null when nothing resolves.
+                'production_wip_warehouse_id' => app(ProductionWipLocationResolver::class)->warehouseId(),
+            ],
+        ]);
     }
 
     /**

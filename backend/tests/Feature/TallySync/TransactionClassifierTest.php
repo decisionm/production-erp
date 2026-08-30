@@ -168,7 +168,7 @@ class TransactionClassifierTest extends TestCase
         config(['tally-sync.voucher_granularity' => 'batch']);
 
         $consumption = new ShiftMaterialConsumption(['quantity_issued_kg' => '250.0000']);
-        $consumption->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin']));
+        $consumption->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin', 'tally_stock_item_guid' => 'itm-resin']));
         $consumption->setRelation('warehouse', new Warehouse(['name' => 'Raw Material Store']));
 
         $spe = $this->existing(new ShiftProductionEntry([
@@ -449,15 +449,15 @@ class TransactionClassifierTest extends TestCase
     private function enqueueGoodsReceipt(): TallySyncEntry
     {
         $po = new PurchaseOrder;
-        $po->setRelation('vendor', new Vendor(['name' => 'Reliance Industries', 'gstin' => '27AAACR1234A1Z5']));
+        $po->setRelation('vendor', new Vendor(['name' => 'Reliance Industries', 'gstin' => '27AAACR1234A1Z5', 'tally_ledger_name' => 'Reliance Industries']));
 
         $line = new GoodsReceiptNoteLine(['quantity' => '100.0000', 'unit_cost' => '85.0000']);
-        $line->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin']));
+        $line->setRelation('item', new Item(['sku' => 'RES-1', 'name' => 'PET Resin', 'tally_stock_item_guid' => 'itm-resin']));
         $line->setRelation('scheduleAllocations', collect());
 
         $grn = $this->existing(new GoodsReceiptNote(['received_date' => '2026-08-04']), 7);
         $grn->setRelation('lines', collect([$line]));
-        $grn->setRelation('warehouse', new Warehouse(['name' => 'RM Store']));
+        $grn->setRelation('warehouse', new Warehouse(['name' => 'RM Store', 'tally_guid' => 'gd-rm']));
         $grn->setRelation('purchaseOrder', $po);
 
         event(new GoodsReceiptNoteReceived($grn));

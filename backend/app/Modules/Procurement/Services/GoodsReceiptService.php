@@ -21,6 +21,7 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\LazyCollection;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
 
 /**
  * Posting a GRN is the one place Procurement actually moves stock. It never
@@ -33,6 +34,7 @@ class GoodsReceiptService
     /** Loaded on every receipt the list hands back, so the resource never lazy-loads. */
     private const WITH = [
         'lines.item',
+        'lines.incomingInspections',
         'lines.materialLots.item',
         'lines.materialLots.bags',
         'lines.materialLots.costVersions',
@@ -235,7 +237,7 @@ class GoodsReceiptService
         }
 
         try {
-            return DB::transaction(function () use ($data, $createdBy, $receiptKey, $payloadHash) {
+            $receipt = DB::transaction(function () use ($data, $createdBy, $receiptKey, $payloadHash) {
                 if ($receiptKey !== null) {
                     $existing = GoodsReceiptNote::query()
                         ->where('receipt_key', $receiptKey)
@@ -387,12 +389,26 @@ class GoodsReceiptService
 
                 $this->recomputeOrderStatus($order->fresh('lines'));
 
-                // Announce the receipt only after the line and all its physical
-                // bags exist. A replay returns above and emits nothing.
-                event(new GoodsReceiptNoteReceived($grn));
+                // Announce the receipt only after COMMIT (DB::afterCommit —
+                // exactly as PurchaseOrderService::send() announces
+                // PurchaseOrderSent). Inside the transaction, any unexpected
+                // throwable from a listener would roll back stock, lots and
+                // the PO's received counters — undoing a physical arrival
+                // because paperwork hiccuped, which the Tally listener
+                // explicitly promises must never happen. A replay returns
+                // above and emits nothing.
+                DB::afterCommit(fn () => event(new GoodsReceiptNoteReceived($grn)));
 
-                return $this->loadReceipt($grn);
+                // Loaded OUTSIDE the transaction (below): afterCommit fires
+                // at commit, before DB::transaction() returns, so the load
+                // sees whatever the listener recorded (tally_staging, the
+                // queue entry) — the store response stays complete.
+                return $grn;
             });
+
+            // Fresh receipt AND replay land here (a replay's second load is
+            // an idempotent read) — loaded after commit, listener included.
+            return $this->loadReceipt($receipt);
         } catch (QueryException $exception) {
             // Concurrent retries may both miss the first read. The unique
             // receipt_key makes one transaction win and rolls the other back
@@ -641,6 +657,7 @@ class GoodsReceiptService
     {
         $receipt->load([
             'lines.item',
+            'lines.incomingInspections',
             'lines.materialLots.item',
             'lines.materialLots.bags',
             'lines.materialLots.costVersions',
@@ -651,8 +668,9 @@ class GoodsReceiptService
             'purchaseOrder',
         ]);
         // The store response and a replay carry the link too: for a fresh
-        // receipt the Receipt Note listener has already run (the event is
-        // in-transaction), so the row exists by the time this loads.
+        // receipt the Receipt Note listener has already run — the event is
+        // dispatched DB::afterCommit, which fires at commit, before create()
+        // loads the receipt — so the row exists by the time this loads.
         $this->trace->decorateReceipts([$receipt]);
 
         return $receipt;
@@ -677,5 +695,53 @@ class GoodsReceiptService
         if ($anyReceived) {
             $order->update(['status' => PurchaseOrderStatus::PartiallyReceived]);
         }
+    }
+
+    /**
+     * The states goods_receipt_notes.tally_staging may carry —
+     * PurchaseOrderService::STAGING_STATES minus 'dismissed': a receipt has
+     * no cancel/close lifecycle to withdraw a staged voucher for.
+     */
+    public const STAGING_STATES = ['disabled', 'refused', 'enqueued'];
+
+    /**
+     * The ONLY writer of goods_receipt_notes.tally_staging — the mirror of
+     * PurchaseOrderService::recordTallyStaging(), and called by the same
+     * listener family (TallySyncEventServiceProvider): disabled (the flag
+     * is off — the factory does not use Tally Receipt Notes, DEC-20260830-001) / refused (named reasons — an unmapped item, an
+     * unmapped vendor ledger, no allowed company) / enqueued (entry_id).
+     * Writes this one column and nothing else — no Tally, no stock, no
+     * status change.
+     *
+     * @param  array{state: string, reasons?: list<array{code: string, detail?: ?string}>, entry_id?: ?int, at?: ?string}  $staging
+     */
+    public function recordTallyStaging(GoodsReceiptNote $note, array $staging): void
+    {
+        $state = (string) ($staging['state'] ?? '');
+        if (! in_array($state, self::STAGING_STATES, true)) {
+            throw new InvalidArgumentException(
+                'tally_staging.state must be one of '.implode('|', self::STAGING_STATES).", got \"{$state}\".",
+            );
+        }
+
+        $reasons = [];
+        foreach ($staging['reasons'] ?? [] as $reason) {
+            $reasons[] = [
+                'code' => (string) ($reason['code'] ?? 'unknown'),
+                'detail' => isset($reason['detail']) ? (string) $reason['detail'] : null,
+            ];
+        }
+
+        $record = [
+            'state' => $state,
+            'reasons' => $reasons,
+            'at' => isset($staging['at']) ? (string) $staging['at'] : now()->toIso8601String(),
+        ];
+        if (isset($staging['entry_id'])) {
+            $record['entry_id'] = (int) $staging['entry_id'];
+        }
+
+        // One column, nothing else on the receipt changes.
+        $note->forceFill(['tally_staging' => $record])->save();
     }
 }

@@ -131,6 +131,25 @@ class TallySyncService
      * listener. See ReceiptNoteNotPostable's docblock for the other two
      * locks (the listener never calling this; pending() withholding a row
      * that already exists despite this one).
+     *
+     * EVERY TALLY NAME IS VALIDATED BEFORE A ROW IS QUEUED — the PO rule
+     * (DEC-20260812-002: refuse rather than guess), applied here after the
+     * 28-Aug rehearsal proved both failure modes live: a Receipt Note died
+     * at the agent on an item name Tally did not carry, and another reached
+     * an obsolete Tally company. Both were knowable BEFORE queueing, so
+     * both are refused here with named reasons, and the listener records
+     * them on the GRN where the receiving desk can read them.
+     *
+     *   - party_ledger comes from vendors.tally_ledger_name — the column
+     *     Accounts types the Tally name into — never from vendors.name,
+     *     which is the ERP's own label and matches Tally only by luck;
+     *   - every line's item must be Tally-sourced and not a local fixture;
+     *   - the receiving warehouse must resolve to a godown Tally knows
+     *     (TallyGodownResolver rule 4 — the resolveName() fallback to the
+     *     warehouse's OWN name is exactly the guessing this refuses);
+     *   - allowed_company (tally-sync.receipt_notes_allowed_company) is
+     *     fail-closed and stamped on the payload; the agent compares it
+     *     byte-for-byte against its configured company before building.
      */
     public function enqueueGoodsReceiptNote(GoodsReceiptNote $note): TallySyncEntry
     {
@@ -139,6 +158,63 @@ class TallySyncService
         }
 
         $note->loadMissing(['lines.item', 'lines.scheduleAllocations.schedule', 'warehouse', 'purchaseOrder.vendor']);
+
+        $reasons = [];
+
+        $allowedCompany = config('tally-sync.receipt_notes_allowed_company');
+        $allowedCompany = is_string($allowedCompany) && trim($allowedCompany) !== '' ? trim($allowedCompany) : null;
+        if ($allowedCompany === null) {
+            $reasons[] = [
+                'code' => 'allowed_company_unconfigured',
+                'detail' => 'tally-sync.receipt_notes_allowed_company is blank — Receipt Note posting is enabled '
+                    .'but there is no allowed Tally company to check the agent against.',
+            ];
+        }
+
+        // vendors.tally_ledger_name, exactly as the PO path reads it. FC-06:
+        // the detail names the vendor by id, never by name or GSTIN.
+        $partyLedger = $note->purchaseOrder?->vendor?->tally_ledger_name;
+        $partyLedger = is_string($partyLedger) && trim($partyLedger) !== '' ? trim($partyLedger) : null;
+        if ($partyLedger === null) {
+            $reasons[] = [
+                'code' => 'party_unmapped',
+                'detail' => $note->purchaseOrder?->vendor === null
+                    ? 'the receipt\'s order names no vendor.'
+                    : "vendor #{$note->purchaseOrder->vendor->id} has no Tally ledger name recorded (vendors.tally_ledger_name).",
+            ];
+        }
+
+        if ($note->lines->isEmpty()) {
+            $reasons[] = ['code' => 'no_lines', 'detail' => 'the receipt has no lines.'];
+        }
+
+        foreach ($note->lines as $line) {
+            $item = $line->item;
+            if ($item === null || ! $item->isTallySourced() || $item->isLocalFixture()) {
+                $reasons[] = [
+                    'code' => 'item_unmapped',
+                    'detail' => $item === null
+                        ? "line #{$line->id} names no item."
+                        : "item #{$item->id} '{$item->name}' is not a Tally stock item (no Tally identity recorded).",
+                ];
+            }
+        }
+
+        // resolve(), not resolveName(): the name fallback would post the
+        // warehouse's OWN name, which is the guess this refusal exists for.
+        $godown = $this->godowns->resolve($note->warehouse)?->name;
+        if ($godown === null) {
+            $reasons[] = [
+                'code' => 'godown_unresolved',
+                'detail' => $note->warehouse === null
+                    ? 'the receipt names no warehouse.'
+                    : "no godown Tally knows can stand in for warehouse '{$note->warehouse->name}'.",
+            ];
+        }
+
+        if ($reasons !== []) {
+            throw ReceiptNoteNotPostable::because($reasons);
+        }
 
         $lines = $note->lines->map(fn ($line) => [
             // The exact Tally stock-item name (items are pulled from Tally, so
@@ -156,9 +232,13 @@ class TallySyncService
             'voucher_type' => 'Receipt Note',
             'voucher_date' => $note->received_date?->toDateString(),
             'voucher_number' => $note->receipt_note_reference ?? "GRN-{$note->id}",
-            'party_ledger' => $note->purchaseOrder?->vendor?->name,
+            'party_ledger' => $partyLedger,
             'party_gstin' => $note->purchaseOrder?->vendor?->gstin,
-            'godown' => $this->godowns->resolveName($note->warehouse),
+            // The allowed Tally company (fail-closed above, trimmed above) —
+            // the agent compares this verbatim, byte-for-byte, against its
+            // configured tallyCompanyName before it builds or posts anything.
+            'allowed_company' => $allowedCompany,
+            'godown' => $godown,
             'narration' => $note->notes,
             'lines' => $lines,
             'total_amount' => $totalAmount,

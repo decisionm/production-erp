@@ -150,8 +150,21 @@ export async function listWarehouses(params?: ListParams): Promise<Paginated<War
 }
 
 /** Full reference list for a picker (all rows, not the default first page). */
-export async function listAllWarehouses(): Promise<Paginated<Warehouse>> {
-    const { data } = await api.get<Paginated<Warehouse>>('/inventory/warehouses', {
+/** The warehouses index's page — Paginated plus the WIP identity the receiving form reads. */
+export type WarehousesPage = Paginated<Warehouse> & {
+    meta: Paginated<Warehouse>['meta'] & {
+        /**
+         * Which row is Production/WIP (DEC-20260817-001), resolved by the
+         * server — null/absent when nothing resolves. The goods-receipt form
+         * keeps this row out of its warehouse picker; the server refuses it
+         * anyway (a purchase has not been "issued to production").
+         */
+        production_wip_warehouse_id?: number | null;
+    };
+};
+
+export async function listAllWarehouses(): Promise<WarehousesPage> {
+    const { data } = await api.get<WarehousesPage>('/inventory/warehouses', {
         params: { per_page: FULL_LIST_PER_PAGE },
     });
     return data;

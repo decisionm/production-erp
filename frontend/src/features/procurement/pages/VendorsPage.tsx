@@ -7,6 +7,8 @@ import { z } from 'zod';
 import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { createVendor, listVendors, updateVendor } from '@/features/procurement/api';
 import type { Vendor } from '@/features/procurement/types';
+import { ListEmpty } from '@/lib/ListEmpty';
+import { vendorLedgerWords } from '@/features/procurement/documentWords';
 
 // The New Vendor form does NOT ask for a code. The server mints "V-0001" and
 // steps the sequence on, so there is nothing here for a person to guess at —
@@ -54,7 +56,7 @@ export default function VendorsPage() {
     const [searchInput, setSearchInput] = useState('');
     const [search, setSearch] = useState('');
 
-    const { data, isLoading } = useQuery({
+    const { data, isLoading, isPending, isError, error, refetch } = useQuery({
         queryKey: ['procurement', 'vendors', page, perPage, search],
         queryFn: () => listVendors(page, perPage, search),
     });
@@ -136,6 +138,15 @@ export default function VendorsPage() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
+                locale={{
+                    emptyText: (
+                        <ListEmpty
+                            state={{ isPending, isError, error, refetch }}
+                            entity="vendors"
+                            empty={search ? 'No vendors match this search.' : 'No vendors yet.'}
+                        />
+                    ),
+                }}
                 pagination={{
                     current: page,
                     pageSize: perPage,
@@ -159,15 +170,21 @@ export default function VendorsPage() {
                     { title: 'State', dataIndex: 'state_code' },
                     {
                         title: 'Tally ledger',
-                        render: (_, row) =>
-                            row.tally_ledger_name ? (
-                                row.tally_ledger_name
+                        // vendorLedgerWords: most imported vendors carry a
+                        // ledger name identical to their own name, and
+                        // printing the same string twice per row taught
+                        // readers to skip the column — hiding the one row
+                        // where the two genuinely differ. A vendor with no
+                        // ledger name cannot be staged for Tally, and this
+                        // column is where that gets fixed.
+                        render: (_, row) => {
+                            const words = vendorLedgerWords(row);
+                            return words.kind === 'differs' ? (
+                                words.text
                             ) : (
-                                // Not a blank: a vendor with no ledger name
-                                // cannot be staged for Tally, and this is
-                                // where that gets fixed.
-                                <Typography.Text type="secondary">not mapped</Typography.Text>
-                            ),
+                                <Typography.Text type="secondary">{words.text}</Typography.Text>
+                            );
+                        },
                     },
                     {
                         title: 'Status',

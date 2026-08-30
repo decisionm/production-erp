@@ -74,3 +74,23 @@ export function uomOf(item: { uom?: string | null } | null | undefined): string 
     const raw = (item?.uom ?? '').trim();
     return raw === '' ? null : raw;
 }
+
+/**
+ * The label a PICKER shows — `itemLabel` plus the unit, "PET Resin · kg".
+ *
+ * A table cell sits beside a quantity column that (now) prints the unit, so
+ * repeating it in the cell is noise. A picker option stands alone, and this
+ * catalogue holds near-duplicate names whose only honest discriminator short
+ * of merging masters (not this UI's call) is the unit — "Shrink Roll" in kg
+ * and "Shrink Roll" in Nos. are different materials, and picking the wrong
+ * one is a Tally mapping failure waiting at sync time. The unit is appended,
+ * never substituted: identity stays the item's own name.
+ */
+export function itemPickerLabel(
+    item: { sku?: string | null; name?: string | null; display_name?: string | null; uom?: string | null } | null | undefined,
+): string {
+    const label = itemLabel(item);
+    const uom = uomOf(item);
+
+    return label !== '—' && uom !== null ? `${label} · ${uom}` : label;
+}

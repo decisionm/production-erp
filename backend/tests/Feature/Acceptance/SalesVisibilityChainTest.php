@@ -110,11 +110,11 @@ class SalesVisibilityChainTest extends TestCase
     {
         parent::setUp();
 
-        $vendor = Vendor::create(['code' => 'SUP-RL', 'name' => self::VENDOR, 'gstin' => '27AAACR1234A1Z5']);
+        $vendor = Vendor::create(['code' => 'SUP-RL', 'name' => self::VENDOR, 'gstin' => '27AAACR1234A1Z5', 'tally_ledger_name' => self::VENDOR]);
         $customer = Customer::create(['code' => 'CUST-AQ', 'name' => self::CUSTOMER, 'gstin' => '33AAACS1234A1Z9']);
-        $resin = Item::create(['sku' => 'RM-PET', 'name' => 'PET Resin', 'uom' => 'Kgs']);
+        $resin = Item::create(['sku' => 'RM-PET', 'name' => 'PET Resin', 'uom' => 'Kgs', 'tally_stock_item_guid' => 'itm-resin']);
         $bottle = Item::create(['sku' => 'BTL-500', 'name' => '500ml PET Bottle', 'uom' => 'Nos']);
-        $rm = Warehouse::create(['code' => 'RM', 'name' => 'RM Store']);
+        $rm = Warehouse::create(['code' => 'RM', 'name' => 'RM Store', 'tally_guid' => 'gd-rm']);
         $fg = Warehouse::create(['code' => 'FG', 'name' => 'FG Store']);
 
         // ---- the purchase side: a rate on the order and a rate on the receipt,

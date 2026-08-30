@@ -40,6 +40,16 @@ interface NavLeaf {
     key: string;
     label: string;
     module?: string;
+    /**
+     * A PERMISSION gate without an ADOPTION gate: the entry belongs to an
+     * adopted group but is visible only to holders of this module's
+     * permission. Supplier Bills is the case that needed it — procurement
+     * work done by Accounts (FC-06: every figure is a purchase rate, so the
+     * API gates on module:finance), while the Finance MODULE itself stays
+     * unadopted (DEC-20260812-001) and must not become visible through a
+     * child entry.
+     */
+    permissionModule?: string;
 }
 
 interface NavGroup {
@@ -102,6 +112,8 @@ export const allNavItems: readonly NavGroup[] = [
             { key: '/procurement/purchase-requisitions', label: 'Purchase Requisitions' },
             { key: '/procurement/purchase-orders', label: 'Purchase Orders' },
             { key: '/procurement/goods-receipts', label: 'Goods Receipts' },
+            // Accounts only (permission gate, not adoption — see NavLeaf).
+            { key: '/procurement/supplier-bills', label: 'Supplier Bills', permissionModule: 'finance' },
         ],
     },
     {
@@ -402,14 +414,32 @@ export function buildNavItems(user: User | null) {
             // Administrator holds every permission and would otherwise see every
             // module regardless of whether the factory uses it.
             if (item.module && !ADOPTED_MODULES.has(item.module)) return null;
-            if (item.module && !hasModuleAccess(user, item.module)) return null;
+
+            // Whether this user reaches the group through its OWN module.
+            // A group they do not reach that way can still surface — with
+            // ONLY those children — when a child carries a permissionModule
+            // the user holds (Codex on 073a8c2: a finance-only Accounts
+            // login is accepted by every supplier-bill route yet had no
+            // sidebar path to the page, because Procurement was rejected
+            // before its children were looked at). Adoption stays the hard
+            // gate above; this only widens the PERMISSION half.
+            const reachesGroup = !item.module || hasModuleAccess(user, item.module);
+
             if (item.children) {
-                const children = item.children.filter(
-                    (child) => !child.module || (ADOPTED_MODULES.has(child.module) && hasModuleAccess(user, child.module)),
-                );
+                const children = item.children.filter((child) => {
+                    if (child.permissionModule) {
+                        // Its own permission is the whole gate — deliberately
+                        // NOT conditioned on reachesGroup.
+                        return hasModuleAccess(user, child.permissionModule);
+                    }
+                    if (!reachesGroup) return false;
+                    return !child.module || (ADOPTED_MODULES.has(child.module) && hasModuleAccess(user, child.module));
+                });
                 if (children.length === 0) return null;
                 return { ...item, children };
             }
+
+            if (!reachesGroup) return null;
             return item;
         })
         .filter((item): item is NavGroup => item !== null);

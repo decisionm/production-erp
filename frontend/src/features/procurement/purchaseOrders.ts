@@ -44,11 +44,13 @@ const STATUS_COLOR: Record<PurchaseOrderStatus, string> = {
     cancelled: 'red',
 };
 
-/** The status Tag — colour + words. An unknown status still renders (readably) rather than throwing the table down. */
+/** The status Tag — colour + words, sentence case ("Partially received", never the raw enum). An unknown status still renders (readably) rather than throwing the table down. */
 export function statusTag(status: PurchaseOrderStatus | string): { color: string; label: string } {
+    const words = String(status).replaceAll('_', ' ');
+
     return {
         color: (STATUS_COLOR as Record<string, string>)[status] ?? 'default',
-        label: String(status).replaceAll('_', ' '),
+        label: words.charAt(0).toUpperCase() + words.slice(1),
     };
 }
 
@@ -91,6 +93,13 @@ export function tallyReasonWords(reason: TallyStagingReason): string {
             return 'no lines';
         case 'purchase_orders_disabled':
             return DISABLED_WORDS;
+        case 'receipt_notes_disabled':
+            return RECEIPT_NOTES_DISABLED_WORDS;
+        case 'testing_company_unconfigured':
+        case 'allowed_company_unconfigured':
+            return 'no allowed Tally company is configured';
+        case 'staging_error':
+            return 'Tally staging failed unexpectedly — ask an administrator to check the server log';
         case 'cancelled_before_delivery':
             return 'cancelled before the agent collected it';
         case 'closed_before_delivery':
@@ -122,6 +131,8 @@ export function tallyAfterWords(after: TallyStagingAfter | string | null | undef
 
 const AFTER_TAIL = 'in the ERP after Tally received it (owner question)';
 const DISABLED_WORDS = 'PO posting is disabled (owner gate Q35)';
+/** Exported for grnTally.ts — the GRN cell's disabled line uses the same words. */
+export const RECEIPT_NOTES_DISABLED_WORDS = 'the factory does not use Tally Receipt Notes (DEC-20260830-001)';
 const NOT_SENT = 'Not sent to Tally';
 
 export type TallyStateKind = 'mirror' | 'link' | 'enqueued' | 'refused' | 'disabled' | 'dismissed' | 'draft' | 'cancelled';
@@ -246,12 +257,17 @@ export function tallyStateLine(order: Pick<PurchaseOrder, 'status' | 'source' | 
 
 export type PurchaseOrderAction = keyof PurchaseOrderCan;
 
-/** The button words, one place. */
+/**
+ * The button words, one place. Cancel says "Cancel order" — it sits near
+ * Close, which merely stops further receiving, and near every modal's own
+ * Cancel button, and a one-word "Cancel" among them read as three different
+ * verbs wearing one label (28-Aug audit, item 7).
+ */
 export const ACTION_LABELS: Record<PurchaseOrderAction, string> = {
     send: 'Send',
     amend: 'Amend',
     close: 'Close',
-    cancel: 'Cancel',
+    cancel: 'Cancel order',
 };
 
 /** The order the buttons appear in — the order the lifecycle runs. */

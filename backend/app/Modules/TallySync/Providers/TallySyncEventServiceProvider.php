@@ -8,7 +8,9 @@ use App\Modules\Procurement\Events\GoodsReceiptNoteReceived;
 use App\Modules\Procurement\Events\PurchaseOrderCancelled;
 use App\Modules\Procurement\Events\PurchaseOrderClosed;
 use App\Modules\Procurement\Events\PurchaseOrderSent;
+use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Procurement\Models\PurchaseOrder;
+use App\Modules\Procurement\Services\GoodsReceiptService;
 use App\Modules\Procurement\Services\PurchaseOrderService;
 use App\Modules\Production\Events\ShiftProductionEntryApproved;
 use App\Modules\Production\Models\ShiftProductionEntry;
@@ -17,6 +19,7 @@ use App\Modules\Sales\Events\DeliveryDispatched;
 use App\Modules\Sales\Models\Enums\InvoiceStatus;
 use App\Modules\Sales\Models\Invoice;
 use App\Modules\TallySync\Exceptions\PurchaseOrderNotPostable;
+use App\Modules\TallySync\Exceptions\ReceiptNoteNotPostable;
 use App\Modules\TallySync\Models\Enums\TallySyncStatus;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\TallySyncService;
@@ -52,22 +55,19 @@ class TallySyncEventServiceProvider extends ServiceProvider
         // explicit domain events (not model events) because the receipt/delivery
         // are posted at creation — after their lines exist — and production
         // approval is an atomic query update that fires no model event.
-        // Gated on tally-sync.receipt_notes_enabled, OFF by default —
-        // whether the factory uses Tally Receipt Notes at all is PENDING Q63
-        // and unanswered, so off is the fail-closed reading of an open
-        // question rather than a decision anyone has taken. OFF means this no-ops rather than staging anything —
-        // no queue row, no XML, and nothing about a past GRN or a past
-        // Receipt Note voucher is touched.
+        // Gated on tally-sync.receipt_notes_enabled, OFF as the DECIDED
+        // state — the factory does not use Tally Receipt Notes
+        // (DEC-20260830-001). OFF means this
+        // stages nothing — no queue row, no XML, and nothing about a past
+        // GRN or a past Receipt Note voucher is touched — and, like the PO
+        // listener, what staging concluded is RECORDED on the receipt
+        // (tally_staging) so the receiving desk reads the state instead of
+        // silence. A refusal (an unmapped item, an unmapped vendor ledger,
+        // no allowed company) is likewise recorded, never thrown onward:
+        // the material HAS arrived and the stock HAS posted — an arrival
+        // must not fail because Tally staging refused.
         Event::listen(GoodsReceiptNoteReceived::class, function (GoodsReceiptNoteReceived $event) {
-            if (! config('tally-sync.receipt_notes_enabled')) {
-                Log::debug('Goods receipt received; Tally Receipt Note staging disabled (tally-sync.receipt_notes_enabled = false — the factory does not use Tally Receipt Notes for GRN/inward).', [
-                    'goods_receipt_note_id' => $event->note->id,
-                ]);
-
-                return;
-            }
-
-            $this->app->make(TallySyncService::class)->enqueueGoodsReceiptNote($event->note);
+            $this->stageGoodsReceiptNote($event->note);
         });
 
         Event::listen(DeliveryDispatched::class, function (DeliveryDispatched $event) {
@@ -158,11 +158,129 @@ class TallySyncEventServiceProvider extends ServiceProvider
     }
 
     /**
+     * The GoodsReceiptNoteReceived listener's body — stagePurchaseOrder()'s
+     * shape on the receipt. Every branch ends in ONE recordTallyStaging()
+     * call with the state the receipt should show; the enqueue itself never
+     * touches the receipt.
+     */
+    private function stageGoodsReceiptNote(GoodsReceiptNote $note): void
+    {
+        // Belt and braces (withdrawStagedPurchaseOrder's rule): the arrival
+        // is a physical fact — no staging surprise may escape this listener.
+        // The event now arrives after commit, so an escape could no longer
+        // roll the arrival back, but it would still turn a recorded receipt
+        // into a 500 for the person who booked it.
+        try {
+            $this->stageGoodsReceiptNoteUnguarded($note);
+        } catch (Throwable $exception) {
+            Log::error('Tally staging for a goods receipt failed unexpectedly — the arrival stands.', [
+                'goods_receipt_note_id' => $note->id,
+                'exception' => $exception->getMessage(),
+            ]);
+
+            // A crash must not read as silence at the receiving desk
+            // (Cursor final pass): best-effort refused record with a
+            // GENERIC reason — the exception's own words stay in the log,
+            // never on the receipt (they can carry anything). If even this
+            // write fails, the log line above already tells the story.
+            try {
+                $this->app->make(GoodsReceiptService::class)->recordTallyStaging($note, [
+                    'state' => 'refused',
+                    'reasons' => [[
+                        'code' => 'staging_error',
+                        'detail' => 'Tally staging failed unexpectedly — the arrival stands; ask an administrator to check the server log.',
+                    ]],
+                ]);
+            } catch (Throwable $recordFailure) {
+                Log::error('Recording the staging failure on the receipt also failed.', [
+                    'goods_receipt_note_id' => $note->id,
+                    'exception' => $recordFailure->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    private function stageGoodsReceiptNoteUnguarded(GoodsReceiptNote $note): void
+    {
+        $at = now()->toIso8601String();
+        $receipts = $this->app->make(GoodsReceiptService::class);
+
+        if (! config('tally-sync.receipt_notes_enabled')) {
+            Log::debug('Goods receipt received; Tally Receipt Note staging disabled (the factory does not use Tally Receipt Notes — DEC-20260830-001).', [
+                'goods_receipt_note_id' => $note->id,
+            ]);
+            $receipts->recordTallyStaging($note, [
+                'state' => 'disabled',
+                'reasons' => [[
+                    'code' => 'receipt_notes_disabled',
+                    'detail' => 'Receipt Note posting to Tally is off — the factory does not use Tally Receipt Notes (DEC-20260830-001). Nothing was staged.',
+                ]],
+                'at' => $at,
+            ]);
+
+            return;
+        }
+
+        try {
+            $entry = $this->app->make(TallySyncService::class)->enqueueGoodsReceiptNote($note);
+        } catch (ReceiptNoteNotPostable $refusal) {
+            Log::info('Goods receipt not staged for Tally — refused with named reasons.', [
+                'goods_receipt_note_id' => $note->id,
+                'reasons' => $refusal->codes(),
+            ]);
+            $receipts->recordTallyStaging($note, [
+                'state' => 'refused',
+                'reasons' => $refusal->reasons,
+                'at' => $at,
+            ]);
+
+            return;
+        }
+
+        $receipts->recordTallyStaging($note, [
+            'state' => 'enqueued',
+            'reasons' => [],
+            'entry_id' => $entry->id,
+            'at' => $at,
+        ]);
+    }
+
+    /**
      * The PurchaseOrderSent listener's body — see the Event::listen above.
      * Every branch ends in ONE recordTallyStaging() call with the state the
      * order should show; the enqueue itself never touches the order.
      */
     private function stagePurchaseOrder(PurchaseOrder $order): void
+    {
+        // The GRN listener's belt and braces, mirrored (Cursor final pass):
+        // the order is already Sent when this runs — a staging surprise must
+        // not turn a sent order into a 500.
+        try {
+            $this->stagePurchaseOrderUnguarded($order);
+        } catch (Throwable $exception) {
+            Log::error('Tally staging for a sent purchase order failed unexpectedly — the order stands.', [
+                'purchase_order_id' => $order->id,
+                'exception' => $exception->getMessage(),
+            ]);
+
+            try {
+                $this->app->make(PurchaseOrderService::class)->recordTallyStaging($order, [
+                    'state' => 'refused',
+                    'reasons' => [[
+                        'code' => 'staging_error',
+                        'detail' => 'Tally staging failed unexpectedly — the order stands; ask an administrator to check the server log.',
+                    ]],
+                ]);
+            } catch (Throwable $recordFailure) {
+                Log::error('Recording the staging failure on the order also failed.', [
+                    'purchase_order_id' => $order->id,
+                    'exception' => $recordFailure->getMessage(),
+                ]);
+            }
+        }
+    }
+
+    private function stagePurchaseOrderUnguarded(PurchaseOrder $order): void
     {
         $at = now()->toIso8601String();
 
