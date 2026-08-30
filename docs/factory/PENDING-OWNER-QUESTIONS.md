@@ -1875,11 +1875,24 @@ this factory cannot make (FC-01, DEC-20260807-007: a bag belongs to no
 machine and no batch, and a batch's consumption is calculated). So the screen
 shows the split and a person chooses.
 
+**Until it is answered, the build REFUSES rather than picks.** A material an
+open store issue is standing on will not accept an unattributed return: the
+refusal names the issue and points at its own line, which always works.
+Materials with no handover behind them — all seven the live instance could
+not bring home — are unaffected, so the case that provoked the build works
+and the undecided case does not.
+
+That is deliberate and it is the conservative direction. An earlier version
+showed the split and let the storekeeper choose, which sounds like leaving
+the decision to a person and is not: shipping the capability answers this
+question "storekeeper's choice", and **an unattributed movement can never be
+re-attributed afterwards**. If the answer turns out to be "must attribute",
+every return recorded the other way has left a handover claiming material
+that went home weeks earlier, with nothing able to tell the two apart.
+
 Both answers are cheap from here. "Must attribute where an issue is open" is
-a refusal to add on the unattributed path. "Storekeeper's choice" is what is
-already built. What is NOT cheap is guessing: an unattributed return that
-should have been attributed leaves an open handover claiming material that
-has physically gone home, and nothing later can tell the two apart.
+the deleted condition — nothing to build. "Storekeeper's choice" is deleting
+the refusal in `ProductionReturnService::undecidedRefusal()`.
 
 **Related, and also open:** the ERP does not enforce that the return happens
 daily — nothing warns at the end of a shift that material is still standing

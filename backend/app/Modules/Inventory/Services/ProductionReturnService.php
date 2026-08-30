@@ -48,11 +48,25 @@ use Illuminate\Validation\ValidationException;
  * unattributed return across open issues, FIFO or otherwise. That is the
  * same invention unconsumedBudgets() refuses in the other direction:
  * nothing in this factory can say which handover a given kilogram came out
- * of (FC-01, DEC-20260807-007). The read side (returnable()) shows the
- * split — on the floor, standing against open issues, unattributed — and a
- * person chooses. Whether an end-of-day return MUST be attributed where an
- * issue exists is a factory-flow question for the owner, not a default to
- * be picked here.
+ * of (FC-01, DEC-20260807-007).
+ *
+ * AND WHERE THE ANSWER IS NOT RECORDED, IT REFUSES RATHER THAN PICKS.
+ * Whether an end-of-day return MUST be attributed to an open handover is
+ * Q69, open with the owner. An earlier version showed the split and let the
+ * storekeeper choose — which sounds like leaving the decision to a person,
+ * and is not: shipping the capability IS answering Q69 "storekeeper's
+ * choice", and answering it that way writes records that CANNOT BE UNDONE.
+ * An unattributed movement can never be re-attributed afterwards, so if the
+ * owner answers "must attribute", every one of them has left a handover
+ * claiming material that went home weeks ago.
+ *
+ * So: a material with an OPEN store issue standing on it in production
+ * refuses an unattributed return, naming the issue and the other door
+ * (AGENTS.md — add the question, stop that part, do not choose for the
+ * factory). A material with NO open handover behind it — every one of the
+ * seven the live instance could not bring home — is untouched by this,
+ * which is the whole case that provoked the build. When the owner answers,
+ * relaxing this is a deleted condition.
  *
  * THE RESIDUE BOUND, and why it is the conservative one:
  *
@@ -234,7 +248,13 @@ class ProductionReturnService
             $residues = $this->budgetsFor($this->unattributedItemIds($lines), $wipId);
             $moved = collect();
 
-            foreach ($lines as $index => $line) {
+            // IN ITEM ORDER, NOT THE ORDER THEY WERE TYPED. Each move locks
+            // that material's balances, so two returns sent at the same moment
+            // — one listing resin then film, the other film then resin — would
+            // each hold their first material and wait for the other's, and
+            // InnoDB would kill one. Everything below still reports against
+            // the line index the caller sent.
+            foreach ($this->inItemOrder($lines) as $index => $line) {
                 $lineId = isset($line['store_issue_line_id']) ? (int) $line['store_issue_line_id'] : 0;
 
                 if ($lineId > 0) {
@@ -258,6 +278,12 @@ class ProductionReturnService
                 }
 
                 $residues[$itemId] ??= '0.0000';
+
+                if (bccomp($this->standingAgainstOpenIssues($itemId, $wipId), '0', 4) === 1) {
+                    throw ValidationException::withMessages([
+                        "lines.{$index}.quantity" => $this->undecidedRefusal($itemId, $wipId),
+                    ]);
+                }
 
                 if (bccomp($quantity, $residues[$itemId], 4) === 1) {
                     throw ValidationException::withMessages([
@@ -441,6 +467,53 @@ class ProductionReturnService
                 ]);
             }
         }
+    }
+
+    /**
+     * The caller's lines, keyed by their original index, ordered by material.
+     *
+     * A line with no material sorts first so its refusal is still reached.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     * @return array<int, array<string, mixed>>
+     */
+    private function inItemOrder(array $lines): array
+    {
+        uasort($lines, fn ($a, $b) => ((int) ($a['item_id'] ?? 0)) <=> ((int) ($b['item_id'] ?? 0)));
+
+        return $lines;
+    }
+
+    /** What every open handover is standing on, for one material in production. */
+    private function standingAgainstOpenIssues(int $itemId, int $wipId): string
+    {
+        return $this->standingByItem([$itemId], $wipId)
+            ->get($itemId, collect())
+            ->reduce(fn (string $carry, array $line) => bcadd($carry, $line['outstanding'], 4), '0.0000');
+    }
+
+    /**
+     * The refusal for a material an open handover is standing on — Q69, not a
+     * bug. It names the other door, because that door always works.
+     */
+    private function undecidedRefusal(int $itemId, int $wipId): string
+    {
+        $issues = $this->standingByItem([$itemId], $wipId)
+            ->get($itemId, collect())
+            ->pluck('issue_number')
+            ->unique()
+            ->implode(', ');
+
+        $item = Item::query()->whereKey($itemId)->first(['display_name', 'name']);
+        $name = $item?->display_name ?: ($item?->name ?: 'This material');
+
+        return sprintf(
+            '%s is still standing against store issue %s. Return it against that issue so the handover closes. '
+            .'Whether material may come back without naming its handover is an open question for the owner, and '
+            .'a return recorded without one cannot be attributed afterwards.',
+            $name,
+            $issues,
+        );
     }
 
     /** What the books hold for one material in one location, to 4 places. */

@@ -161,37 +161,49 @@ class ProductionReturnToStoreTest extends TestCase
 
     // ---- (3) the bound: an open handover's material is not residue ---------
 
-    public function test_an_unattributed_return_may_not_take_what_an_open_store_issue_is_standing_on(): void
+    public function test_a_material_an_open_handover_is_standing_on_refuses_an_unattributed_return(): void
     {
-        // 200 kg of residue, plus a 100 kg handover on top of it. The
-        // production balance is 300, but only 200 answers no document.
+        // Q69 IS OPEN, so this door does not answer it. 200 kg of residue with
+        // a 100 kg handover standing on the same material: allowing the
+        // unattributed return here would be shipping "storekeeper's choice" as
+        // the answer, and an unattributed movement can NEVER be re-attributed
+        // afterwards. Refused, with the other door named.
         $this->openingStockInProduction($this->resin, '200');
         $this->stockInStore($this->resin, '500');
-        $this->issueResin('100');
+        $issue = $this->issueResin('100');
 
         $this->assertSame('300.0000', $this->balance($this->wip, $this->resin));
 
         $refusal = $this->postJson('/api/v1/inventory/production-returns', [
             'to_warehouse_id' => $this->store->id,
-            'lines' => [['item_id' => $this->resin->id, 'quantity' => '300']],
+            'lines' => [['item_id' => $this->resin->id, 'quantity' => '200']],
         ])->assertStatus(422);
 
         $message = (string) $refusal->json('errors')['lines.0.quantity'][0];
-        $this->assertStringContainsString('300.0000 standing in production', $message);
-        $this->assertStringContainsString('only 200.0000 of it answers no store issue', $message);
-        $this->assertStringContainsString('return that part against its own issue line', $message);
+        $this->assertStringContainsString('still standing against store issue', $message);
+        $this->assertStringContainsString('cannot be attributed afterwards', $message);
 
-        // REFUSED, NOT CAPPED. Nothing moved.
+        // Nothing moved.
         $this->assertSame('300.0000', $this->balance($this->wip, $this->resin));
 
-        // And what genuinely answers no document does come home.
+        // THE NAMED DOOR ALWAYS WORKS, which is why refusing the other one
+        // strands nothing that has a handover behind it.
+        $this->postJson('/api/v1/inventory/production-returns', [
+            'to_warehouse_id' => $this->store->id,
+            'lines' => [['store_issue_line_id' => $issue['lines'][0]['id'], 'quantity' => '100']],
+        ])->assertCreated();
+
+        $this->assertSame('200.0000', $this->balance($this->wip, $this->resin));
+
+        // And once no handover stands on it, the residue comes home too — the
+        // refusal is about the open question, not about the material.
         $this->postJson('/api/v1/inventory/production-returns', [
             'to_warehouse_id' => $this->store->id,
             'lines' => [['item_id' => $this->resin->id, 'quantity' => '200']],
         ])->assertCreated();
 
-        $this->assertSame('100.0000', $this->balance($this->wip, $this->resin));
-        $this->assertLedgerMatchesBalances('after residue came home around an open issue');
+        $this->assertSame('0.0000', $this->balance($this->wip, $this->resin));
+        $this->assertLedgerMatchesBalances('after the handover closed and the residue followed');
     }
 
     public function test_two_unattributed_lines_of_one_material_share_one_budget(): void
@@ -217,23 +229,28 @@ class ProductionReturnToStoreTest extends TestCase
 
     public function test_attributed_and_unattributed_lines_travel_in_one_call(): void
     {
-        $this->openingStockInProduction($this->resin, '200');
+        // Two DIFFERENT materials, which is the shape an evening actually has:
+        // resin that came through a handover, and a retired cap standing in
+        // production with nothing behind it.
         $this->stockInStore($this->resin, '500');
+        $this->openingStockInProduction($this->retiredCap, '4000');
         $issue = $this->issueResin('100');
         $lineId = $issue['lines'][0]['id'];
 
-        $this->assertSame('300.0000', $this->balance($this->wip, $this->resin));
+        $this->assertSame('100.0000', $this->balance($this->wip, $this->resin));
 
         $this->postJson('/api/v1/inventory/production-returns', [
             'to_warehouse_id' => $this->store->id,
             'notes' => 'End of day',
             'lines' => [
                 ['store_issue_line_id' => $lineId, 'quantity' => '40'],
-                ['item_id' => $this->resin->id, 'quantity' => '200'],
+                ['item_id' => $this->retiredCap->id, 'quantity' => '4000'],
             ],
         ])->assertCreated();
 
         $this->assertSame('60.0000', $this->balance($this->wip, $this->resin));
+        $this->assertSame('0.0000', $this->balance($this->wip, $this->retiredCap));
+        $this->assertSame('4000.0000', $this->balance($this->store, $this->retiredCap));
 
         // The ATTRIBUTED half closed the handover's own arithmetic — which is
         // the whole reason it must stay a separate kind of line.
@@ -246,8 +263,8 @@ class ProductionReturnToStoreTest extends TestCase
 
     public function test_a_refusal_on_the_second_line_rolls_back_the_first(): void
     {
-        $this->openingStockInProduction($this->resin, '200');
         $this->stockInStore($this->resin, '500');
+        $this->openingStockInProduction($this->retiredCap, '4000');
         $issue = $this->issueResin('100');
         $lineId = $issue['lines'][0]['id'];
 
@@ -256,15 +273,16 @@ class ProductionReturnToStoreTest extends TestCase
         $this->postJson('/api/v1/inventory/production-returns', [
             'to_warehouse_id' => $this->store->id,
             'lines' => [
-                ['item_id' => $this->resin->id, 'quantity' => '200'],
+                ['item_id' => $this->retiredCap->id, 'quantity' => '4000'],
                 ['store_issue_line_id' => $lineId, 'quantity' => '500'],
             ],
         ])->assertStatus(422);
 
         // Nothing at all was recorded: a storekeeper who typed one wrong
         // figure has half a return to reason about otherwise.
-        $this->assertSame('300.0000', $this->balance($this->wip, $this->resin));
-        $this->assertSame('400.0000', $this->balance($this->store, $this->resin));
+        $this->assertSame('4000.0000', $this->balance($this->wip, $this->retiredCap));
+        $this->assertSame('0.0000', $this->balance($this->store, $this->retiredCap));
+        $this->assertSame('100.0000', $this->balance($this->wip, $this->resin));
         $this->assertSame('0.0000', (string) StoreIssue::query()->sole()->lines()->sole()->quantity_returned);
     }
 

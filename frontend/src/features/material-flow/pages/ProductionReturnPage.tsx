@@ -149,7 +149,13 @@ export default function ProductionReturnPage() {
                     min={0}
                     max={Number(row.unattributed)}
                     step={permitsFractions(row.uom) ? 0.001 : 1}
-                    disabled={Number(row.unattributed) <= 0}
+                    // A material an open handover is standing on goes home
+                    // through ITS line, in the expanded row — the server
+                    // refuses it here while Q69 is open, and an input that
+                    // only ever produces a refusal is worse than no input.
+                    // The "Held by a store issue" figure beside it is the
+                    // explanation; no sentence is needed.
+                    disabled={Number(row.unattributed) <= 0 || row.store_issue_lines.length > 0}
                     value={free[row.item_id] ?? null}
                     onChange={(value) => setFree((current) => ({ ...current, [row.item_id]: value }))}
                     style={{ width: '100%' }}
