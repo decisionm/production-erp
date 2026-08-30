@@ -239,6 +239,65 @@ export interface BagScanPayload {
     notes?: string | null;
 }
 
+/* ------------------------- the daily return home ------------------------- */
+
+/**
+ * One material standing in the production area, SPLIT by what may come back
+ * which way.
+ *
+ * The split is the point. `attributed` is held by open store issues and has
+ * to go home against their lines so each handover's arithmetic closes;
+ * `unattributed` answers no document and is the only part a return with no
+ * store issue behind it may draw on. One total would leave the storekeeper
+ * guessing, and guessing is how a return quietly takes another issue's
+ * kilograms.
+ *
+ * `on_floor` may be NEGATIVE — a batch may consume more than was issued —
+ * and is shown as it is. `unattributed` is then "0.0000": you cannot send
+ * back less than nothing.
+ */
+export interface ProductionReturnable {
+    item_id: number;
+    sku: string | null;
+    name: string | null;
+    display_name?: string | null;
+    uom: string | null;
+    /** Deactivated materials still have a way home; the flag explains the row, it does not block it. */
+    item_is_active: boolean;
+    warehouse_id: number;
+    on_floor: string;
+    attributed: string;
+    unattributed: string;
+    store_issue_lines: {
+        store_issue_line_id: number;
+        store_issue_id: number;
+        issue_number: string;
+        status: string;
+        outstanding: string;
+        to_warehouse_id: number;
+    }[];
+}
+
+/**
+ * ONE door for both kinds of line. A line names a store issue line (the
+ * return closes that handover), or a material (the return answers no
+ * document). Never both kinds in one line — the server refuses a material
+ * that contradicts the handover it is sent with.
+ *
+ * `to_warehouse_id` addresses the UNATTRIBUTED lines only: an attributed
+ * line goes home to the store it came out of, which is a fact about the
+ * original handover and not this screen's to redirect.
+ */
+export interface ProductionReturnPayload {
+    to_warehouse_id: number;
+    notes?: string | null;
+    lines: {
+        item_id?: number | null;
+        store_issue_line_id?: number | null;
+        quantity: number;
+    }[];
+}
+
 export interface ReturnToStorePayload {
     received_by?: number | null;
     notes?: string | null;

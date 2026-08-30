@@ -1854,7 +1854,54 @@ because this file re-mints question numbers at merge.
 supplier-bill screen, its arithmetic, its matching and its attachment work
 under either answer. *Open since 2026-08-28.*
 
-## Q69 · Does a document reference from a retired warehouse prove the material is physically on the shelf today? — RESOLVED (DEC-20260831-001)
+## Q69 · When material comes back from production, must it be returned against the store issue that put it there?
+
+The daily return was built on 30-Aug-2026: the store issues material to the
+production area, production makes finished goods from it, and the balance is
+returned to the store daily. Until then the only return in the system was
+bounded by a store issue LINE, and seven of the nine materials standing in
+production on the live instance have no store issue behind them at all
+(`issued = 0`, a positive balance, `returned = 0` across the whole ledger).
+They had no way home. `POST /api/v1/inventory/production-returns` now takes
+both kinds of line in one call: with a `store_issue_line_id`, the return
+closes that handover's own arithmetic; without one, it is bounded by the part
+of the production balance that no open handover is standing against.
+
+What this asks: when a store issue IS open for that material, must the
+evening's return be attributed to it, or may the storekeeper record it as
+unattributed? The build deliberately does not answer. Spreading a return
+across open issues — FIFO or by any other rule — would invent an attribution
+this factory cannot make (FC-01, DEC-20260807-007: a bag belongs to no
+machine and no batch, and a batch's consumption is calculated). So the screen
+shows the split and a person chooses.
+
+**Until it is answered, the build REFUSES rather than picks.** A material an
+open store issue is standing on will not accept an unattributed return: the
+refusal names the issue and points at its own line, which always works.
+Materials with no handover behind them — all seven the live instance could
+not bring home — are unaffected, so the case that provoked the build works
+and the undecided case does not.
+
+That is deliberate and it is the conservative direction. An earlier version
+showed the split and let the storekeeper choose, which sounds like leaving
+the decision to a person and is not: shipping the capability answers this
+question "storekeeper's choice", and **an unattributed movement can never be
+re-attributed afterwards**. If the answer turns out to be "must attribute",
+every return recorded the other way has left a handover claiming material
+that went home weeks earlier, with nothing able to tell the two apart.
+
+Both answers are cheap from here. "Must attribute where an issue is open" is
+the deleted condition — nothing to build. "Storekeeper's choice" is deleting
+the refusal in `ProductionReturnService::undecidedRefusal()`.
+
+**Related, and also open:** the ERP does not enforce that the return happens
+daily — nothing warns at the end of a shift that material is still standing
+in production. Whether it should chase, and against what clock, follows from
+this answer.
+
+**Blocks:** nothing built. The return works under either answer.
+*Open since 2026-08-30.*
+## Q70 · Does a document reference from a retired warehouse prove the material is physically on the shelf today? — RESOLVED (DEC-20260831-001)
 
 `inventory:preview-warehouse-recovery` lists the stock standing in
 warehouses no picker offers and classifies each row from its own movement
@@ -1875,7 +1922,7 @@ which reference wordings prove present physical stock?
 **Blocks:** any recovery of the DOCUMENTED rows. The preview itself is
 read-only and safe to run under either answer. *Open since 2026-08-30.*
 
-## Q70 · What happens to the opening-balance and wiring-check stock in the retired warehouses?
+## Q71 · What happens to the opening-balance and wiring-check stock in the retired warehouses?
 
 The same preview withholds every OPENING and TEST row. On the live instance
 these are the larger share: the retired RM store's rows are backed almost
@@ -1890,7 +1937,7 @@ is itself a stock movement.
 
 **Blocks:** closing out the retired warehouses. *Open since 2026-08-30.*
 
-## Q71 · Recovering stranded stock would re-value the Store's stock of the same item — is that acceptable to Accounts?
+## Q72 · Recovering stranded stock would re-value the Store's stock of the same item — is that acceptable to Accounts?
 
 A stock transfer carries the source row's average cost into the destination,
 where the weighted average is recomputed. So recovering a stranded row does
@@ -1902,10 +1949,10 @@ What is asked: does Accounts accept the re-valuation, should the recovery
 carry a different cost, or should the quantity move without disturbing the
 average?
 
-**Blocks:** any recovery, including the DOCUMENTED rows Q69 covers. *Open
+**Blocks:** any recovery, including the DOCUMENTED rows Q70 covers. *Open
 since 2026-08-30.*
 
-## Q72 · Which materials must a goods receipt record lots and bags for?
+## Q73 · Which materials must a goods receipt record lots and bags for?
 
 Lot and bag traceability is switched on and has never produced a row: the
 lots block is optional on a goods receipt, so omitting it creates no lot and
@@ -1927,7 +1974,7 @@ question is the third of that set and they are best answered together.
 **Blocks:** making the traceability workflow operational for future
 receipts. *Open since 2026-08-30.*
 
-## Q73 · Is there a store-acceptance step for finished goods, and may the Storekeeper approve dispatch?
+## Q74 · Is there a store-acceptance step for finished goods, and may the Storekeeper approve dispatch?
 
 The Storekeeper role now exists as a definition
 (`roles:define-storekeeper`, dry-run first). Two of the capabilities asked
@@ -1949,7 +1996,7 @@ Sales, or does the Storekeeper simply not do it?
 **Blocks:** those two capabilities only. The rest of the Storekeeper role
 works without them. *Open since 2026-08-30.*
 
-## Q74 · What should the stock screen call the quantity a storekeeper may act on? — RESOLVED (DEC-20260831-002)
+## Q75 · What should the stock screen call the quantity a storekeeper may act on? — RESOLVED (DEC-20260831-002)
 
 The stock list can be decomposed per row into on-hand, quantity held for
 incoming QC, quantity reserved for a customer line, and quantity standing in

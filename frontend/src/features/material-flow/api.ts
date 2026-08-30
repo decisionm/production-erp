@@ -8,6 +8,8 @@ import type {
     MaterialRequest,
     MaterialRequestFilters,
     ProductionFloorStockResult,
+    ProductionReturnPayload,
+    ProductionReturnable,
     ReturnToStorePayload,
     StoreIssue,
     StoreIssueBagScan,
@@ -142,6 +144,26 @@ export async function returnToStore(issueId: number, payload: ReturnToStorePaylo
         payload,
     );
     return data.data;
+}
+
+/* ------------------------- the daily return home ------------------------- */
+
+/**
+ * What is standing in the production area and how much of it may come back
+ * which way. Not paginated on purpose: this is one row per material standing
+ * on the floor, a list the factory keeps short by returning it.
+ */
+export async function listProductionReturnable(q?: string): Promise<ProductionReturnable[]> {
+    const { data } = await api.get<{ data: ProductionReturnable[] }>(
+        `${MATERIAL_FLOW_BASE}/production-returns/returnable`,
+        { params: { q } },
+    );
+    return data.data;
+}
+
+/** The return itself — attributed and unattributed lines in ONE call. */
+export async function recordProductionReturn(payload: ProductionReturnPayload): Promise<void> {
+    await api.post(`${MATERIAL_FLOW_BASE}/production-returns`, payload);
 }
 
 /**
