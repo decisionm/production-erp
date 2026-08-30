@@ -218,4 +218,89 @@ return [
 
     'receipt_notes_allowed_company' => env('TALLY_SYNC_RECEIPT_NOTES_ALLOWED_COMPANY'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Delivery Note → Tally (dispatch) — OFF by default, FAIL-CLOSED
+    |--------------------------------------------------------------------------
+    |
+    | Whether a dispatch (DeliveryDispatched) stages a Tally 'Delivery Note'
+    | voucher at all. OFF is a FAIL-CLOSED READING OF AN OPEN QUESTION, not
+    | a decision — the owner has not ruled, and the evidence says the
+    | factory has never used this voucher:
+    |
+    |   Transactions.xml (the factory's own July-2026 export) holds 195
+    |   Payments, 177 Sales, 134 Receipts, 126 Sales Orders, 82 Journals,
+    |   64 Purchases, 38 Stock Journals, 15 Purchase Orders, 15 Contras and
+    |   1 Debit Note — and ZERO Delivery Notes. Of the 177 real Sales
+    |   vouchers, NONE reference a delivery note (INVOICEDELNOTES.LIST is
+    |   empty in all 177) while 163 reference a Sales Order directly.
+    |
+    | That is the exact sales-side shape of DEC-20260830-001 on the purchase
+    | side (the factory does not use Tally Receipt Notes). Until the owner
+    | and Accounts rule, the ERP must not invent a voucher type the
+    | factory's books have never contained. Turning this ON needs an owner
+    | record, never an env edit alone.
+    |
+    | OFF means the listener no-ops (logs and returns) rather than calling
+    | TallySyncService::enqueueDelivery() — no queue row is created. The
+    | ERP's own delivery, its stock movement and its trace are untouched:
+    | this gate governs ONLY what is sent to Tally.
+    |
+    */
+
+    'delivery_notes_enabled' => (bool) env('TALLY_SYNC_DELIVERY_NOTES_ENABLED', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Sales Invoice → Tally — OFF by default, FAIL-CLOSED
+    |--------------------------------------------------------------------------
+    |
+    | Whether issuing an ERP invoice stages a Tally 'Sales' voucher. OFF is
+    | fail-closed for TWO independent reasons, either of which is enough:
+    |
+    | (1) DOUBLE POSTING. DEC-20260809-003 records that ALL real sales are
+    |     invoiced DIRECTLY IN TALLY and that the ERP Sales module is
+    |     demo-scale. If Accounts keys the invoice and the ERP also posts
+    |     one, the sale is booked twice. Which book originates a sale is an
+    |     open Accounts question.
+    |
+    | (2) THE VOUCHER IS MALFORMED. Independently of (1), the builder
+    |     (tally-sync-agent salesInvoice.ts) says of itself "BEST-EFFORT
+    |     TEMPLATE - NOT YET VALIDATED AGAINST A REAL TALLY INSTANCE", and
+    |     against the factory's own export it emits NO GST ledger entries,
+    |     NO 'Rounding Off', a single sales ledger where Tally uses
+    |     per-line ACCOUNTINGALLOCATIONS, and nests ALLINVENTORYENTRIES
+    |     inside ALLLEDGERENTRIES where Tally has them at voucher level. A
+    |     posted voucher would carry ZERO TAX. That is wrong under ANY
+    |     answer to (1), which is why this gate is not a business choice.
+    |
+    | Turning this on requires BOTH an owner/Accounts answer and a builder
+    | validated against a real export.
+    |
+    */
+
+    'sales_invoices_enabled' => (bool) env('TALLY_SYNC_SALES_INVOICES_ENABLED', false),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Sales Invoice → Tally: the allowed Tally company (fail-closed)
+    |--------------------------------------------------------------------------
+    |
+    | The same rule as the Purchase Order and Receipt Note company gates, and on
+    | this voucher it is the one that matters most. The factory's own Sales
+    | export was taken from a company literally named
+    | "SWAASHPET POLYMERS PVT LTD Testing", and the same file carries two other
+    | company strings ("... 26-27" as the remote company name, and the bare
+    | "SWAASHPET POLYMERS PVT LTD" as the godown). They are NOT interchangeable,
+    | and an agent that guessed would post real sales into a test ledger.
+    |
+    | Blank-after-trim or unset REFUSES staging even while sales_invoices_enabled
+    | is true. The trimmed value rides the payload as `allowed_company` and the
+    | desktop agent compares it BYTE-FOR-BYTE against its own configured company
+    | before it builds anything.
+    |
+    */
+
+    'sales_invoices_allowed_company' => env('TALLY_SYNC_SALES_INVOICES_ALLOWED_COMPANY'),
+
 ];

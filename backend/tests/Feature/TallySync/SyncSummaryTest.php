@@ -30,6 +30,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -47,6 +48,7 @@ use Tests\TestCase;
 class SyncSummaryTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     private Shift $night;
 
@@ -79,6 +81,13 @@ class SyncSummaryTest extends TestCase
         $this->resin = Item::create(['sku' => 'RES-1', 'name' => 'PET Resin', 'uom' => 'KG']);
         $this->fgStore = Warehouse::create(['code' => 'WH-FG', 'name' => 'FG Store']);
         $this->rmStore = Warehouse::create(['code' => 'WH-RM', 'name' => 'RM Store']);
+
+        // The Sales voucher in the fixture queue is now assembled GST-correct or
+        // not staged at all: the registration, the ledger mappings, the single
+        // Tally-linked godown and the items' HSN all have to exist BEFORE the
+        // invoice is issued. Neither store carries a tally_guid, so this adds
+        // the one godown that resolves.
+        $this->seedSalesTallyMasterData();
     }
 
     /**
@@ -458,12 +467,20 @@ class SyncSummaryTest extends TestCase
 
     private function invoice(int $id, string $date, string $customer): Invoice
     {
+        // Unlike the delivery and GRN fixtures, the party and the item here are
+        // REAL rows: the Sales voucher is built from their own masters — the
+        // customer's Tally ledger name and state code, the item's HSN and rate —
+        // and the seeding writes those onto rows that exist. Completed here,
+        // after the customer row is made and before the invoice is issued.
+        $party = Customer::create(['code' => "CUST-{$id}", 'name' => $customer]);
+        $this->completeSalesTallyMastersOnExistingRows();
+
         $line = new InvoiceLine(['quantity' => '1000.0000', 'unit_price' => '4.5000']);
-        $line->setRelation('item', new Item(['sku' => 'BTL-500', 'name' => '500ml PET Bottle']));
+        $line->setRelation('item', $this->bottle->fresh());
 
         $invoice = $this->existing(new Invoice(['invoice_date' => $date]), $id);
         $invoice->setRelation('lines', collect([$line]));
-        $invoice->setRelation('customer', new Customer(['name' => $customer]));
+        $invoice->setRelation('customer', $party->fresh());
 
         return $invoice;
     }

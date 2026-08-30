@@ -28,6 +28,7 @@ use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -51,6 +52,7 @@ use Tests\TestCase;
 class SyncEntryMappingsTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     /** SyncPayloadRateVisibilityTest's walk keys — the same walk, so the two suites cannot disagree on what a rate is. */
     private const RATE_KEYS = ['rate', 'amount', 'total_amount', 'debit', 'credit', 'unit_price', 'unit_cost'];
@@ -205,53 +207,72 @@ class SyncEntryMappingsTest extends TestCase
 
     public function test_show_of_a_sales_invoice_maps_the_party_by_name_and_the_sales_ledger_by_role(): void
     {
-        TallyLedgerMapping::create(['role' => TallyLedgerRole::Sales->value, 'tally_ledger_name' => 'Sales A/c']);
-
+        // THE ROLE MOVED WITH THE LEDGER. Before the 31-Aug-2026 GST rewrite a
+        // Sales voucher named ONE ledger from the single `sales` role. It now
+        // names one PER LINE, chosen by supply type: this fixture's buyer is in
+        // Tamil Nadu (33) and the company is in Puducherry (34), so the sale is
+        // interstate and the interstate role is the one that must be read.
         $entry = app(TallySyncService::class)->enqueueSalesInvoice($this->invoice());
-        $this->assertSame('Sales A/c', $entry->payload['sales_ledger']);
+
+        $this->assertArrayNotHasKey('sales_ledger', $entry->payload, 'the single top-level ledger was retired');
+        $this->assertSame('Interstate Sales Taxable', $entry->payload['lines'][0]['sales_ledger']);
         $this->assertSame('4.5000', $entry->payload['lines'][0]['rate'], 'The fixture carries the rate the block must not');
 
         $this->actAsStaff(['tally-sync.view']);
         $data = $this->getJson("/api/v1/tally-sync/entries/{$entry->id}")->assertOk()->json('data');
 
-        // No item row by that name at all — the demo invoice's bottle was
-        // never created in the masters — and a Sales voucher names no godown.
+        // The item exists in the masters now (the GST payload cannot be built
+        // from an item that does not), so it reads name_only rather than
+        // unmapped — it has a row but no Tally GUID. And a Sales voucher DOES
+        // name a godown now: every line carries one, because the real vouchers
+        // do and Tally rejects a stock line without one.
         $line = $data['mappings']['lines'][0];
         $this->assertSame('500ml PET Bottle', $line['item']['name']);
-        $this->assertSame('unmapped', $line['item']['state']);
-        $this->assertNull($line['item']['item_id']);
-        $this->assertSame('none', $line['godown']['state']);
-        $this->assertNull($line['godown']['name']);
+        $this->assertSame('name_only', $line['item']['state']);
+        $this->assertNotNull($line['item']['item_id']);
+        $this->assertSame('identity', $line['godown']['state']);
+        $this->assertSame('SWAASHPET POLYMERS PVT LTD', $line['godown']['name']);
 
         $this->assertSame('Sri Aurobindo Beverages', $data['mappings']['party']['name']);
         $this->assertSame('name_only', $data['mappings']['party']['state']);
 
-        $this->assertSame('Sales A/c', $data['mappings']['sales_ledger']['name']);
+        // THE DRAWER NAMES THE LEDGER AND THE ROLE IT CAME FROM. Reading the
+        // retired `sales` role here would show a NAMELESS row wearing a green
+        // identity badge — a lie about configuration, and the defect this
+        // assertion exists to keep out.
+        $this->assertSame('Interstate Sales Taxable', $data['mappings']['sales_ledger']['name']);
         $this->assertSame('identity', $data['mappings']['sales_ledger']['state']);
-        $this->assertStringContainsString('Sales A/c', $data['mappings']['sales_ledger']['note']);
+        $this->assertStringContainsString('Interstate Sales Taxable', $data['mappings']['sales_ledger']['note']);
+        $this->assertStringContainsString('interstate', $data['mappings']['sales_ledger']['note']);
 
         $this->assertSame(
-            ['identity' => 1, 'name_only' => 1, 'unmapped' => 1, 'fixture' => 0, 'ambiguous' => 0],
+            ['identity' => 2, 'name_only' => 2, 'unmapped' => 0, 'fixture' => 0, 'ambiguous' => 0],
             $data['mapping_summary'],
         );
     }
 
     public function test_a_sales_invoice_whose_role_mapping_was_cleared_reads_unmapped(): void
     {
-        TallyLedgerMapping::create(['role' => TallyLedgerRole::Sales->value, 'tally_ledger_name' => 'Sales A/c']);
         $entry = app(TallySyncService::class)->enqueueSalesInvoice($this->invoice());
 
         // The mapping is cleared AFTER the voucher was queued: the state is
         // read against the mapping as it stands now, and the note says the
         // queued voucher still names the old ledger.
+        //
+        // AFTER is now the only order this can be written in, and that is
+        // itself the point: with the mapping cleared FIRST, SalesVoucherPayload
+        // refuses and stages nothing at all, so there is no voucher to read a
+        // stale mapping on. The drawer's "unmapped" state exists for exactly
+        // this case — a voucher queued while the mapping stood, read after
+        // somebody cleared it.
         TallyLedgerMapping::query()->delete();
 
         $this->actAsStaff(['tally-sync.view']);
         $data = $this->getJson("/api/v1/tally-sync/entries/{$entry->id}")->assertOk()->json('data');
 
-        $this->assertSame('Sales A/c', $data['mappings']['sales_ledger']['name']);
+        $this->assertSame('Interstate Sales Taxable', $data['mappings']['sales_ledger']['name']);
         $this->assertSame('unmapped', $data['mappings']['sales_ledger']['state']);
-        $this->assertStringContainsString('Sales A/c', $data['mappings']['sales_ledger']['note']);
+        $this->assertStringContainsString('Interstate Sales Taxable', $data['mappings']['sales_ledger']['note']);
     }
 
     // ---- a Journal: ledgers ------------------------------------------------
@@ -391,13 +412,24 @@ class SyncEntryMappingsTest extends TestCase
         return app(TallySyncService::class)->enqueueGoodsReceiptNote($grn);
     }
 
+    /**
+     * The item and the party are REAL ROWS, and the GST masters are seeded,
+     * because SalesVoucherPayload assembles the voucher from the customer's
+     * Tally ledger name and state and the item's HSN — and stages NOTHING when
+     * any of it is missing. The invoice itself stays in-memory: nothing here
+     * needs it persisted.
+     */
     private function invoice(): Invoice
     {
+        $item = Item::create(['sku' => 'BTL-500', 'name' => '500ml PET Bottle', 'uom' => 'NOS']);
+        $customer = Customer::create(['code' => 'CUST-INV-5', 'name' => 'Sri Aurobindo Beverages']);
+        $this->seedSalesTallyMasterData();
+
         $line = new InvoiceLine(['quantity' => '1000.0000', 'unit_price' => '4.5000']);
-        $line->setRelation('item', new Item(['sku' => 'BTL-500', 'name' => '500ml PET Bottle']));
+        $line->setRelation('item', $item->fresh());
         $invoice = $this->existing(new Invoice(['invoice_date' => '2026-08-01']), 5);
         $invoice->setRelation('lines', collect([$line]));
-        $invoice->setRelation('customer', new Customer(['name' => 'Sri Aurobindo Beverages']));
+        $invoice->setRelation('customer', $customer->fresh());
 
         return $invoice;
     }

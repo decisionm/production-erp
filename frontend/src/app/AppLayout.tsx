@@ -309,6 +309,7 @@ export const allNavItems: readonly NavGroup[] = [
             { key: '/sales/sales-orders', label: 'Sales Orders' },
             { key: '/sales/deliveries', label: 'Deliveries' },
             { key: '/sales/invoices', label: 'Invoices' },
+            { key: '/sales/fulfilment-control', label: 'Fulfilment Control' },
         ],
     },
     {

@@ -30,6 +30,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -75,6 +76,7 @@ use Tests\TestCase;
 class SalesVisibilityChainTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     /** The rates. Owner/Accounts only (FC-06) — they must appear in NO file reader N downloads. */
     private const ORDER_RATE = '96.5000';
@@ -196,6 +198,12 @@ class SalesVisibilityChainTest extends TestCase
             'quantity' => '500',
             'unit_price' => '4.5000',
         ]);
+        // The Sales voucher is this chain's fixture VEHICLE, not its subject, and
+        // SalesVoucherPayload now stages nothing without the GST masters behind
+        // it — so they go in here, after the two purchase/delivery vouchers are
+        // already staged, and before the one act that needs them.
+        $this->seedSalesTallyMasterData();
+
         // Issuing is what stages the Sales voucher (the model observer).
         $this->invoice->update(['status' => InvoiceStatus::Issued]);
         $this->salesVoucher = TallySyncEntry::query()->where('tally_voucher_type', 'Sales')->sole();

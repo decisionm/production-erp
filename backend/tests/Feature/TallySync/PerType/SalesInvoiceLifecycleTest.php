@@ -51,7 +51,14 @@ class SalesInvoiceLifecycleTest extends PerTypeLifecycleTestCase
 
         // The configured Sales ledger rides the payload (Settings → Ledger
         // Mappings), never a hardcoded "Sales Account".
-        app(TallyLedgerMappingService::class)->setMany([TallyLedgerRole::Sales->value => 'Sales - Local']);
+        // THIS FIXTURE'S BUYER IS IN PUDUCHERRY (GSTIN 34AABCA1122G1Z4), the
+        // company's own state, so the sale is LOCAL and the local role is the
+        // one the voucher names. Both roles are mapped so the test would still
+        // read correctly if the fixture's party ever moved states.
+        app(TallyLedgerMappingService::class)->setMany([
+            TallyLedgerRole::SalesLocal->value => 'Sales - Local',
+            TallyLedgerRole::SalesInterstate->value => 'Sales - Interstate',
+        ]);
     }
 
     private function salesDesk(): static
@@ -117,14 +124,29 @@ class SalesInvoiceLifecycleTest extends PerTypeLifecycleTestCase
 
     public function test_the_payload_names_the_configured_sales_ledger_and_its_prices_are_gated_on_the_wire(): void
     {
+        // The GST masters, before the voucher is staged: SalesVoucherPayload
+        // refuses and stages NOTHING without them, so this test's subject would
+        // not exist. The base's own four tests seed themselves; this one is
+        // this class's, so it seeds itself too.
+        $this->seedSalesTallyMasterData();
+
         $entry = $this->enqueueViaDomain();
 
         $this->assertSame('Sri Aurobindo Beverages', $entry->payload['party_ledger']);
         $this->assertSame('34AABCA1122G1Z4', $entry->payload['party_gstin']);
-        $this->assertSame('Sales - Local', $entry->payload['sales_ledger']);
+        // The ledger is named PER LINE now, and chosen by supply type.
+        $this->assertSame('intra_state', $entry->payload['supply_type']);
+        $this->assertSame('Sales - Local', $entry->payload['lines'][0]['sales_ledger']);
         $this->assertSame('2026-08-10', $entry->payload['voucher_date']);
         $this->assertSame('500ml PET Bottle', $entry->payload['lines'][0]['item']);
-        $this->assertSame('9000.0000', $entry->payload['total_amount']);
+        // `total_amount` was retired by the GST rewrite: 2000 x 4.50 = 9000
+        // taxable, CGST 810 + SGST 810, and the party is debited the
+        // tax-inclusive 10620 — which is already whole, so no rounding line.
+        $this->assertArrayNotHasKey('total_amount', $entry->payload);
+        $this->assertSame('9000.0000', $entry->payload['taxable_value']);
+        $this->assertSame('10620', $entry->payload['party_amount']);
+        $this->assertSame(['CGST', 'SGST'], array_column($entry->payload['tax_ledgers'], 'ledger'));
+        $this->assertNull($entry->payload['round_off']);
 
         // Same keys, same gate as the Receipt Note: omitted for a reader
         // without finance.*, whole for the agent (salesInvoice.ts needs them).
@@ -133,10 +155,17 @@ class SalesInvoiceLifecycleTest extends PerTypeLifecycleTestCase
         $this->assertArrayNotHasKey('rate', $viewerRow['payload']['lines'][0]);
         $this->assertArrayNotHasKey('amount', $viewerRow['payload']['lines'][0]);
         $this->assertArrayNotHasKey('total_amount', $viewerRow['payload']);
-        $this->assertSame('Sales - Local', $viewerRow['payload']['sales_ledger'], 'A ledger name is not a price');
+        // Every money key the GST rewrite added is withheld from this reader…
+        $this->assertArrayNotHasKey('party_amount', $viewerRow['payload']);
+        $this->assertArrayNotHasKey('taxable_value', $viewerRow['payload']);
+        $this->assertArrayNotHasKey('amount', $viewerRow['payload']['tax_ledgers'][0]);
+        // …and the LEDGER NAMES survive, because a ledger name is not a price.
+        $this->assertSame('Sales - Local', $viewerRow['payload']['lines'][0]['sales_ledger'], 'A ledger name is not a price');
+        $this->assertSame('CGST', $viewerRow['payload']['tax_ledgers'][0]['ledger']);
 
         $agentRow = collect($this->asAgent()->getJson('/api/v1/tally-sync/pending')->assertOk()->json('data'))->firstWhere('id', $entry->id);
         $this->assertSame('4.5000', $agentRow['payload']['lines'][0]['rate']);
-        $this->assertSame('9000.0000', $agentRow['payload']['total_amount']);
+        $this->assertSame('9000.0000', $agentRow['payload']['taxable_value']);
+        $this->assertSame('810.0000', $agentRow['payload']['tax_ledgers'][0]['amount'], 'the agent needs the figures the reader may not see');
     }
 }

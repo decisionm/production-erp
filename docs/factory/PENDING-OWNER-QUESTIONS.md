@@ -1901,7 +1901,94 @@ this answer.
 
 **Blocks:** nothing built. The return works under either answer.
 *Open since 2026-08-30.*
-## Q70 · Does a document reference from a retired warehouse prove the material is physically on the shelf today? — RESOLVED (DEC-20260831-001)
+
+## Q70 · Does the factory use Tally DELIVERY NOTES at all?
+
+The sales-side sibling of Q63, and the evidence points the same way Q63's did.
+The owner's stated fulfilment sequence is "Sales Order → Delivery Note / stock
+dispatch → Sales voucher", but the factory's own Tally does not contain that
+middle step:
+
+* `Transactions.xml` (the factory's July-2026 export) holds 195 Payments, 177
+  Sales, 134 Receipts, 126 Sales Orders, 82 Journals, 64 Purchases, 38 Stock
+  Journals, 15 Purchase Orders, 15 Contras and 1 Debit Note — and **ZERO
+  Delivery Notes**;
+* of those **177 real Sales vouchers, NONE references a delivery note**
+  (`INVOICEDELNOTES.LIST` is empty in all 177), while **163 reference a Sales
+  Order directly** (`INVOICEORDERLIST.LIST` → `ORDERTYPE` "Sales Order" +
+  `BASICPURCHASEORDERNO`), and 176 carry `ORDERNO` on their inventory lines.
+
+So the factory's real accounting sequence today is **Sales Order → Sales
+Invoice**, with the invoice referencing the order. Two possibilities and the
+code cannot choose: (a) the factory is ADOPTING Delivery Notes as a new
+practice, and the ERP should post them; or (b) it does not use them, and the
+ERP must stop — the DEC-20260830-001 outcome, one voucher type later.
+
+Until this is answered the ERP stages nothing: `tally-sync.delivery_notes_enabled`
+defaults OFF, fail-closed, and the listener no-ops. The ERP's own delivery, its
+stock movement and its trace are untouched either way — this is only about what
+reaches Tally. **Blocks:** any Delivery Note emission. *Open since 2026-08-30.*
+
+## Q71 · When the ERP issues an invoice, which book originates the sale?
+
+DEC-20260809-003 records that **ALL real sales are invoiced directly in Tally**
+and the ERP Sales module is demo-scale. Yet issuing an ERP invoice has been
+staging a Tally 'Sales' voucher with no gate at all. If Accounts also keys that
+invoice into Tally, **the sale is booked twice**.
+
+Independently of the business answer, the voucher the ERP would post is
+malformed: the builder declares itself "BEST-EFFORT TEMPLATE — NOT YET
+VALIDATED AGAINST A REAL TALLY INSTANCE", and against the factory's own export
+it emits **no CGST/SGST ledger entries and no `Rounding Off`**, one sales ledger
+where Tally uses per-line `ACCOUNTINGALLOCATIONS` (`Local Sales Taxable`), and
+nests `ALLINVENTORYENTRIES` inside `ALLLEDGERENTRIES` where Tally has them at
+voucher level. **A posted voucher would carry ZERO TAX.**
+
+`tally-sync.sales_invoices_enabled` therefore defaults OFF, fail-closed. Turning
+it on needs BOTH an Accounts answer here AND a builder validated field-by-field
+against a real export. **Blocks:** any Sales voucher emission. *Open since
+2026-08-30.*
+
+## Q72 · Q61 revisited — the Tally Sales Order register IS in use
+
+Q61 asks whether the ERP may emit a Tally "Sales Order" voucher, and notes as
+part of its premise that "Tally's own order register is not in use today as far
+as the evidence shows". **That premise is now contradicted by the evidence:**
+the factory's exports carry **126 Sales Order vouchers in July 2026** and **34
+in August** (`sales_order.xml`), with full party, GST, godown, batch and
+per-line `ORDERNO` detail — and 163 of July's Sales invoices reference them.
+
+This does not answer Q61 — whether the ERP may become the ORIGIN of those orders
+in Tally is still the owner's and Accounts' call, and the questions Q61 raises
+about who may then edit a Tally-held order, and what happens when the ERP
+cancels one, stand unchanged. But it should be answered knowing the register is
+real and in daily use, not assumed dormant. **Blocks:** nothing beyond what Q61
+already blocks. *Open since 2026-08-30.*
+
+## Q73 · What does it MEAN when the store rejects a quantity?
+
+The owner's fulfilment flow has the store approve a hold in full, approve it in
+part, or REJECT it, with production planning starting only for the quantity the
+store explicitly rejects or cannot fulfil. The ERP can express the first two —
+a hold is placed for the approved quantity — but it has **no field for a
+rejection**: reservations live `active / released / consumed`, and a release may
+equally be a re-point, a correction or a cancellation. A rejection is therefore
+not a fact this database holds, and the control view reports it as
+`not_recorded` rather than inferring it from a release.
+
+Before the column is built, three things only the factory can settle: (a) does
+rejecting a quantity END that quantity's claim on stock, or may a later store
+decision re-offer it? (b) does a rejection AUTOMATICALLY raise the production
+request for that quantity, or is asking the floor still a separate deliberate
+act? (c) must a rejection carry a reason from a fixed list (no stock / quality /
+customer on hold / other), and who may overturn one?
+
+Related: **Q62** (contested stock — whose hold survives) and **Q27** (whether a
+QC pass is required before dispatch, which the owner's flow answers as YES but
+which is not yet a decision record). **Blocks:** the store-decision record, and
+with it the "production plans only the rejected quantity" rule. *Open since
+2026-08-30.*
+## Q74 · Does a document reference from a retired warehouse prove the material is physically on the shelf today? — RESOLVED (DEC-20260831-001)
 
 `inventory:preview-warehouse-recovery` lists the stock standing in
 warehouses no picker offers and classifies each row from its own movement
@@ -1922,7 +2009,7 @@ which reference wordings prove present physical stock?
 **Blocks:** any recovery of the DOCUMENTED rows. The preview itself is
 read-only and safe to run under either answer. *Open since 2026-08-30.*
 
-## Q71 · What happens to the opening-balance and wiring-check stock in the retired warehouses?
+## Q75 · What happens to the opening-balance and wiring-check stock in the retired warehouses?
 
 The same preview withholds every OPENING and TEST row. On the live instance
 these are the larger share: the retired RM store's rows are backed almost
@@ -1937,7 +2024,7 @@ is itself a stock movement.
 
 **Blocks:** closing out the retired warehouses. *Open since 2026-08-30.*
 
-## Q72 · Recovering stranded stock would re-value the Store's stock of the same item — is that acceptable to Accounts?
+## Q76 · Recovering stranded stock would re-value the Store's stock of the same item — is that acceptable to Accounts?
 
 A stock transfer carries the source row's average cost into the destination,
 where the weighted average is recomputed. So recovering a stranded row does
@@ -1949,10 +2036,10 @@ What is asked: does Accounts accept the re-valuation, should the recovery
 carry a different cost, or should the quantity move without disturbing the
 average?
 
-**Blocks:** any recovery, including the DOCUMENTED rows Q70 covers. *Open
+**Blocks:** any recovery, including the DOCUMENTED rows Q74 covers. *Open
 since 2026-08-30.*
 
-## Q73 · Which materials must a goods receipt record lots and bags for?
+## Q77 · Which materials must a goods receipt record lots and bags for?
 
 Lot and bag traceability is switched on and has never produced a row: the
 lots block is optional on a goods receipt, so omitting it creates no lot and
@@ -1974,7 +2061,7 @@ question is the third of that set and they are best answered together.
 **Blocks:** making the traceability workflow operational for future
 receipts. *Open since 2026-08-30.*
 
-## Q74 · Is there a store-acceptance step for finished goods, and may the Storekeeper approve dispatch?
+## Q78 · Is there a store-acceptance step for finished goods, and may the Storekeeper approve dispatch?
 
 The Storekeeper role now exists as a definition
 (`roles:define-storekeeper`, dry-run first). Two of the capabilities asked
@@ -1996,7 +2083,7 @@ Sales, or does the Storekeeper simply not do it?
 **Blocks:** those two capabilities only. The rest of the Storekeeper role
 works without them. *Open since 2026-08-30.*
 
-## Q75 · What should the stock screen call the quantity a storekeeper may act on? — RESOLVED (DEC-20260831-002)
+## Q79 · What should the stock screen call the quantity a storekeeper may act on? — RESOLVED (DEC-20260831-002)
 
 The stock list can be decomposed per row into on-hand, quantity held for
 incoming QC, quantity reserved for a customer line, and quantity standing in

@@ -10,6 +10,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -39,7 +40,7 @@ use Tests\TestCase;
  */
 abstract class PerTypeLifecycleTestCase extends TestCase
 {
-    use RefreshDatabase;
+    use RefreshDatabase, SeedsSalesTallyMasterData;
 
     /** The installation's token, issued exactly as the Agent Tokens page issues it. */
     private ?string $agentToken = null;
@@ -178,6 +179,16 @@ abstract class PerTypeLifecycleTestCase extends TestCase
 
     public function test_the_lifecycle_walks_the_real_endpoints_in_order(): void
     {
+        // The master data a GST-correct Sales voucher needs before the domain
+        // act: SalesVoucherPayload refuses — and stages NOTHING, so there is no
+        // lifecycle to walk — without the registration, the ledger roles, an
+        // HSN and rate per item and a single resolvable godown. It sits here
+        // rather than in setUp() because a concrete class makes its items,
+        // customers and warehouses AFTER parent::setUp(); the trait completes
+        // only what it finds blank and adds a Tally-linked warehouse only where
+        // the type made none (two would make the godown ambiguous).
+        $this->seedSalesTallyMasterData();
+
         $entry = $this->enqueueViaDomain();
         $id = $entry->id;
         $document = $this->expectedDocumentNumber($entry);
@@ -302,6 +313,9 @@ abstract class PerTypeLifecycleTestCase extends TestCase
 
     public function test_a_failed_voucher_can_be_dismissed_and_a_dismissed_one_never_retried(): void
     {
+        // Masters before the domain act, as in the lifecycle test above.
+        $this->seedSalesTallyMasterData();
+
         $entry = $this->enqueueViaDomain();
         $id = $entry->id;
         $document = $this->expectedDocumentNumber($entry);
@@ -357,6 +371,9 @@ abstract class PerTypeLifecycleTestCase extends TestCase
 
     public function test_a_user_without_tally_sync_view_is_refused_on_list_show_and_summary(): void
     {
+        // Masters before the domain act, as in the lifecycle test above.
+        $this->seedSalesTallyMasterData();
+
         $entry = $this->enqueueViaDomain();
 
         $this->asUser($this->nobody());
@@ -378,6 +395,9 @@ abstract class PerTypeLifecycleTestCase extends TestCase
 
     public function test_enqueueing_the_same_source_twice_leaves_exactly_one_row(): void
     {
+        // Masters before the domain act, as in the lifecycle test above.
+        $this->seedSalesTallyMasterData();
+
         $entry = $this->enqueueViaDomain();
 
         $this->attemptDuplicateEnqueue($entry);
