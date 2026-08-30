@@ -79,6 +79,23 @@ class EntryPresenter
      * — but it has never posted to a real Tally, and will not until the
      * owner flips tally-sync.purchase_orders_enabled (Q35).
      */
+    /**
+     * The Sales builder's own status line, replacing the retired
+     * "BEST-EFFORT TEMPLATE" admission. The builder was rewritten on
+     * 31-Aug-2026 against the factory's 55 real Sales vouchers: it now emits
+     * CGST/SGST or IGST, 'Rounding Off', a godown and a per-line accounting
+     * allocation, and debits the party the TAX-INCLUSIVE total. So the old note
+     * — "doesn't yet emit GST tax ledger entries" — became false, and a false
+     * honesty flag is worse than none.
+     *
+     * What is still true, and what this line says instead: it has never posted
+     * to a real Tally, and it cannot until the GST master data exists (the live
+     * instance has an empty tally_ledger_mappings, a placeholder company GSTIN
+     * and an HSN on 11 of 146 items) and the owner answers who mints the invoice
+     * number.
+     */
+    private const SALES_STAGED_LINE = 'DERIVED FROM THE STRUCTURE OF 55 REAL SALES VOUCHER EXPORTS — NOT YET POSTED TO A REAL TALLY (flag off; owner gate Q70 and the GST master data)';
+
     private const PURCHASE_ORDER_STAGED_LINE = 'DERIVED FROM THE STRUCTURE OF 107 REAL PURCHASE ORDER EXPORTS — NOT YET POSTED TO A REAL TALLY (flag off; owner gate Q35)';
 
     /**
@@ -548,10 +565,19 @@ class EntryPresenter
         // carry no such line and are not flagged.
         $unvalidated = match ($category) {
             TallyTransactionCategory::SalesInvoice => [
-                'note' => 'The agent\'s Sales voucher builder is, in its own words, a "'.self::UNVALIDATED_LINE.'" that '
-                    .'"doesn\'t yet emit GST tax ledger entries (CGST/SGST/IGST)". Real sales are invoiced in Tally '
-                    .'(DEC-20260809-003); do not post real invoices from the ERP while that decision stands.',
+                'note' => 'The agent\'s Sales voucher builder is, in its own words, "'.self::SALES_STAGED_LINE.'" — '
+                    .'rebuilt against the factory\'s own 55 real Sales vouchers, so it now emits CGST/SGST or IGST '
+                    .'and Rounding Off, and debits the party the tax-inclusive total. It has still never posted '
+                    .'to a real Tally, and it cannot until the GST master data is complete and Accounts settles which '
+                    .'book mints the invoice number. Real sales are invoiced in Tally (DEC-20260809-003); that decision '
+                    .'stands until a superseding one is recorded.',
                 'builder' => self::SALES_BUILDER,
+                // THE DECISION STILL STANDS. DEC-20260809-003 records that all
+                // real sales are invoiced directly in Tally, and a decision is
+                // superseded by a RECORD, never by a rewrite or a conversation.
+                // The builder being correct now does not retire it; until the
+                // owner records the move to ERP-originated sales, this flag
+                // keeps naming the decision that governs the question.
                 'decision' => 'DEC-20260809-003',
             ],
             TallyTransactionCategory::ReceiptNote => [

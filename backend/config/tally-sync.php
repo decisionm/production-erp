@@ -281,4 +281,26 @@ return [
 
     'sales_invoices_enabled' => (bool) env('TALLY_SYNC_SALES_INVOICES_ENABLED', false),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Sales Invoice → Tally: the allowed Tally company (fail-closed)
+    |--------------------------------------------------------------------------
+    |
+    | The same rule as the Purchase Order and Receipt Note company gates, and on
+    | this voucher it is the one that matters most. The factory's own Sales
+    | export was taken from a company literally named
+    | "SWAASHPET POLYMERS PVT LTD Testing", and the same file carries two other
+    | company strings ("... 26-27" as the remote company name, and the bare
+    | "SWAASHPET POLYMERS PVT LTD" as the godown). They are NOT interchangeable,
+    | and an agent that guessed would post real sales into a test ledger.
+    |
+    | Blank-after-trim or unset REFUSES staging even while sales_invoices_enabled
+    | is true. The trimmed value rides the payload as `allowed_company` and the
+    | desktop agent compares it BYTE-FOR-BYTE against its own configured company
+    | before it builds anything.
+    |
+    */
+
+    'sales_invoices_allowed_company' => env('TALLY_SYNC_SALES_INVOICES_ALLOWED_COMPANY'),
+
 ];

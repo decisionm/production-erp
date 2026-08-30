@@ -138,10 +138,37 @@ class EntryMappingSurface
             $party = ['name' => $partyName] + $this->resolver->ledgerName($partyName);
         }
 
+        // THE SALES LEDGER MOVED, and the role it is judged against moved with
+        // it. Before 31-Aug-2026 the Sales payload carried ONE top-level
+        // `sales_ledger` mapped from the single `sales` role. The GST-correct
+        // payload writes the ledger PER LINE and chooses between two roles by
+        // the supply type — `sales_local` (CGST+SGST) or `sales_interstate`
+        // (IGST) — because the factory's own vouchers use exactly two ledgers,
+        // 'Local Sales Taxable' and 'Interstate Sales Taxable'.
+        //
+        // Reading the old place still would show the mapping drawer a NAMELESS
+        // row wearing a green "identity" badge derived from a vestigial role
+        // nothing writes any more — and it would flip to "unmapped" if anyone
+        // cleared that stale `sales` row, even though the real mappings were
+        // correct. Both readings are lies about configuration.
+        //
+        // OLD QUEUED ROWS STILL READ CORRECTLY: a payload that carries the
+        // top-level key is judged the old way, because that is genuinely what
+        // it was staged from.
         $salesLedger = null;
         if ($shape['sales_ledger']) {
-            $salesName = $this->name($payload['sales_ledger'] ?? null);
-            $salesLedger = ['name' => $salesName] + $this->resolver->ledgerRole(TallyLedgerRole::Sales, $salesName);
+            if (array_key_exists('sales_ledger', $payload)) {
+                $salesName = $this->name($payload['sales_ledger'] ?? null);
+                $salesRole = TallyLedgerRole::Sales;
+            } else {
+                $firstLine = is_array($payload['lines'][0] ?? null) ? $payload['lines'][0] : [];
+                $salesName = $this->name($firstLine['sales_ledger'] ?? null);
+                $salesRole = ($payload['supply_type'] ?? null) === 'intra_state'
+                    ? TallyLedgerRole::SalesLocal
+                    : TallyLedgerRole::SalesInterstate;
+            }
+
+            $salesLedger = ['name' => $salesName] + $this->resolver->ledgerRole($salesRole, $salesName);
         }
 
         // The Purchase Order's purchase ledger (TallyLedgerRole::Purchase —

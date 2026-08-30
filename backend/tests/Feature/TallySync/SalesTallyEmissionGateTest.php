@@ -117,15 +117,32 @@ class SalesTallyEmissionGateTest extends TestCase
         $this->assertSame(0, TallySyncEntry::query()->count(), 'the listener no-ops rather than staging a Sales voucher');
     }
 
-    public function test_with_the_flag_on_issuing_an_invoice_stages_exactly_one_sales_voucher(): void
+    /**
+     * THE SECOND LOCK, and the more important one now. Opening the feature flag
+     * is NOT sufficient to stage a Sales voucher: SalesVoucherPayload refuses
+     * unless the master data a GST-correct voucher needs is actually present —
+     * the customer's Tally ledger name, its state, an HSN and rate per item, the
+     * sales and tax ledger mappings, and a resolvable godown.
+     *
+     * This fixture invoice has none of that, which is exactly the state a live
+     * instance is in today (tally_ledger_mappings is empty, and 11 of 146 items
+     * carry an HSN). So the flag is on and NOTHING is staged — which is the
+     * whole point: the old builder would have happily staged a zero-tax voucher
+     * here. `SalesVoucherPayloadTest` covers the complete-data path.
+     */
+    public function test_the_flag_alone_does_not_stage_a_voucher_without_the_master_data(): void
     {
         config(['tally-sync.sales_invoices_enabled' => true]);
 
         $invoice = $this->draftInvoice();
         $invoice->update(['status' => InvoiceStatus::Issued]);
 
-        $entry = TallySyncEntry::query()->sole();
-        $this->assertSame('Sales', $entry->tally_voucher_type);
+        $this->assertSame(
+            0,
+            TallySyncEntry::query()->count(),
+            'an invoice whose GST/ledger master data is incomplete stages NOTHING rather than a malformed voucher',
+        );
+        $this->assertSame(InvoiceStatus::Issued, $invoice->fresh()->status, 'and the ERP invoice still issues');
     }
 
     /**

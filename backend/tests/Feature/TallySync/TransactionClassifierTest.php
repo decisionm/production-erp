@@ -36,6 +36,7 @@ use App\Modules\TallySync\Services\TransactionClassifier;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -51,6 +52,7 @@ use Tests\TestCase;
 class TransactionClassifierTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     protected function setUp(): void
     {
@@ -66,12 +68,26 @@ class TransactionClassifierTest extends TestCase
 
     public function test_a_sales_invoice_classifies_as_sales_invoice(): void
     {
+        // SalesVoucherPayload refuses — and stages NOTHING — without the GST
+        // registration, the ledger mappings, a single Tally-linked godown, and
+        // an HSN / state / Tally ledger name on this invoice's own item and
+        // customer. So those two are REAL ROWS here, unlike the stand-ins the
+        // other fixtures below keep: the trait completes rows, not in-memory
+        // models. Seeded HERE, immediately before the invoice is issued,
+        // rather than in setUp(): the godown it adds would otherwise become
+        // the sole Tally-linked warehouse for the delivery and production
+        // vouchers too, which have no need of it. Re-read after the seeding —
+        // it fills the rows through its own instances, so these would be stale.
+        $item = Item::firstOrCreate(['sku' => 'BTL-500'], ['name' => '500ml PET Bottle', 'uom' => 'NOS']);
+        $customer = Customer::firstOrCreate(['code' => 'CUST-1'], ['name' => 'Sri Aurobindo Beverages']);
+        $this->seedSalesTallyMasterData();
+
         $line = new InvoiceLine(['quantity' => '1000.0000', 'unit_price' => '4.5000']);
-        $line->setRelation('item', new Item(['sku' => 'BTL-500', 'name' => '500ml PET Bottle']));
+        $line->setRelation('item', $item->fresh());
 
         $invoice = $this->existing(new Invoice(['invoice_date' => '2026-08-01']), 5);
         $invoice->setRelation('lines', collect([$line]));
-        $invoice->setRelation('customer', new Customer(['name' => 'Sri Aurobindo Beverages']));
+        $invoice->setRelation('customer', $customer->fresh());
 
         $entry = app(TallySyncService::class)->enqueueSalesInvoice($invoice);
 

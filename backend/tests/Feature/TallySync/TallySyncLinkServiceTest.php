@@ -20,6 +20,7 @@ use App\Modules\TallySync\Services\TallySyncLinkService;
 use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -49,6 +50,7 @@ use Tests\TestCase;
 class TallySyncLinkServiceTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     private Item $bottle;
 
@@ -65,6 +67,17 @@ class TallySyncLinkServiceTest extends TestCase
         $customer = Customer::create(['code' => 'CUST-1', 'name' => 'Aqua Traders', 'gstin' => '33AAACA1111A1Z5']);
         $this->order = SalesOrder::create(['customer_id' => $customer->id, 'status' => SalesOrderStatus::Confirmed, 'order_date' => '2026-08-02']);
         $this->order->lines()->create(['item_id' => $this->bottle->id, 'quantity' => '2000', 'unit_price' => '4.50', 'quantity_delivered' => 0]);
+
+        // The Sales voucher is this file's FIXTURE VEHICLE, not its subject:
+        // issuedInvoice() below exists only to put a row in the queue for the
+        // link to point at. SalesVoucherPayload now refuses to stage one — and
+        // stages NOTHING — without the GST masters (registration, ledger roles,
+        // an HSN per item, a Tally ledger name and state on the customer, one
+        // resolvable godown), so they are seeded here, at the end of setUp(),
+        // where the item, the customer and the order already exist and before
+        // any test issues the invoice. No godown is added: $this->fg is already
+        // the sole Tally-linked warehouse, and a second would make it ambiguous.
+        $this->seedSalesTallyMasterData();
     }
 
     // ---- for() ------------------------------------------------------------

@@ -31,6 +31,7 @@ use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -59,6 +60,7 @@ use Tests\TestCase;
 class GenericEnqueueReplayTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     private Item $bottle;
 
@@ -79,7 +81,13 @@ class GenericEnqueueReplayTest extends TestCase
         $this->bottle = Item::create(['sku' => 'BTL-500', 'name' => '500ml PET Bottle', 'uom' => 'Nos', 'tally_stock_item_guid' => 'itm-bottle']);
         $this->resin = Item::create(['sku' => 'RES-1', 'name' => 'PET Resin', 'uom' => 'Kgs', 'tally_stock_item_guid' => 'itm-resin']);
         $this->fg = Warehouse::create(['code' => 'FG', 'name' => 'FG Store', 'tally_guid' => 'gd-fg']);
-        $this->rm = Warehouse::create(['code' => 'RM', 'name' => 'RM Store', 'tally_guid' => 'gd-rm']);
+        // The RM store is a LOCAL store, not a second Tally godown: this factory
+        // has exactly ONE godown, and two Tally-linked warehouses would make the
+        // Sales voucher's godown genuinely ambiguous — SalesVoucherPayload would
+        // refuse with godown_unresolved and stage nothing to replay. The receipt
+        // note below is unaffected: an unlinked warehouse posts under the one
+        // linked godown (TallyGodownResolver rule 3), as the factory's bins do.
+        $this->rm = Warehouse::create(['code' => 'RM', 'name' => 'RM Store']);
 
         app(StockMovementService::class)->recordReceipt(
             itemId: $this->bottle->id, warehouseId: $this->fg->id, quantity: '5000', unitCost: '2.50', reference: 'seed',
@@ -89,6 +97,15 @@ class GenericEnqueueReplayTest extends TestCase
         $customer = Customer::create(['code' => 'CUST-1', 'name' => 'Aqua Traders', 'gstin' => '33AAACA1111A1Z5']);
         $this->order = SalesOrder::create(['customer_id' => $customer->id, 'status' => SalesOrderStatus::Confirmed, 'order_date' => '2026-08-09']);
         $this->line = $this->order->lines()->create(['item_id' => $this->bottle->id, 'quantity' => '2000', 'unit_price' => '4.50', 'quantity_delivered' => 0]);
+
+        // The Sales voucher is this file's FIXTURE VEHICLE, not its subject, and
+        // SalesVoucherPayload now stages NOTHING without the GST masters behind it
+        // (registration, ledger roles, an HSN and rate per item, the customer's
+        // Tally name and state) — the invoice replay below would have no row to
+        // watch. Last in setUp, so the items and the customer above are there to
+        // complete; the FG store above is the single Tally-linked godown, so the
+        // trait adds none.
+        $this->seedSalesTallyMasterData();
     }
 
     // ---- actors -----------------------------------------------------------

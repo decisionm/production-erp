@@ -29,6 +29,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -56,6 +57,7 @@ use Tests\TestCase;
 class SyncQueryFiltersTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     private Shift $morning;
 
@@ -100,6 +102,16 @@ class SyncQueryFiltersTest extends TestCase
         $this->fgStore = Warehouse::create(['code' => 'WH-FG', 'name' => 'FG Store']);
         $this->rmStore = Warehouse::create(['code' => 'WH-RM', 'name' => 'RM Store']);
 
+        // The Sales voucher is this file's FIXTURE VEHICLE, not its subject,
+        // and SalesVoucherPayload now refuses to stage one without the GST
+        // masters — registration, ledger roles, an HSN per item, one godown.
+        // Seeded before the queue is built, since the invoice is issued there;
+        // neither warehouse above is Tally-linked, so the godown the trait adds
+        // stays the only one and resolves. The seeding writes to the ROWS, so
+        // the item this file already holds is re-read from its own.
+        $this->seedSalesTallyMasterData();
+        $this->bottle->refresh();
+
         // 10:00 on 23 July: the morning shift is collecting, so the shift
         // voucher enqueued below is HELD by the gate.
         Carbon::setTestNow(Carbon::parse('2026-07-23 10:00:00', 'UTC'));
@@ -126,7 +138,15 @@ class SyncQueryFiltersTest extends TestCase
         $this->entries['grn'] = $sync->enqueueGoodsReceiptNote($this->goodsReceipt(7, '2026-08-04', 'Reliance Industries'));
         $this->entries['dn3'] = $sync->enqueueDelivery($this->delivery(3, '2026-08-03', 'Sri Aurobindo Beverages'));
 
-        $this->entries['inv'] = $sync->enqueueSalesInvoice($this->invoice(5, '2026-08-01', 'Sri Aurobindo Beverages'));
+        // The invoice's customer row is minted by invoice() below, after the
+        // seeding in setUp() ran — so complete it (Tally ledger name, GSTIN,
+        // state) and re-read those onto the instance the voucher is assembled
+        // from, before the voucher is assembled.
+        $invoice = $this->invoice(5, '2026-08-01', 'Sri Aurobindo Beverages');
+        $this->completeSalesTallyMastersOnExistingRows();
+        $invoice->customer->refresh();
+
+        $this->entries['inv'] = $sync->enqueueSalesInvoice($invoice);
         $sync->markSynced($this->entries['inv']);
 
         $this->entries['je'] = $sync->enqueueJournalEntry($this->journal(4, '2026-08-02', 'JE-REF-9'));
@@ -493,11 +513,19 @@ class SyncQueryFiltersTest extends TestCase
     private function invoice(int $id, string $date, string $customer): Invoice
     {
         $line = new InvoiceLine(['quantity' => '1000.0000', 'unit_price' => '4.5000']);
-        $line->setRelation('item', new Item(['sku' => 'BTL-500', 'name' => '500ml PET Bottle']));
+        // The PERSISTED bottle, unlike the delivery fixture's stand-in: the GST
+        // breakdown reads the item's HSN and the voucher line its uom, and only
+        // a real row carries what the masters seeding wrote.
+        $line->setRelation('item', $this->bottle);
 
         $invoice = $this->existing(new Invoice(['invoice_date' => $date]), $id);
         $invoice->setRelation('lines', collect([$line]));
-        $invoice->setRelation('customer', new Customer(['name' => $customer]));
+        // A real customer for the same reason — the Sales voucher's party is
+        // its tally_ledger_name (still the name below, so q=aurobindo is
+        // unchanged), and its gstin/state_code decide the local/interstate
+        // split. The delivery fixtures keep their in-memory customers: that
+        // path reads name and nothing else.
+        $invoice->setRelation('customer', Customer::create(['code' => "CUST-{$id}", 'name' => $customer]));
 
         return $invoice;
     }

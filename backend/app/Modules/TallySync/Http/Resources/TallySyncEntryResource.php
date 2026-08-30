@@ -63,7 +63,26 @@ class TallySyncEntryResource extends JsonResource
      */
     private const LINE_RATE_KEYS = ['rate', 'amount', 'debit', 'credit'];
 
-    private const TOTAL_RATE_KEYS = ['total_amount'];
+    /**
+     * TOP-LEVEL MONEY KEYS, withheld from a reader without finance standing.
+     *
+     * `total_amount` was the whole list until the Sales voucher was rebuilt on
+     * 31-Aug-2026. The GST-correct payload carries four more figures at the top
+     * — the tax-inclusive `party_amount` and the pre-tax `taxable_value` — and
+     * the FC-06 walk in SyncPayloadRateVisibilityTest caught them the moment
+     * they appeared, which is exactly what that walk exists for. `total_amount`
+     * stays listed: older queued rows still carry it.
+     */
+    private const TOTAL_RATE_KEYS = ['total_amount', 'party_amount', 'taxable_value'];
+
+    /**
+     * Money nested one level down, in the Sales voucher's tax and rounding
+     * lines. `tax_ledgers` is a list of {ledger, amount}; `round_off` is a
+     * single {ledger, amount} or null. The LEDGER NAMES are configuration and
+     * stay visible — a reader may see that a voucher posts to IGST; only the
+     * FIGURE is withheld.
+     */
+    private const NESTED_LEDGER_AMOUNT_KEYS = ['tax_ledgers', 'round_off'];
 
     /**
      * The payload keys that name the supplier on a supplier-party voucher
@@ -276,6 +295,22 @@ class TallySyncEntryResource extends JsonResource
 
         foreach (self::TOTAL_RATE_KEYS as $key) {
             unset($payload[$key]);
+        }
+
+        // The Sales voucher's tax and rounding figures. Strip the AMOUNT and
+        // keep the ledger name: which ledger a voucher posts to is
+        // configuration a reader may see; what it posts is not.
+        foreach (self::NESTED_LEDGER_AMOUNT_KEYS as $key) {
+            if (! isset($payload[$key]) || ! is_array($payload[$key])) {
+                continue;
+            }
+
+            $payload[$key] = array_is_list($payload[$key])
+                ? array_values(array_map(
+                    fn ($entry) => is_array($entry) ? array_diff_key($entry, ['amount' => true]) : $entry,
+                    $payload[$key],
+                ))
+                : array_diff_key($payload[$key], ['amount' => true]);
         }
 
         if ($withholdsSupplier) {

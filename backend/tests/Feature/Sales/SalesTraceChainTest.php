@@ -22,6 +22,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -52,6 +53,7 @@ use Tests\TestCase;
 class SalesTraceChainTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     private Item $bottle;
 
@@ -82,6 +84,16 @@ class SalesTraceChainTest extends TestCase
         app(StockMovementService::class)->recordReceipt(
             itemId: $this->bottle->id, warehouseId: $this->fg->id, quantity: '5000', unitCost: '2.50', reference: 'seed',
         );
+
+        // The Sales voucher is this chain's fixture VEHICLE, not its subject —
+        // the invoice is issued to put a 'Sales' row in the queue to read back.
+        // SalesVoucherPayload now refuses (and stages NOTHING) without the GST
+        // registration, the tax/sales ledger mappings, an HSN and rate per item
+        // and the customer's ledger name and state, so they are seeded LAST:
+        // the item, the customer and the single Tally-linked FG store above
+        // already exist, and the trait completes them without overwriting
+        // anything set here (it adds no second godown, which would be ambiguous).
+        $this->seedSalesTallyMasterData();
     }
 
     // ---- actors -------------------------------------------------------------

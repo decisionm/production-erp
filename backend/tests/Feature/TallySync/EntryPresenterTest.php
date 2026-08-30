@@ -39,6 +39,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -58,6 +59,7 @@ use Tests\TestCase;
 class EntryPresenterTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     private const BACKFILL_MIGRATION = 'database/migrations/2026_08_16_100001_backfill_tally_sync_events.php';
 
@@ -313,11 +315,34 @@ class EntryPresenterTest extends TestCase
         $presenter = app(EntryPresenter::class);
         $unvalidated = 'BEST-EFFORT TEMPLATE — NOT YET VALIDATED AGAINST A REAL TALLY INSTANCE';
 
-        // Sales: the shared line, PLUS its GST gap (salesInvoice.ts:28-32)
-        // and the decision that keeps real sales in Tally.
+        // SALES NO LONGER SHARES THE UNVALIDATED LINE, and this is the
+        // assertion that keeps that honest. The builder was rewritten on
+        // 31-Aug-2026 against the factory's own 55 real Sales vouchers: it now
+        // emits CGST/SGST or IGST and Rounding Off and debits the party the
+        // tax-inclusive total, so the old note — "doesn't yet emit GST tax
+        // ledger entries" — became FALSE, and a false honesty flag is worse
+        // than no flag at all.
+        //
+        // What replaced it is weaker in claim and stronger in truth: derived
+        // from real exports, but never yet posted to a real Tally. The
+        // decision that governs whether it may post AT ALL still stands and is
+        // still named.
         $sales = $presenter->flags($this->enqueueSalesInvoice())['unvalidated_builder'];
-        $this->assertStringContainsString($unvalidated, $sales['note']);
-        $this->assertStringContainsString("doesn't yet emit GST tax ledger entries (CGST/SGST/IGST)", $sales['note']);
+        $this->assertStringContainsString(
+            'NOT YET POSTED TO A REAL TALLY',
+            $sales['note'],
+            'the Sales builder must still say plainly that it has never posted to a real Tally',
+        );
+        $this->assertStringNotContainsString(
+            $unvalidated,
+            $sales['note'],
+            'the retired "BEST-EFFORT TEMPLATE" admission must not outlive the template it described',
+        );
+        $this->assertStringNotContainsString(
+            "doesn't yet emit GST tax ledger entries",
+            $sales['note'],
+            'the builder DOES emit GST now — repeating the old gap would be a false warning',
+        );
         $this->assertStringContainsString('DEC-20260809-003', $sales['note']);
         $this->assertSame('tally-sync-agent/src/tally/voucherBuilders/salesInvoice.ts', $sales['builder']);
         $this->assertSame('DEC-20260809-003', $sales['decision']);
@@ -531,14 +556,33 @@ class EntryPresenterTest extends TestCase
         return TallySyncEntry::query()->where('tally_voucher_type', 'Receipt Note')->latest('id')->firstOrFail();
     }
 
+    /**
+     * SalesVoucherPayload refuses — and stages NOTHING — without the GST
+     * registration, the ledger mappings, a single Tally-linked godown, and an
+     * HSN / state / Tally ledger name on the invoice's own item and customer.
+     * So the master data is seeded HERE, immediately before the invoice is
+     * issued, rather than in setUp(): the seeded godown is the only Tally-linked
+     * warehouse, and TallyGodownResolver aliases every unlinked warehouse to it,
+     * which would rename the godowns the delivery and production summaries above
+     * assert. Only the vouchers that need it should see it.
+     *
+     * The item and the customer are REAL ROWS here (the other helpers'
+     * stand-ins stay in memory) because the trait completes rows, not
+     * in-memory models — and they are re-read afterwards, since it fills them
+     * through its own instances and these two would otherwise be stale.
+     */
     private function enqueueSalesInvoice(): TallySyncEntry
     {
+        $item = Item::firstOrCreate(['sku' => 'BTL-500'], ['name' => '500ml PET Bottle', 'uom' => 'NOS']);
+        $customer = Customer::firstOrCreate(['code' => 'CUST-1'], ['name' => 'Sri Aurobindo Beverages']);
+        $this->seedSalesTallyMasterData();
+
         $line = new InvoiceLine(['quantity' => '1000.0000', 'unit_price' => '4.5000']);
-        $line->setRelation('item', new Item(['sku' => 'BTL-500', 'name' => '500ml PET Bottle']));
+        $line->setRelation('item', $item->fresh());
 
         $invoice = $this->existing(new Invoice(['invoice_date' => '2026-08-01']), 5);
         $invoice->setRelation('lines', collect([$line]));
-        $invoice->setRelation('customer', new Customer(['name' => 'Sri Aurobindo Beverages']));
+        $invoice->setRelation('customer', $customer->fresh());
 
         return app(TallySyncService::class)->enqueueSalesInvoice($invoice);
     }

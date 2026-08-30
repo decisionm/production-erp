@@ -24,6 +24,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -66,37 +67,58 @@ class TallySyncService
         // between the two writes there leaves the state change in place and
         // the event missing, never the reverse.
         private readonly TallySyncEventRecorder $events,
+        private readonly SalesVoucherPayload $salesVoucher,
     ) {}
 
-    public function enqueueSalesInvoice(Invoice $invoice): TallySyncEntry
+    /**
+     * An issued ERP invoice → Tally 'Sales' voucher.
+     *
+     * REWRITTEN 31-Aug-2026 against the factory's own 55 real Sales vouchers.
+     * The payload this used to build carried only {item, quantity, rate, amount}
+     * and one ledger name, and the voucher the agent made from it had no GST, no
+     * 'Rounding Off' and a party debited the PRE-TAX total. SalesVoucherPayload
+     * assembles the real thing — per-line sales ledger, CGST+SGST or IGST, the
+     * rounding plug, godown, party GSTIN and place of supply — or REFUSES with
+     * named reasons.
+     *
+     * RETURNS NULL ON A REFUSAL, and never throws: issuing an invoice is the
+     * factory's act and must not fail because Tally staging could not be
+     * assembled. The reasons are logged where the accountant's desk can be
+     * pointed at them. (A `tally_staging` column on the invoice — the shape the
+     * goods-receipt path uses to put the refusal on the document itself — is the
+     * natural follow-up and needs a migration, so it is deliberately not done
+     * here in the same change as the accounting fix.)
+     */
+    public function enqueueSalesInvoice(Invoice $invoice): ?TallySyncEntry
     {
-        $invoice->loadMissing(['lines.item', 'customer']);
+        $allowedCompany = config('tally-sync.sales_invoices_allowed_company');
+        $allowedCompany = is_string($allowedCompany) && trim($allowedCompany) !== '' ? trim($allowedCompany) : null;
 
-        $lines = $invoice->lines->map(fn ($line) => [
-            // The exact Tally stock-item name (items are pulled from Tally, so
-            // item->name IS the Tally name) — this is what a voucher's
-            // <STOCKITEMNAME> must match. Never "sku - name".
-            'item' => $line->item->name,
-            'quantity' => $line->quantity,
-            'rate' => $line->unit_price,
-            'amount' => bcmul($line->quantity, $line->unit_price, 4),
-        ])->all();
+        if ($allowedCompany === null) {
+            Log::warning('Invoice issued; Tally Sales staging refused — no allowed Tally company is configured.', [
+                'invoice_id' => $invoice->id,
+                'reasons' => [[
+                    'code' => 'allowed_company_unconfigured',
+                    'detail' => 'tally-sync.sales_invoices_allowed_company is blank. The factory\'s own export was taken '
+                        .'from a company named "... Testing", so the destination is never assumed.',
+                ]],
+            ]);
 
-        $totalAmount = array_reduce($lines, fn ($carry, $line) => bcadd($carry, $line['amount'], 4), '0.0000');
+            return null;
+        }
 
-        return $this->enqueue($invoice, 'Sales', [
-            'voucher_type' => 'Sales',
-            'voucher_date' => $invoice->invoice_date?->toDateString(),
-            'voucher_number' => "INV-{$invoice->id}",
-            'party_ledger' => $invoice->customer->name,
-            'party_gstin' => $invoice->customer->gstin,
-            // The configured Sales ledger (Settings → Ledger Mappings) instead of
-            // a hardcoded "Sales Account", so each client posts to their own.
-            'sales_ledger' => $this->ledgerMappings->get(TallyLedgerRole::Sales),
-            'narration' => $invoice->notes,
-            'lines' => $lines,
-            'total_amount' => $totalAmount,
-        ]);
+        $built = $this->salesVoucher->forInvoice($invoice);
+
+        if ($built['payload'] === null) {
+            Log::warning('Invoice issued; Tally Sales staging refused — the voucher could not be assembled correctly.', [
+                'invoice_id' => $invoice->id,
+                'reasons' => $built['reasons'],
+            ]);
+
+            return null;
+        }
+
+        return $this->enqueue($invoice, 'Sales', $built['payload'] + ['allowed_company' => $allowedCompany]);
     }
 
     public function enqueueJournalEntry(JournalEntry $entry): TallySyncEntry

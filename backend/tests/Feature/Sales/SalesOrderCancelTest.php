@@ -18,6 +18,7 @@ use App\Modules\TallySync\Models\TallySyncEvent;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -44,6 +45,7 @@ use Tests\TestCase;
 class SalesOrderCancelTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     private Item $bottle;
 
@@ -63,6 +65,13 @@ class SalesOrderCancelTest extends TestCase
         $this->bottle = Item::create(['sku' => 'BTL-500', 'name' => '500ml PET Bottle', 'uom' => 'Nos', 'tally_stock_item_guid' => 'itm-bottle']);
         $this->fg = Warehouse::create(['code' => 'FG', 'name' => 'FG Store', 'tally_guid' => 'gd-fg']);
         $this->customer = Customer::create(['code' => 'CUST-1', 'name' => 'Aqua Traders', 'gstin' => '33AAACA1111A1Z5']);
+
+        // Issuing an invoice below is a fixture, not the subject: without the
+        // GST masters SalesVoucherPayload refuses and stages nothing, and the
+        // "a queued voucher survives a refused cancel" assertion has no row to
+        // watch. The FG warehouse above is the single Tally-linked godown, so
+        // the trait adds none.
+        $this->seedSalesTallyMasterData();
     }
 
     // ---- fixtures ---------------------------------------------------------

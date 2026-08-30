@@ -68,6 +68,10 @@
              exercises the OFF behaviour explicitly. -->
         <env name="TALLY_SYNC_DELIVERY_NOTES_ENABLED" value="true"/>
         <env name="TALLY_SYNC_SALES_INVOICES_ENABLED" value="true"/>
+        <!-- Synthetic and FC-06-safe, exactly like the PO and Receipt Note company
+             pins above: lets the suite exercise a staged Sales voucher without every
+             fixture configuring the fail-closed company gate itself. -->
+        <env name="TALLY_SYNC_SALES_INVOICES_ALLOWED_COMPANY" value="Testing Tally Company Alpha"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
