@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Card, Input, InputNumber, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { useMemo, useState } from 'react';
-import { listWarehouses } from '@/features/inventory/api';
+import { listAllWarehouses } from '@/features/inventory/api';
 import { itemLabel } from '@/lib/itemLabel';
 import { ListEmpty } from '@/lib/ListEmpty';
 import { apiRefusalMessage, listProductionReturnable, recordProductionReturn } from '../api';
@@ -42,20 +42,31 @@ export default function ProductionReturnPage() {
 
     const warehouses = useQuery({
         queryKey: ['inventory', 'warehouses', 'return-destinations'],
-        queryFn: () => listWarehouses({ per_page: 100 }),
+        queryFn: listAllWarehouses,
     });
+
+    /** Names for the per-line destinations the server chose. */
+    const warehouseName = useMemo(() => {
+        const byId = new Map<number, string>();
+        for (const warehouse of warehouses.data?.data ?? []) byId.set(warehouse.id, warehouse.name);
+        return byId;
+    }, [warehouses.data]);
 
     /**
      * Only stores still in use, and never production itself — the server
      * refuses both, and a dropdown that offers a refusal is a dropdown that
      * wastes a storekeeper's evening.
+     *
+     * The production row comes from the warehouses index's own meta, NOT from
+     * the first floor row: filter the floor to nothing and that row would be
+     * back in the dropdown, which is the one place it must never be.
      */
     const destinations = useMemo(() => {
-        const wipId = floor.data?.[0]?.warehouse_id;
+        const wipId = warehouses.data?.meta?.production_wip_warehouse_id ?? null;
         return (warehouses.data?.data ?? [])
             .filter((warehouse) => warehouse.is_active && warehouse.id !== wipId)
             .map((warehouse) => ({ value: warehouse.id, label: warehouse.name }));
-    }, [warehouses.data, floor.data]);
+    }, [warehouses.data]);
 
     const lines = useMemo(() => {
         const typed: { item_id?: number; store_issue_line_id?: number; quantity: number }[] = [];
@@ -213,6 +224,20 @@ export default function ProductionReturnPage() {
                                     align: 'right' as const,
                                     render: (line: ProductionReturnable['store_issue_lines'][number]) =>
                                         formatQuantity(line.outstanding, row.uom),
+                                },
+                                {
+                                    // THE DROPDOWN ABOVE DOES NOT ADDRESS THESE
+                                    // LINES. An attributed return goes back to
+                                    // the store it came OUT of — a fact about
+                                    // the original handover, not this screen's
+                                    // to redirect — and on live that is not
+                                    // always the row the dropdown names. Shown
+                                    // per line so the destination is never a
+                                    // silent surprise.
+                                    title: 'Goes back to',
+                                    key: 'to_warehouse_id',
+                                    render: (line: ProductionReturnable['store_issue_lines'][number]) =>
+                                        warehouseName.get(line.to_warehouse_id) ?? `#${line.to_warehouse_id}`,
                                 },
                                 {
                                     title: 'Return',

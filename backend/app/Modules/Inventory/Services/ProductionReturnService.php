@@ -218,7 +218,7 @@ class ProductionReturnService
             // Read ONCE, before the first line moves, and spent down as the
             // lines are honoured: two unattributed lines of one material
             // must not each be told the whole residue is theirs.
-            $residues = [];
+            $residues = $this->budgetsFor($this->unattributedItemIds($lines), $wipId);
             $moved = collect();
 
             $attributed = [];
@@ -248,7 +248,7 @@ class ProductionReturnService
                     ]);
                 }
 
-                $residues[$itemId] ??= $this->unattributedBudget($itemId, $wipId);
+                $residues[$itemId] ??= '0.0000';
 
                 if (bccomp($quantity, $residues[$itemId], 4) === 1) {
                     throw ValidationException::withMessages([
@@ -308,23 +308,82 @@ class ProductionReturnService
     }
 
     /**
-     * The part of a material's production balance that no open handover is
+     * The materials on this return that answer no store issue line.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     * @return array<int, int>
+     */
+    private function unattributedItemIds(array $lines): array
+    {
+        $ids = [];
+
+        foreach ($lines as $line) {
+            if (isset($line['store_issue_line_id']) && (int) $line['store_issue_line_id'] > 0) {
+                continue;
+            }
+
+            $itemId = (int) ($line['item_id'] ?? 0);
+
+            if ($itemId > 0) {
+                $ids[$itemId] = $itemId;
+            }
+        }
+
+        return array_values($ids);
+    }
+
+    /**
+     * The part of each material's production balance that no open handover is
      * standing against — see the class docblock for why it is bounded this
      * way and floored at zero.
+     *
+     * READ ONCE, FOR EVERY MATERIAL ON THE RETURN, BEFORE THE FIRST LINE
+     * MOVES, and spent down as the lines are honoured: two lines of one
+     * material must not each be told the whole residue is theirs.
+     *
+     * THE BALANCE IS LOCKED BEFORE THE STANDING QUANTITY IS READ, and the
+     * materials are locked in ITEM-ID ORDER. Both matter under concurrency:
+     * the lock is what makes a second return of the same material wait and
+     * then re-read a balance this one has already spent, and a stable order
+     * is what stops two returns touching the same two materials from taking
+     * each other's rows in opposite orders. Note the guarantee is the
+     * DATABASE'S — `lockForUpdate` is a no-op on SQLite, so no test here can
+     * demonstrate it, and MySQL is where it has to hold.
+     *
+     * @param  array<int, int>  $itemIds
+     * @return array<int, string>
      */
-    private function unattributedBudget(int $itemId, int $wipId): string
+    private function budgetsFor(array $itemIds, int $wipId): array
     {
-        $balance = StockBalance::query()
-            ->where('item_id', $itemId)
-            ->where('warehouse_id', $wipId)
-            ->lockForUpdate()
-            ->value('quantity');
+        if ($itemIds === []) {
+            return [];
+        }
 
-        $attributed = $this->standingByItem([$itemId], $wipId)
-            ->get($itemId, collect())
-            ->reduce(fn (string $carry, array $line) => bcadd($carry, $line['outstanding'], 4), '0.0000');
+        sort($itemIds);
 
-        return $this->residue((string) ($balance ?? '0'), $attributed);
+        $balances = [];
+
+        foreach ($itemIds as $itemId) {
+            $balances[$itemId] = (string) (StockBalance::query()
+                ->where('item_id', $itemId)
+                ->where('warehouse_id', $wipId)
+                ->lockForUpdate()
+                ->value('quantity') ?? '0');
+        }
+
+        // One join for every material on the return, not one per line.
+        $standing = $this->standingByItem($itemIds, $wipId);
+        $budgets = [];
+
+        foreach ($itemIds as $itemId) {
+            $attributed = $standing
+                ->get($itemId, collect())
+                ->reduce(fn (string $carry, array $line) => bcadd($carry, $line['outstanding'], 4), '0.0000');
+
+            $budgets[$itemId] = $this->residue($balances[$itemId], $attributed);
+        }
+
+        return $budgets;
     }
 
     /** max(0, on floor − standing against open issues), to 4 places. */

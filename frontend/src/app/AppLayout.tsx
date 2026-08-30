@@ -144,7 +144,13 @@ export const allNavItems: readonly NavGroup[] = [
             // and the balance comes back in the evening — and until 30-Aug-2026
             // the second half had no screen and, for material no handover put
             // there, no way home at all.
-            { key: '/inventory/production-returns', label: 'Return to Store' },
+            //
+            // "Returns", not "Return to Store". The 30-Aug audit (H-17) found
+            // four labels in this menu already truncating, and "Stock Movements"
+            // — fifteen characters, exactly as long — is one of them. A label
+            // that arrives pre-truncated adds to the defect instead of avoiding
+            // it, and beside "Store Issue Queue" the pair reads out and back.
+            { key: '/inventory/production-returns', label: 'Returns' },
             { key: '/inventory/warehouses', label: 'Warehouses' },
             // The ledger, first-class since 27-Aug-2026. It was NOT in this
             // menu before, and the reason recorded here was true at the time:
