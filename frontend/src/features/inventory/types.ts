@@ -284,6 +284,22 @@ export interface StockBalance {
     warehouse: Warehouse;
     quantity: string;
     /**
+     * The four figures a storekeeper acts on. Quantities only — no rate ever
+     * rides here (FC-06).
+     *
+     * `free_to_issue` subtracts the QC hold AND customer reservations, which
+     * is STRICTER than the engine: the write path consults only the hold, so
+     * the system would permit issuing reserved stock. The screen deliberately
+     * under-reports, so breaking a reservation is a decision rather than an
+     * accident.
+     */
+    state?: {
+        on_hand: string;
+        qa_hold: string;
+        reserved: string;
+        free_to_issue: string;
+    };
+    /**
      * Weighted average of the purchase rates received into this balance —
      * served only to finance.view/manage eyes (FC-06); the key is ABSENT,
      * never null, for everyone else. Presence is the server's ruling.

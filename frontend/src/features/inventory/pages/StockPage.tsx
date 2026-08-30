@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
@@ -377,11 +377,78 @@ export default function StockPage() {
                         render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}`,
                     },
                     {
-                        title: 'Quantity',
+                        // The unit, next to the numbers it governs. Without it
+                        // a row reading 1,074 could be kilograms or pieces, and
+                        // this factory's master carries both spellings of each.
+                        title: 'Unit',
+                        width: 90,
+                        render: (_, row) => row.item.uom ?? '—',
+                    },
+                    {
+                        title: 'On hand',
                         dataIndex: 'quantity',
                         align: 'right' as const,
                         sorter: true,
                         sortOrder: sort === 'quantity' ? (direction === 'asc' ? 'ascend' : 'descend') : null,
+                        // A negative balance is not stock. It reads as an
+                        // ordinary number otherwise, and there are live rows
+                        // like this — say so on the row rather than in a report.
+                        render: (value: string, row) => {
+                            const negative = Number(row.quantity) < 0;
+
+                            return negative
+                                ? <Tooltip title="Negative balance — more has been issued than was ever received here. Needs a correction."><Typography.Text type="danger" strong>{value}</Typography.Text></Tooltip>
+                                : value;
+                        },
+                    },
+                    {
+                        title: 'QA hold',
+                        align: 'right' as const,
+                        width: 110,
+                        render: (_, row) => {
+                            const held = row.state?.qa_hold;
+
+                            if (held === undefined) return '—';
+
+                            return Number(held) > 0
+                                ? <Tooltip title="Standing in incoming-QC hold. It is on the shelf but not production's yet."><Typography.Text type="warning">{held}</Typography.Text></Tooltip>
+                                : held;
+                        },
+                    },
+                    {
+                        title: 'Reserved',
+                        align: 'right' as const,
+                        width: 110,
+                        render: (_, row) => {
+                            const held = row.state?.reserved;
+
+                            if (held === undefined) return '—';
+
+                            return Number(held) > 0
+                                ? <Tooltip title="Promised to a customer's order line.">{held}</Tooltip>
+                                : held;
+                        },
+                    },
+                    {
+                        // THE HEADLINE, and the one figure that answers the
+                        // storekeeper's actual question. It subtracts both the
+                        // QC hold and customer reservations — stricter than the
+                        // engine, which subtracts only the hold. Under-reporting
+                        // is the safe direction.
+                        title: 'Free to issue',
+                        align: 'right' as const,
+                        width: 130,
+                        render: (_, row) => {
+                            const free = row.state?.free_to_issue;
+
+                            if (free === undefined) return '—';
+
+                            const withheld = Number(row.state?.qa_hold ?? 0) + Number(row.state?.reserved ?? 0);
+
+                            return withheld > 0
+                                ? <Tooltip title="On hand, less what QC is holding and what is promised to customers."><Typography.Text strong>{free}</Typography.Text></Tooltip>
+                                : <Typography.Text strong>{free}</Typography.Text>;
+                        },
                     },
                     ...(showsAverageCost ? [{ title: 'Avg. Cost', dataIndex: 'average_cost' }] : []),
                     {

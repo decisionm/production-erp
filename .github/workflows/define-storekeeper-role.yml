@@ -1,0 +1,112 @@
+name: Define the Storekeeper role
+
+# Creates the Storekeeper role on the live instance and fixes its permission
+# set. Dry by default: without write=true it prints exactly what it would add
+# and remove and changes nothing.
+#
+# WHY THIS IS A WORKFLOW AND NOT A SEEDER. PermissionSeeder runs on every
+# deploy, and its own note says it must only ever ADD its one permission and
+# never rewrite what an administrator granted through the Roles screen.
+# Creating a role and fixing its grants is a live master-data change, and
+# AGENTS.md is explicit that those go through a manual workflow, dry-run
+# first, written only after a person has read the dry run. Shipping it as a
+# seeder would make an authorization change a side effect of deploying code.
+#
+# IT ASSIGNS NOBODY. Which people keep the store is a fact about the factory
+# that the repository cannot know, and a role granted to the wrong login is an
+# authorization incident. Run this, then add the users on the Roles screen.
+#
+# READ `roles:show` FIRST. Roles are created at runtime and never seeded, so
+# the only way to know what a live role holds today is to read it off the live
+# database — the "Show roles" workflow does exactly that, read-only. The dry
+# run below also prints the difference, but seeing the whole board first is
+# the habit that catches the surprise.
+
+# Least privilege: nothing here writes to the repository. Every workflow uses
+# only checkout, setup-node/php and same-run artifacts, and reaches the server
+# over SSH with a deploy key — never the GITHUB_TOKEN.
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      write:
+        description: 'Actually write. Leave false for a dry run that changes nothing.'
+        type: boolean
+        default: false
+
+concurrency:
+  group: define-storekeeper-role
+  cancel-in-progress: false
+
+jobs:
+  define:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          keys=""
+          for attempt in 1 2 3; do
+            keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+            if [ -n "$keys" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "ssh-keyscan attempt ${attempt} returned no host key; retrying in $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            fi
+          done
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Check hPanel → Advanced → SSH Access, and whether brute-force protection has banned the runner. Re-running often clears a transient failure."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      # Inputs cross into shell ONLY via env. A `${{ }}` expression pasted into
+      # script text is substituted as TEXT before bash parses the line, so the
+      # value becomes code; env makes it data.
+      - name: Report what is about to run
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+        run: |
+          if [ "$WRITE_RAW" = "true" ]; then
+            echo "::warning::WRITING the Storekeeper role and its permissions on the live instance. No user is assigned either way."
+          else
+            echo "Dry run — nothing will be written."
+          fi
+
+      - name: Run it
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+        run: |
+          set -o pipefail
+
+          FLAGS=""
+          [ "$WRITE_RAW" = "true" ] && FLAGS="--write"
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan roles:define-storekeeper $FLAGS" \
+            2>&1 | tee output.txt
+
+      - name: Summarise
+        if: always()
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+        run: |
+          {
+            echo '### Define the Storekeeper role'
+            echo ''
+            echo "write: \`$WRITE_RAW\`"
+            echo ''
+            echo 'No user is assigned by this workflow. Add the people on the Roles screen afterwards.'
+            echo ''
+            echo '```'
+            tail -c 60000 output.txt 2>/dev/null || echo '(no output captured)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

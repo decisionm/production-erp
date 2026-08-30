@@ -981,7 +981,7 @@ identity to a reader without finance standing.
 
 *Opened 2026-08-17; resolved the same day by inspection, no owner ruling required.*
 
-## Q51 · ANSWERED (DEC-20260817-001) · How many stores does the factory actually have, and which rows are they?
+## Q51 · ANSWERED (DEC-20260830-002) · How many stores does the factory actually have, and which rows are they?
 
 The ERP holds five warehouses. Two pairs are functionally duplicated and the
 evidence says accidentally so (full audit:
@@ -1122,7 +1122,7 @@ trust check at all. *Open since 2026-08-17.*
 
 ## Q54 · Five things the Store -> Production material flow cannot decide for itself
 
-Phase 7.5 builds the workflow the lead confirmed on 17-Aug (Q50, DEC-20260817-001):
+Phase 7.5 builds the workflow the lead confirmed on 17-Aug (Q50, DEC-20260830-002):
 Store Stock -> Material Request -> Store Issue -> Scan/Handover -> Issued to
 Production (the WIP location) -> Consumption -> Return unused. Building it raised
 five points that are the factory's call, not engineering's. **None of them is
@@ -1201,7 +1201,7 @@ masterbatch request; (d) decides one sentence on one internal screen; (b), (c) a
 
 ## Q55 · Retiring the Day Bin — two things the code cannot decide, and one that must be built first
 
-DEC-20260817-001 settled the inventory locations: **RM Store → Production/WIP → FG Store,
+DEC-20260830-002 settled the inventory locations: **RM Store → Production/WIP → FG Store,
 and there is no Day Bin.** A full audit of every remaining Day Bin reference (18-Aug-2026)
 found that the *target workflow* is indeed free of it, but the *running system* is not: the
 Day Bin is still load-bearing in two places, and one of them prices every batch.
@@ -1343,7 +1343,7 @@ blocked is any screen that wants to say "these specific bags are on the floor ri
 
 **Related:** a fully-poured bag is marked with the status `consumed` by the shared pour path,
 on a store issue as well as on the day-bin scan. On a handover that word contradicts
-DEC-20260817-001 — the material has been handed over, not consumed. The enum value is shared
+DEC-20260830-002 — the material has been handed over, not consumed. The enum value is shared
 with the day-bin path and written into historical rows, so renaming it is a data decision
 rather than a code one. Worth settling alongside the above.
 *Open since 2026-08-18.*
@@ -1988,3 +1988,117 @@ QC pass is required before dispatch, which the owner's flow answers as YES but
 which is not yet a decision record). **Blocks:** the store-decision record, and
 with it the "production plans only the rejected quantity" rule. *Open since
 2026-08-30.*
+## Q74 · Does a document reference from a retired warehouse prove the material is physically on the shelf today? — RESOLVED (DEC-20260831-001)
+
+`inventory:preview-warehouse-recovery` lists the stock standing in
+warehouses no picker offers and classifies each row from its own movement
+history: DOCUMENTED (ordinary factory documents), OPENING (an opening
+balance somebody seeded), TEST (a wiring check or demo), MIXED. Only the
+DOCUMENTED rows are printed with a proposed destination.
+
+That printed destination is the proposal to move real stock, and it rests on
+an assumption the report cannot check: that a reference like `GRN for PO 4`,
+`QC release to FG store` or `SPE 154` recorded against a retired location
+means the material is **still physically there**. The report reads
+references, not shelves.
+
+What is asked: is that assumption sound, or must someone count these rows
+before any of them move? And is the DOCUMENTED vocabulary itself right —
+which reference wordings prove present physical stock?
+
+**Blocks:** any recovery of the DOCUMENTED rows. The preview itself is
+read-only and safe to run under either answer. *Open since 2026-08-30.*
+
+## Q75 · What happens to the opening-balance and wiring-check stock in the retired warehouses?
+
+The same preview withholds every OPENING and TEST row. On the live instance
+these are the larger share: the retired RM store's rows are backed almost
+entirely by a rehearsal opening balance, and the dispatch bay's rows by
+wiring checks and demo documents. Moving them into the operational Store
+would credit the factory with material it never received, with no error
+anywhere.
+
+What is asked: are these written off, left where they are, or corrected to
+zero — and by whom? Note the third option is not free either: a correction
+is itself a stock movement.
+
+**Blocks:** closing out the retired warehouses. *Open since 2026-08-30.*
+
+## Q76 · Recovering stranded stock would re-value the Store's stock of the same item — is that acceptable to Accounts?
+
+A stock transfer carries the source row's average cost into the destination,
+where the weighted average is recomputed. So recovering a stranded row does
+not only move a quantity: it blends that row's cost into the Store's
+existing average for the same item — and those costs came from a rehearsal
+seeder or from the older Tally company the retired godowns belong to.
+
+What is asked: does Accounts accept the re-valuation, should the recovery
+carry a different cost, or should the quantity move without disturbing the
+average?
+
+**Blocks:** any recovery, including the DOCUMENTED rows Q74 covers. *Open
+since 2026-08-30.*
+
+## Q77 · Which materials must a goods receipt record lots and bags for?
+
+Lot and bag traceability is switched on and has never produced a row: the
+lots block is optional on a goods receipt, so omitting it creates no lot and
+no bags — and the incoming-QC hold, which acts on bags, then has nothing to
+hold. Making the lots block mandatory needs a rule for WHICH materials it is
+mandatory for, and the obvious discriminator is not usable: every item in
+the master carries `tracking_type = none`.
+
+What is asked: is it every purchased material, only weighed materials
+(resin, masterbatch), only named items, or a per-item flag someone
+maintains? This decides what the store is asked to do at every arrival, so
+it is a floor-process question, not a technical one.
+
+Related and already recorded: DEC-20260825-001 leaves open "whether every
+arrival line must wait for QA before the store may issue it or only named
+materials", and "what carries the barcode for counted packaging". This
+question is the third of that set and they are best answered together.
+
+**Blocks:** making the traceability workflow operational for future
+receipts. *Open since 2026-08-30.*
+
+## Q78 · Is there a store-acceptance step for finished goods, and may the Storekeeper approve dispatch?
+
+The Storekeeper role now exists as a definition
+(`roles:define-storekeeper`, dry-run first). Two of the capabilities asked
+for could not be granted, because neither is a thing the system currently
+does:
+
+  · **Receiving approved finished goods.** The finished-goods chain today is
+    complete → quality-check → pm-approve → accountant-approve. There is no
+    store-acceptance step. Adding one is a new stage in how the factory
+    works.
+  · **Final dispatch approval.** Deliveries sit under the sales module, so
+    granting it means `sales.manage`, which also unlocks sales orders,
+    customers and invoices — a wider grant than the words ask for.
+
+What is asked: should a store-acceptance step exist for finished goods, and
+who performs it? And should dispatch approval be separable from the rest of
+Sales, or does the Storekeeper simply not do it?
+
+**Blocks:** those two capabilities only. The rest of the Storekeeper role
+works without them. *Open since 2026-08-30.*
+
+## Q79 · What should the stock screen call the quantity a storekeeper may act on? — RESOLVED (DEC-20260831-002)
+
+The stock list can be decomposed per row into on-hand, quantity held for
+incoming QC, quantity reserved for a customer line, and quantity standing in
+Production/WIP. The arithmetic is settled and already exists. What is not
+settled is the WORDING, and the wording is the whole risk.
+
+The quantity an issue is actually checked against subtracts the QC hold and
+**not** customer reservations. So a row can honestly read on-hand 500 /
+free 500 / reserved 120 — and a column headed "free to issue" would tell a
+storekeeper 500 may go out while 120 are promised to a customer. With no
+bags on the live instance today the QC hold is zero on every row, so that
+column would duplicate on-hand exactly until the first lot is recorded.
+
+What is asked: what should that column be called, and should the store's
+headline figure net customer holds or not?
+
+**Blocks:** shipping the stock-state decomposition to the Stock page. The
+underlying figures are unaffected. *Open since 2026-08-30.*

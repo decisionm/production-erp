@@ -48,6 +48,12 @@ class StoreStoreIssueRequest extends FormRequest
     public function rules(): array
     {
         return [
+            // THE IDEMPOTENCY KEY, the same shape goods receipts take.
+            // Optional so an existing integration keeps working, but the
+            // frontend always sends one — an optional protection nobody
+            // exercises protects nothing, which is the lesson the lots block
+            // taught this module.
+            'issue_key' => ['sometimes', 'nullable', 'string', 'max:100'],
             // A GHOST HEADER IS A DANGLING POINTER. Without `exists`, an
             // issue could be filed against request 999999999: stock moved,
             // `store_issues.material_request_id` persisted, and nothing on
