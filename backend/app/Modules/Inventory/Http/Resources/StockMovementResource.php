@@ -31,6 +31,17 @@ class StockMovementResource extends JsonResource
             'quantity' => $this->quantity,
             ...($showsCost ? ['unit_cost' => $this->unit_cost] : []),
             'reference' => $this->reference,
+            // WHO RECORDED IT. The column has been on this table since the
+            // ledger was created and every writer populates it — it was
+            // simply never served, so the ledger read as though nobody had
+            // done anything, and a storekeeper asking "who moved this?" had
+            // to be told the ERP knew and would not say.
+            //
+            // whenLoaded, so the key is ABSENT rather than null wherever the
+            // relation was not eager-loaded: this resource is served for the
+            // whole factory ledger, and a lazy belongsTo here would be one
+            // query per row.
+            'recorded_by' => $this->whenLoaded('createdBy', fn () => $this->createdBy?->name),
             'transfer_group' => $this->transfer_group,
             'movement_date' => $this->movement_date?->toIso8601String(),
             'notes' => $this->notes,

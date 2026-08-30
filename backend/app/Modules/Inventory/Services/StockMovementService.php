@@ -579,7 +579,15 @@ class StockMovementService
     public function paginateMovements(?int $itemId = null, ?int $warehouseId = null, int $perPage = 20): LengthAwarePaginator
     {
         return StockMovement::query()
-            ->with(['item' => fn ($item) => $item->withTrashed(), 'warehouse'])
+            // createdBy: two columns, eager-loaded, so a page of the ledger
+            // can say who recorded each row without becoming one query per
+            // row. StockMovementResource gates it behind whenLoaded, so every
+            // other read of that resource is unchanged.
+            ->with([
+                'item' => fn ($item) => $item->withTrashed(),
+                'warehouse',
+                'createdBy:id,name',
+            ])
             ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
             ->when($warehouseId, fn ($query) => $query->where('warehouse_id', $warehouseId))
             ->orderByDesc('movement_date')
