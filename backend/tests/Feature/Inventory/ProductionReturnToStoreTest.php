@@ -260,6 +260,65 @@ class ProductionReturnToStoreTest extends TestCase
         $this->assertSame('0.0000', (string) StoreIssue::query()->sole()->lines()->sole()->quantity_returned);
     }
 
+    public function test_two_lines_naming_one_handover_line_are_added_together_not_replaced(): void
+    {
+        // Keyed by line id and ASSIGNED, the second would silently replace the
+        // first: a caller believing it returned 10 + 20 while 20 moved, and a
+        // 201 saying it worked.
+        $this->stockInStore($this->resin, '500');
+        $issue = $this->issueResin('100');
+        $lineId = $issue['lines'][0]['id'];
+
+        $this->postJson('/api/v1/inventory/production-returns', [
+            'to_warehouse_id' => $this->store->id,
+            'lines' => [
+                ['store_issue_line_id' => $lineId, 'quantity' => '10'],
+                ['store_issue_line_id' => $lineId, 'quantity' => '20'],
+            ],
+        ])->assertCreated();
+
+        $this->assertSame('30.0000', (string) StoreIssue::query()->sole()->lines()->sole()->quantity_returned);
+        $this->assertSame('70.0000', $this->balance($this->wip, $this->resin));
+        $this->assertLedgerMatchesBalances('after duplicate line ids were summed');
+    }
+
+    public function test_a_handover_that_never_went_to_production_is_refused(): void
+    {
+        // Reachable only through the API — the screen lists the production
+        // floor. returnUnused() moves from the LINE's own to_warehouse, so
+        // without this check a line handed over somewhere else would move that
+        // warehouse's stock under the name "production return".
+        $elsewhere = Warehouse::create(['code' => 'FG-STORE', 'name' => 'Finished Goods', 'is_active' => true]);
+        $this->stockInStore($this->resin, '500');
+
+        $issue = StoreIssue::query()->create([
+            'issue_number' => 'SI-OTHER',
+            'issued_by' => $this->storeKeeper->id,
+            'received_by' => $this->supervisor->id,
+            'issued_at' => now(),
+            'status' => 'issued',
+        ]);
+        $line = $issue->lines()->create([
+            'item_id' => $this->resin->id,
+            'from_warehouse_id' => $this->store->id,
+            'to_warehouse_id' => $elsewhere->id,
+            'quantity_issued' => '50',
+            'quantity_returned' => '0',
+            'uom' => 'Kgs.',
+        ]);
+
+        $refusal = $this->postJson('/api/v1/inventory/production-returns', [
+            'to_warehouse_id' => $this->store->id,
+            'lines' => [['store_issue_line_id' => $line->id, 'quantity' => '10']],
+        ])->assertStatus(422);
+
+        $this->assertStringContainsString(
+            'did not hand material over to production',
+            (string) $refusal->json('errors')['lines.0.store_issue_line_id'][0],
+        );
+        $this->assertSame('0.0000', (string) $line->fresh()->quantity_returned);
+    }
+
     // ---- (5) and (6) the two refusals a storekeeper will actually meet ----
 
     public function test_nothing_comes_back_from_a_negative_production_balance(): void

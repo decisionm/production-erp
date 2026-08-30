@@ -215,20 +215,26 @@ class ProductionReturnService
         $this->assertDestination($toWarehouseId, $wipId);
 
         return DB::transaction(function () use ($lines, $toWarehouseId, $wipId, $recordedBy, $notes) {
+            // ATTRIBUTED LINES ARE RESOLVED AND LOCKED FIRST, and the order
+            // is the point. StoreIssueService::returnUnused locks the ISSUE
+            // LINE and then moves stock, which locks the balance — line, then
+            // balance. Taking the balance first here (budgetsFor) and the
+            // line afterwards would give two concurrent returns of the same
+            // material opposite lock orders, and InnoDB resolves that by
+            // killing one of them at the end of a shift. So: lines, then
+            // balances, on both paths.
+            $attributed = $this->lockAttributedLines($this->attributedAsks($lines), $wipId);
+
             // Read ONCE, before the first line moves, and spent down as the
             // lines are honoured: two unattributed lines of one material
             // must not each be told the whole residue is theirs.
             $residues = $this->budgetsFor($this->unattributedItemIds($lines), $wipId);
             $moved = collect();
 
-            $attributed = [];
-
             foreach ($lines as $index => $line) {
                 $lineId = isset($line['store_issue_line_id']) ? (int) $line['store_issue_line_id'] : 0;
 
                 if ($lineId > 0) {
-                    $attributed[$lineId] = ['index' => $index, 'quantity' => (string) $line['quantity']];
-
                     continue;
                 }
 
@@ -277,7 +283,7 @@ class ProductionReturnService
                 ]);
             }
 
-            foreach ($this->groupByIssue($attributed) as $issueId => $issueLines) {
+            foreach ($attributed as $issueId => $issueLines) {
                 $issue = StoreIssue::query()->whereKey($issueId)->firstOrFail();
 
                 $this->issues->returnUnused(
@@ -445,43 +451,98 @@ class ProductionReturnService
     }
 
     /**
-     * Attributed lines, resolved to their issues and checked to belong to a
-     * production location, keyed by issue.
+     * What each named store issue line is being asked to take back, SUMMED.
      *
-     * @param  array<int, array{index: int|string, quantity: string}>  $attributed
+     * TWO LINES NAMING ONE HANDOVER LINE ARE ADDED TOGETHER, never replaced.
+     * Keying by line id and assigning would keep the LAST quantity and drop
+     * the rest — a caller believing it returned 10 + 20 while 20 moved, and a
+     * 201 saying it worked. Summing is also what the store-issue return does
+     * with duplicate ids, so the two doors agree.
+     *
+     * The first index is kept so a refusal points at a line the caller sent.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     * @return array<int, array{index: int|string, quantity: string}>
+     */
+    private function attributedAsks(array $lines): array
+    {
+        $asks = [];
+
+        foreach ($lines as $index => $line) {
+            $lineId = isset($line['store_issue_line_id']) ? (int) $line['store_issue_line_id'] : 0;
+
+            if ($lineId <= 0) {
+                continue;
+            }
+
+            $quantity = bcadd((string) $line['quantity'], '0', 4);
+
+            $asks[$lineId] = isset($asks[$lineId])
+                ? ['index' => $asks[$lineId]['index'], 'quantity' => bcadd($asks[$lineId]['quantity'], $quantity, 4)]
+                : ['index' => $index, 'quantity' => $quantity];
+        }
+
+        return $asks;
+    }
+
+    /**
+     * The named handover lines, locked in id order, checked to be handovers
+     * INTO the production location, and keyed by issue.
+     *
+     * THE WIP CHECK IS NOT DECORATION. `returnUnused` moves from the line's
+     * own `to_warehouse_id`, so a line handed over into some OTHER warehouse
+     * would move that warehouse's stock — under the name "production return",
+     * on a screen that lists the production floor. The read side already
+     * refuses to count such a line as standing (standingByItem filters on the
+     * same column); this is the write side agreeing with it. A caller reaching
+     * the API directly is the only way to get here.
+     *
+     * @param  array<int, array{index: int|string, quantity: string}>  $asks
      * @return array<int, array<int, array<string, mixed>>>
      */
-    private function groupByIssue(array $attributed): array
+    private function lockAttributedLines(array $asks, int $wipId): array
     {
-        if ($attributed === []) {
+        if ($asks === []) {
             return [];
         }
 
+        $ids = array_keys($asks);
+        sort($ids);
+
         $lines = StoreIssueLine::query()
-            ->whereIn('id', array_keys($attributed))
-            ->get(['id', 'store_issue_id', 'item_id', 'from_warehouse_id'])
+            ->whereIn('id', $ids)
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get(['id', 'store_issue_id', 'item_id', 'from_warehouse_id', 'to_warehouse_id'])
             ->keyBy(fn ($line) => (int) $line->id);
 
-        // REFUSE, NEVER DROP. A line id that resolves to nothing would
-        // otherwise fall out of the grouping and the caller would be told the
-        // return succeeded while that quantity never moved. The FormRequest
-        // already refuses it; this is the half that does not depend on which
-        // door the call came through.
-        foreach ($attributed as $lineId => $ask) {
+        $grouped = [];
+
+        foreach ($ids as $lineId) {
+            $ask = $asks[$lineId];
+
+            // REFUSE, NEVER DROP. A line id that resolves to nothing would
+            // otherwise fall out of the grouping and the caller would be told
+            // the return succeeded while that quantity never moved. The
+            // FormRequest already refuses it; this is the half that does not
+            // depend on which door the call came through.
             if (! $lines->has($lineId)) {
                 throw ValidationException::withMessages([
                     "lines.{$ask['index']}.store_issue_line_id" => 'That store issue line does not exist.',
                 ]);
             }
-        }
 
-        $grouped = [];
+            $line = $lines->get($lineId);
 
-        foreach ($lines as $line) {
-            $ask = $attributed[(int) $line->id];
+            if ((int) $line->to_warehouse_id !== $wipId) {
+                throw ValidationException::withMessages([
+                    "lines.{$ask['index']}.store_issue_line_id" => 'That store issue did not hand material over to '
+                        .'production, so it is not what is standing there. Return it against its own store issue.',
+                ]);
+            }
 
             $grouped[(int) $line->store_issue_id][] = [
-                'store_issue_line_id' => (int) $line->id,
+                'store_issue_line_id' => $lineId,
                 'item_id' => (int) $line->item_id,
                 'quantity' => $ask['quantity'],
                 'to_warehouse_id' => (int) $line->from_warehouse_id,
