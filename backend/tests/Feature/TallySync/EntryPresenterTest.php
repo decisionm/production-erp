@@ -378,6 +378,48 @@ class EntryPresenterTest extends TestCase
         $this->assertArrayNotHasKey('unvalidated_builder', $presenter->flags($this->approveShiftProduction()));
     }
 
+    /**
+     * "IN ITS OWN WORDS" IS NOW CHECKED, not just claimed.
+     *
+     * Every unvalidated_builder note quotes a line and names the file it came
+     * from — but nothing read that file, so the two could drift silently: edit
+     * a builder's docblock and the presenter keeps quoting a sentence that is
+     * no longer there, attributing words to a file that does not say them.
+     *
+     * That seam went from theoretical to load-bearing on 31-Aug-2026, when the
+     * Sales builder was rewritten and its "BEST-EFFORT TEMPLATE" line retired.
+     * This walks every flagged category, pulls the FIRST QUOTED PHRASE out of
+     * the note, and asserts the named builder actually contains it.
+     */
+    public function test_every_flag_quotes_a_line_its_builder_really_contains(): void
+    {
+        $presenter = app(EntryPresenter::class);
+
+        $flags = [
+            'sales' => $presenter->flags($this->enqueueSalesInvoice())['unvalidated_builder'],
+            'receipt note' => $presenter->flags($this->enqueueGoodsReceipt())['unvalidated_builder'],
+            'delivery note' => $presenter->flags($this->enqueueDelivery())['unvalidated_builder'],
+            'journal' => $presenter->flags(app(TallySyncService::class)->enqueueJournalEntry($this->journal()))['unvalidated_builder'],
+        ];
+
+        foreach ($flags as $label => $flag) {
+            $path = base_path('../'.$flag['builder']);
+            $this->assertFileExists($path, "the {$label} flag names a builder that does not exist");
+
+            $this->assertSame(
+                1,
+                preg_match('/"([^"]+)"/u', $flag['note'], $quoted),
+                "the {$label} flag must quote its builder, not paraphrase it",
+            );
+
+            $this->assertStringContainsString(
+                $quoted[1],
+                (string) file_get_contents($path),
+                "the {$label} flag quotes a line its builder no longer contains — the note and the file have drifted",
+            );
+        }
+    }
+
     public function test_a_receipt_note_carrying_an_order_reference_is_flagged_because_the_agent_does_not_emit_it(): void
     {
         $with = $this->enqueueGoodsReceipt(tallyOrderNo: 'PO/2026/17', dueDate: '2026-08-10');
