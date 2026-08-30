@@ -49,7 +49,7 @@ export interface SalesInvoicePayload {
 }
 
 /**
- * DERIVED FROM THE STRUCTURE OF 55 REAL SALES VOUCHER EXPORTS — NOT YET POSTED TO A REAL TALLY (flag off; owner gate Q70 and the GST master data)
+ * DERIVED FROM THE STRUCTURE OF 55 REAL SALES VOUCHER EXPORTS — NOT YET POSTED TO A REAL TALLY (flag off; owner gate Q71 and the GST master data)
  *
  * BUILT AGAINST THE FACTORY'S OWN VOUCHERS, not against a guess.
  *

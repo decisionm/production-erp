@@ -43,6 +43,7 @@ const ROUTE_TABLE = [
     '/inventory/batches',
     '/inventory/serial-numbers',
     '/inventory/store-issue-queue',
+    '/inventory/production-returns',
     '/inventory/fulfilment',
     '/inventory/planning',
     '/production/work-centers',

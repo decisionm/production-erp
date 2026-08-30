@@ -1854,7 +1854,55 @@ because this file re-mints question numbers at merge.
 supplier-bill screen, its arithmetic, its matching and its attachment work
 under either answer. *Open since 2026-08-28.*
 
-## Q69 · Does the factory use Tally DELIVERY NOTES at all?
+## Q69 · When material comes back from production, must it be returned against the store issue that put it there?
+
+The daily return was built on 30-Aug-2026: the store issues material to the
+production area, production makes finished goods from it, and the balance is
+returned to the store daily. Until then the only return in the system was
+bounded by a store issue LINE, and seven of the nine materials standing in
+production on the live instance have no store issue behind them at all
+(`issued = 0`, a positive balance, `returned = 0` across the whole ledger).
+They had no way home. `POST /api/v1/inventory/production-returns` now takes
+both kinds of line in one call: with a `store_issue_line_id`, the return
+closes that handover's own arithmetic; without one, it is bounded by the part
+of the production balance that no open handover is standing against.
+
+What this asks: when a store issue IS open for that material, must the
+evening's return be attributed to it, or may the storekeeper record it as
+unattributed? The build deliberately does not answer. Spreading a return
+across open issues — FIFO or by any other rule — would invent an attribution
+this factory cannot make (FC-01, DEC-20260807-007: a bag belongs to no
+machine and no batch, and a batch's consumption is calculated). So the screen
+shows the split and a person chooses.
+
+**Until it is answered, the build REFUSES rather than picks.** A material an
+open store issue is standing on will not accept an unattributed return: the
+refusal names the issue and points at its own line, which always works.
+Materials with no handover behind them — all seven the live instance could
+not bring home — are unaffected, so the case that provoked the build works
+and the undecided case does not.
+
+That is deliberate and it is the conservative direction. An earlier version
+showed the split and let the storekeeper choose, which sounds like leaving
+the decision to a person and is not: shipping the capability answers this
+question "storekeeper's choice", and **an unattributed movement can never be
+re-attributed afterwards**. If the answer turns out to be "must attribute",
+every return recorded the other way has left a handover claiming material
+that went home weeks earlier, with nothing able to tell the two apart.
+
+Both answers are cheap from here. "Must attribute where an issue is open" is
+the deleted condition — nothing to build. "Storekeeper's choice" is deleting
+the refusal in `ProductionReturnService::undecidedRefusal()`.
+
+**Related, and also open:** the ERP does not enforce that the return happens
+daily — nothing warns at the end of a shift that material is still standing
+in production. Whether it should chase, and against what clock, follows from
+this answer.
+
+**Blocks:** nothing built. The return works under either answer.
+*Open since 2026-08-30.*
+
+## Q70 · Does the factory use Tally DELIVERY NOTES at all?
 
 The sales-side sibling of Q63, and the evidence points the same way Q63's did.
 The owner's stated fulfilment sequence is "Sales Order → Delivery Note / stock
@@ -1881,7 +1929,7 @@ defaults OFF, fail-closed, and the listener no-ops. The ERP's own delivery, its
 stock movement and its trace are untouched either way — this is only about what
 reaches Tally. **Blocks:** any Delivery Note emission. *Open since 2026-08-30.*
 
-## Q70 · When the ERP issues an invoice, which book originates the sale?
+## Q71 · When the ERP issues an invoice, which book originates the sale?
 
 DEC-20260809-003 records that **ALL real sales are invoiced directly in Tally**
 and the ERP Sales module is demo-scale. Yet issuing an ERP invoice has been
@@ -1901,7 +1949,7 @@ it on needs BOTH an Accounts answer here AND a builder validated field-by-field
 against a real export. **Blocks:** any Sales voucher emission. *Open since
 2026-08-30.*
 
-## Q71 · Q61 revisited — the Tally Sales Order register IS in use
+## Q72 · Q61 revisited — the Tally Sales Order register IS in use
 
 Q61 asks whether the ERP may emit a Tally "Sales Order" voucher, and notes as
 part of its premise that "Tally's own order register is not in use today as far
@@ -1917,7 +1965,7 @@ cancels one, stand unchanged. But it should be answered knowing the register is
 real and in daily use, not assumed dormant. **Blocks:** nothing beyond what Q61
 already blocks. *Open since 2026-08-30.*
 
-## Q72 · What does it MEAN when the store rejects a quantity?
+## Q73 · What does it MEAN when the store rejects a quantity?
 
 The owner's fulfilment flow has the store approve a hold in full, approve it in
 part, or REJECT it, with production planning starting only for the quantity the

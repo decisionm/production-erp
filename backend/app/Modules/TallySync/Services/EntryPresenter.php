@@ -94,7 +94,7 @@ class EntryPresenter
      * and an HSN on 11 of 146 items) and the owner answers who mints the invoice
      * number.
      */
-    private const SALES_STAGED_LINE = 'DERIVED FROM THE STRUCTURE OF 55 REAL SALES VOUCHER EXPORTS — NOT YET POSTED TO A REAL TALLY (flag off; owner gate Q70 and the GST master data)';
+    private const SALES_STAGED_LINE = 'DERIVED FROM THE STRUCTURE OF 55 REAL SALES VOUCHER EXPORTS — NOT YET POSTED TO A REAL TALLY (flag off; owner gate Q71 and the GST master data)';
 
     private const PURCHASE_ORDER_STAGED_LINE = 'DERIVED FROM THE STRUCTURE OF 107 REAL PURCHASE ORDER EXPORTS — NOT YET POSTED TO A REAL TALLY (flag off; owner gate Q35)';
 
