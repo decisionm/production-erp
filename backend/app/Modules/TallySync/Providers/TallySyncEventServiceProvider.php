@@ -39,8 +39,24 @@ class TallySyncEventServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
+        // An issued ERP invoice → Tally 'Sales' voucher, FAIL-CLOSED behind
+        // tally-sync.sales_invoices_enabled (OFF by default). Two reasons,
+        // either sufficient: DEC-20260809-003 records that all real sales are
+        // invoiced DIRECTLY in Tally, so posting here would book the sale
+        // twice; and the agent's Sales builder is self-declared unvalidated
+        // and emits no GST ledgers and no Rounding Off, so a posted voucher
+        // would carry ZERO TAX. The ERP invoice, its numbering and its trace
+        // are untouched — this gate governs ONLY what reaches Tally.
         Invoice::updated(function (Invoice $invoice) {
             if ($invoice->wasChanged('status') && $invoice->status === InvoiceStatus::Issued) {
+                if (! config('tally-sync.sales_invoices_enabled')) {
+                    Log::debug('Invoice issued; Tally Sales staging disabled (tally-sync.sales_invoices_enabled = false — real sales are invoiced directly in Tally, DEC-20260809-003, and the Sales voucher builder is unvalidated).', [
+                        'invoice_id' => $invoice->id,
+                    ]);
+
+                    return;
+                }
+
                 $this->app->make(TallySyncService::class)->enqueueSalesInvoice($invoice);
             }
         });
@@ -70,7 +86,22 @@ class TallySyncEventServiceProvider extends ServiceProvider
             $this->stageGoodsReceiptNote($event->note);
         });
 
+        // A dispatch → Tally 'Delivery Note', FAIL-CLOSED behind
+        // tally-sync.delivery_notes_enabled (OFF by default). The factory's
+        // own July-2026 export holds ZERO Delivery Notes, and none of its 177
+        // real Sales vouchers references one — the sales-side shape of
+        // DEC-20260830-001. Until the owner and Accounts rule, the ERP does
+        // not invent a voucher type the books have never held. The delivery
+        // itself, its stock movement and its trace are untouched.
         Event::listen(DeliveryDispatched::class, function (DeliveryDispatched $event) {
+            if (! config('tally-sync.delivery_notes_enabled')) {
+                Log::debug('Delivery dispatched; Tally Delivery Note staging disabled (tally-sync.delivery_notes_enabled = false — the factory has never used Tally Delivery Notes; owner question open).', [
+                    'delivery_id' => $event->delivery->id,
+                ]);
+
+                return;
+            }
+
             $this->app->make(TallySyncService::class)->enqueueDelivery($event->delivery);
         });
 

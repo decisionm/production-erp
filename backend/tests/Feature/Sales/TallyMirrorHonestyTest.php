@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -45,8 +46,23 @@ use Tests\TestCase;
 class TallyMirrorHonestyTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     private const URL = '/api/v1/sales/tally-mirror';
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // The Sales voucher is this file's FIXTURE, not its subject: one test
+        // issues an invoice only to have a queued voucher the answer must
+        // survive. SalesVoucherPayload now refuses — and stages nothing —
+        // without the GST registration, the ledger roles and a single
+        // Tally-linked godown, so seed them here. In setUp they also land well
+        // before the statement-by-statement write watch below, which must see
+        // the endpoint's own statements and no one else's.
+        $this->seedSalesTallyMasterData();
+    }
 
     /** @param  list<string>  $permissions */
     private function actingWith(array $permissions, string $name = 'Someone'): User
@@ -120,6 +136,11 @@ class TallyMirrorHonestyTest extends TestCase
         $customer = Customer::create(['code' => 'CUST-1', 'name' => 'Aqua Traders', 'gstin' => '33AAACA1111A1Z5']);
         $order = SalesOrder::create(['customer_id' => $customer->id, 'status' => SalesOrderStatus::Confirmed, 'order_date' => '2026-08-09']);
         $line = $order->lines()->create(['item_id' => $bottle->id, 'quantity' => '2000', 'unit_price' => '4.50', 'quantity_delivered' => 0]);
+        // The item and the customer are minted HERE, after setUp's seeding ran,
+        // so complete them — an HSN with a rate behind it, the customer's Tally
+        // ledger name and state — before the voucher is assembled. Neither the
+        // GSTIN nor anything else set above is overwritten.
+        $this->completeSalesTallyMastersOnExistingRows();
         $invoiceId = $this->postJson('/api/v1/sales/invoices', [
             'sales_order_id' => $order->id,
             'invoice_date' => '2026-08-10',

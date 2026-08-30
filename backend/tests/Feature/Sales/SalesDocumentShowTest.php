@@ -20,6 +20,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -52,6 +53,7 @@ use Tests\TestCase;
 class SalesDocumentShowTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     private const TALLY_LINK_KEYS = ['entry_id', 'voucher_type', 'status', 'voucher_number', 'synced_at', 'flags', 'link'];
 
@@ -77,6 +79,15 @@ class SalesDocumentShowTest extends TestCase
         $this->bottle = Item::create(['sku' => 'BTL-500', 'name' => '500ml PET Bottle', 'uom' => 'Nos', 'tally_stock_item_guid' => 'itm-bottle']);
         $this->fg = Warehouse::create(['code' => 'FG', 'name' => 'FG Store', 'tally_guid' => 'gd-fg']);
         $this->customer = Customer::create(['code' => 'CUST-1', 'name' => 'Aqua Traders', 'gstin' => '33AAACA1111A1Z5']);
+
+        // The Sales voucher is this file's FIXTURE, not its subject: it issues an
+        // invoice merely to get a 'Sales' row into the queue to link to.
+        // SalesVoucherPayload now refuses (and stages nothing) without the GST
+        // registration, ledger mappings, HSN/rate and customer ledger name, so
+        // seed them LAST — after the item, the customer and the single
+        // Tally-linked warehouse above, which the trait then leaves alone (a
+        // second godown would be ambiguous, and nothing here is overwritten).
+        $this->seedSalesTallyMasterData();
     }
 
     // ---- sales order ------------------------------------------------------

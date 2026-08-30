@@ -99,6 +99,7 @@ use App\Modules\Quality\Http\Controllers\SpcChartController;
 use App\Modules\Quality\Http\Controllers\SpcMeasurementController;
 use App\Modules\Sales\Http\Controllers\CustomerController;
 use App\Modules\Sales\Http\Controllers\DeliveryController;
+use App\Modules\Sales\Http\Controllers\FulfilmentControlController;
 use App\Modules\Sales\Http\Controllers\InvoiceController;
 use App\Modules\Sales\Http\Controllers\SalesAvailabilityController;
 use App\Modules\Sales\Http\Controllers\SalesCostInsightController;
@@ -596,6 +597,25 @@ Route::prefix('v1')->group(function () {
             // side Sales / Sales Order vouchers are NOT mirrored here
             // (DEC-20260809-003). Read-only; a bare object, not a row.
             Route::get('tally-mirror', [SalesTallyMirrorController::class, 'show']);
+
+        });
+
+        // THE SALES FULFILMENT CONTROL VIEW — one row per sales order line,
+        // and the ONE surface Sales, Store, Production, Quality and Accounts
+        // all read the same state from. Deliberately outside the
+        // `module:sales` group above: it is read by four teams, and OR
+        // semantics (EnsureModulePermission, Phase 7.5) mean holding ANY of
+        // the four modules' permission is enough. Nobody has to hold another
+        // team's permission to see the piece of paper they share.
+        //
+        // READ ONLY, and it stays that way: every act — hold, release,
+        // re-point, ask the floor, start, dispatch, invoice — stays on the
+        // screen that already owns and audits it.
+        Route::prefix('sales')->middleware('module:sales,inventory,production,quality')->group(function () {
+            Route::get('fulfilment-control', [FulfilmentControlController::class, 'index']);
+        });
+
+        Route::prefix('sales')->middleware('module:sales')->group(function () {
 
             // index takes the ListSalesOrdersRequest filters; show carries the
             // document's trace (deliveries with cartons, invoices, Tally links).

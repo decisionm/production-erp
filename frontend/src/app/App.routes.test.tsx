@@ -77,6 +77,7 @@ const ROUTE_TABLE = [
     '/sales/sales-orders',
     '/sales/deliveries',
     '/sales/invoices',
+    '/sales/fulfilment-control',
     '/finance/chart-of-accounts',
     '/finance/journal-entries',
     '/finance/reports',

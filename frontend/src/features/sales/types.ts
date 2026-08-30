@@ -528,3 +528,65 @@ export interface ItemAvailability {
     free: string;
     over_reserved: string;
 }
+
+/**
+ * THE SALES FULFILMENT CONTROL VIEW — one row per sales order line, shared by
+ * Sales, Store, Production, Quality and Accounts.
+ *
+ * `NotRecorded` is the load-bearing type here. Five fields can carry the
+ * literal string 'not_recorded' INSTEAD of a figure, because this build has no
+ * source for them. Each is paired with a `_detail` sentence explaining why.
+ * A client must render the words — never coerce them to 0, and never leave the
+ * cell blank, because on a factory floor a blank reads as "nothing to worry
+ * about".
+ */
+export const NOT_RECORDED = 'not_recorded';
+export type NotRecorded = typeof NOT_RECORDED;
+
+/** Who must act next, and why — the control view's headline column. */
+export interface FulfilmentBlocker {
+    code: string;
+    summary: string;
+    team: string;
+    /** The server's own ordering: higher means it needs a human sooner. */
+    severity: number;
+}
+
+export interface FulfilmentControlRow {
+    line_id: number;
+    sales_order_id: number;
+    order_status: string | null;
+    customer: { id: number; name: string } | null;
+    item: { id: number; sku: string; name: string; display_name: string | null; uom: string | null } | null;
+
+    ordered: string;
+    delivered: string;
+    invoiced: string;
+    available_stock: string;
+    held: string;
+    over_reserved: string;
+    shortfall: string;
+    dispatch_ready: string;
+
+    store: {
+        approved: string;
+        rejected: NotRecorded;
+        rejected_detail: string;
+        oldest_hold_at: string | null;
+        waiting_days: number | null;
+    };
+    production: {
+        requested: string;
+        status: string | null;
+        priority: number | null;
+        planned: NotRecorded;
+        planned_detail: string;
+        completed: NotRecorded;
+        completed_detail: string;
+    };
+    quality: { state: NotRecorded; detail: string };
+    customer_approval: { state: NotRecorded; detail: string };
+
+    expected_date: string | null;
+    blocker: FulfilmentBlocker;
+}

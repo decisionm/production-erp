@@ -18,6 +18,7 @@ use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -43,6 +44,7 @@ use Tests\TestCase;
 class SyncPayloadRateVisibilityTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     /**
      * Every key name that carries a price anywhere in this codebase's
@@ -166,15 +168,37 @@ class SyncPayloadRateVisibilityTest extends TestCase
 
     public function test_a_sales_invoice_is_stripped_of_the_same_keys_for_a_reader_without_finance(): void
     {
+        // The Sales voucher is this test's FIXTURE VEHICLE, not its subject:
+        // SalesVoucherPayload now refuses to stage one — and stages NOTHING —
+        // without the GST masters (registration, ledger roles, an HSN with a
+        // rate per item, one resolvable godown). The invoice is issued inside
+        // this method, so the seeding runs here, before it. The item and the
+        // party are REAL ROWS because the seeding completes rows, not
+        // in-memory models, and the voucher is assembled from the customer's
+        // Tally ledger name and state and the item's HSN and uom. The GRN
+        // fixture's warehouse above is never persisted, so the one godown the
+        // trait adds stays the only Tally-linked one and resolves.
+        $bottle = Item::create(['sku' => 'BTL-500', 'name' => '500ml PET Bottle', 'uom' => 'NOS']);
+        $party = Customer::create(['code' => 'CUST-5', 'name' => 'Sri Aurobindo Beverages']);
+        $this->seedSalesTallyMasterData();
+
         $line = new InvoiceLine(['quantity' => '1000.0000', 'unit_price' => '4.5000']);
-        $line->setRelation('item', new Item(['sku' => 'BTL-500', 'name' => '500ml PET Bottle']));
+        $line->setRelation('item', $bottle->fresh());
         $invoice = $this->existing(new Invoice(['invoice_date' => '2026-08-01']), 5);
         $invoice->setRelation('lines', collect([$line]));
-        $invoice->setRelation('customer', new Customer(['name' => 'Sri Aurobindo Beverages']));
+        $invoice->setRelation('customer', $party->fresh());
 
         $entry = app(TallySyncService::class)->enqueueSalesInvoice($invoice);
         $this->assertSame('4.5000', $entry->payload['lines'][0]['rate']);
-        $this->assertSame('4500.0000', $entry->payload['total_amount']);
+        // `total_amount` was retired when the Sales voucher was rebuilt on
+        // 31-Aug-2026. The GST-correct payload carries the pre-tax
+        // `taxable_value` and the tax-inclusive, rounded `party_amount` in its
+        // place, plus the tax figure on `tax_ledgers[].amount` — four money
+        // keys where there was one, and every one of them has to be gated.
+        $this->assertArrayNotHasKey('total_amount', $entry->payload, 'the retired key must not come back');
+        $this->assertSame('4500.0000', $entry->payload['taxable_value']);
+        $this->assertSame('5310', $entry->payload['party_amount'], 'goods 4500 + IGST 810, already whole');
+        $this->assertSame('810.0000', $entry->payload['tax_ledgers'][0]['amount']);
 
         // The agent first (Sanctum::actingAs below answers for every request
         // after it, SyncSummaryTest): the invoice reaches the agent whole.
@@ -192,6 +216,20 @@ class SyncPayloadRateVisibilityTest extends TestCase
         $this->assertArrayNotHasKey('rate', $row['payload']['lines'][0]);
         $this->assertArrayNotHasKey('amount', $row['payload']['lines'][0]);
         $this->assertArrayNotHasKey('total_amount', $row['payload']);
+
+        // EVERY money key the GST rewrite added, named one at a time. The
+        // walk above would catch a leak generically; these say WHICH figures
+        // must never reach a reader without finance standing, so a future
+        // change that reintroduces one fails here by name rather than in a
+        // path string.
+        $this->assertArrayNotHasKey('party_amount', $row['payload'], 'the tax-inclusive total is a rate');
+        $this->assertArrayNotHasKey('taxable_value', $row['payload'], 'the pre-tax total is a rate');
+        $this->assertArrayNotHasKey('amount', $row['payload']['tax_ledgers'][0], 'the tax figure is a rate');
+
+        // The LEDGER NAME survives on purpose: which ledger a voucher posts to
+        // is configuration a reader may see. Only the figure is withheld.
+        $this->assertSame('IGST', $row['payload']['tax_ledgers'][0]['ledger']);
+
         $this->assertSame('INV-5', $row['payload']['voucher_number']);
         $this->assertSame('Sri Aurobindo Beverages', $row['payload']['party_ledger']);
         $this->assertSame('1000.0000', $row['payload']['lines'][0]['quantity']);

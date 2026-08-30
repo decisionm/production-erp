@@ -5,6 +5,7 @@ import { buildSalesQuery } from './filters';
 import type {
     Customer,
     Delivery,
+    FulfilmentControlRow,
     Invoice,
     ItemAvailability,
     SalesCostInsight,
@@ -227,5 +228,16 @@ export async function getItemAvailability(itemIds: number[]): Promise<ItemAvaila
     const { data } = await api.get<{ data: ItemAvailability[] }>('/sales/availability', {
         params: { item_ids: itemIds },
     });
+    return data.data;
+}
+
+/**
+ * The shared fulfilment control view. Deliberately unpaginated and unfiltered:
+ * the server returns every line of every live order already ordered by who
+ * needs a human soonest, and a factory user reading "what is blocked" wants
+ * the whole board, not page 1 of it.
+ */
+export async function listFulfilmentControl(): Promise<FulfilmentControlRow[]> {
+    const { data } = await api.get<{ data: FulfilmentControlRow[] }>('/sales/fulfilment-control');
     return data.data;
 }
