@@ -59,6 +59,7 @@ class StoreProductionReturnRequest extends FormRequest
         $validator->after(function (Validator $validator): void {
             foreach ((array) $this->input('lines', []) as $index => $line) {
                 $this->assertAddressed($validator, (int) $index, $line);
+                $this->assertLedgerPrecision($validator, (int) $index, $line);
                 $this->assertWholeIfCounted($validator, (int) $index, $line);
             }
         });
@@ -97,34 +98,84 @@ class StoreProductionReturnRequest extends FormRequest
     }
 
     /**
+     * THE LEDGER KEEPS FOUR DECIMAL PLACES, so a fifth is refused rather than
+     * dropped.
+     *
+     * Every quantity on both paths is normalised with `bcadd(..., 4)` before
+     * it moves. Without this guard `1.23459` validates, is silently truncated
+     * to `1.2345`, and comes back as a 201 — the storekeeper is told a figure
+     * came home that is not the figure that moved. The difference is small and
+     * that is exactly what makes it dangerous: it never looks wrong, and it
+     * accumulates one return at a time.
+     *
+     * Refused, not rounded. A quantity nobody could have meant to type is a
+     * question for the person who typed it.
+     */
+    private function assertLedgerPrecision(Validator $validator, int $index, mixed $line): void
+    {
+        $quantity = $line['quantity'] ?? null;
+
+        if ($quantity === null || ! PlainDecimal::matches($quantity)) {
+            return;
+        }
+
+        $point = strpos((string) $quantity, '.');
+
+        if ($point === false) {
+            return;
+        }
+
+        $decimals = strlen(rtrim(substr((string) $quantity, $point + 1), '0'));
+
+        if ($decimals > 4) {
+            $validator->errors()->add(
+                "lines.{$index}.quantity",
+                'Quantities are kept to four decimal places. Round this to four before recording it.',
+            );
+        }
+    }
+
+    /**
      * HALF A TRAY DOES NOT COME BACK — the counted-material rule that
      * StoreStoreIssueReturnRequest applies to attributed returns, applied to
      * unattributed ones too. A fraction of a counted thing is meaningless in
      * either location, and this door writes to the same balances.
      *
-     * Only `items.uom` is read here: an unattributed line has no handover to
-     * carry a second unit. Where a store issue line IS named, that request's
-     * stricter both-units reading still governs, because the service hands
-     * the line to it untouched.
+     * BOTH UNITS ARE CONSULTED WHEN A HANDOVER IS NAMED, and this file used
+     * to claim it did not have to be — that `StoreStoreIssueReturnRequest`
+     * still governed an attributed line "because the service hands the line
+     * to it untouched". THAT WAS FALSE. `ProductionReturnService` calls
+     * `StoreIssueService::returnUnused()` — a SERVICE method — so no
+     * FormRequest of that other door ever runs on this path, and half a cap
+     * could come back through it with a 201. The rule is applied here, on
+     * both kinds of line.
+     *
+     * The two readings CAN disagree, and not only through a human edit:
+     * `ItemService::upsertFromTally` overwrites `items.uom` from Tally's
+     * BASEUNITS on every masters pull, unattended. So a fraction is refused
+     * if EITHER reading says the material is counted.
      */
     private function assertWholeIfCounted(Validator $validator, int $index, mixed $line): void
     {
+        $lineId = isset($line['store_issue_line_id']) ? (int) $line['store_issue_line_id'] : 0;
         $itemId = isset($line['item_id']) ? (int) $line['item_id'] : 0;
         $quantity = $line['quantity'] ?? null;
 
-        if ($itemId <= 0 || $quantity === null || ! PlainDecimal::matches($quantity)) {
+        if ($quantity === null || ! PlainDecimal::matches($quantity)) {
             return;
         }
 
-        // Attributed lines are bounded by the store-issue return rules, which
-        // include their own fractional check against BOTH units.
-        if (isset($line['store_issue_line_id']) && (int) $line['store_issue_line_id'] > 0) {
+        $units = $lineId > 0 ? $this->unitsOfHandover($lineId) : $this->unitsOfItem($itemId);
+
+        if ($units === []) {
             return;
         }
 
-        $uom = DB::table('items')->where('id', $itemId)->value('uom');
+        $counted = collect($units)
+            ->filter(fn ($uom) => trim((string) $uom) !== '')
+            ->contains(fn ($uom) => ! MeasurementType::forUom($uom)->permitsFractions());
 
-        if (trim((string) $uom) === '' || MeasurementType::forUom($uom)->permitsFractions()) {
+        if (! $counted) {
             return;
         }
 
@@ -132,18 +183,15 @@ class StoreProductionReturnRequest extends FormRequest
             return;
         }
 
+        $uom = collect($units)->first(fn ($unit) => trim((string) $unit) !== '');
+
         // BUT EVERYTHING STANDING MAY ALWAYS COME BACK. If a fractional
         // quantity is already sitting in production — issued before this rule
         // existed, or reclassified since — refusing it would strand it there
         // for ever. A refusal that traps stock is worse than the state it
-        // objects to. The service's residue bound still decides whether that
-        // whole figure is actually available.
-        $standing = DB::table('stock_balances')
-            ->where('item_id', $itemId)
-            ->where('warehouse_id', (int) ($this->productionWarehouseId() ?? 0))
-            ->value('quantity');
-
-        if ($standing !== null && bccomp((string) $quantity, (string) $standing, 4) === 0) {
+        // objects to. The service's own bound still decides whether that whole
+        // figure is actually available.
+        if ($this->isEverythingStanding($lineId, $itemId, (string) $quantity)) {
             return;
         }
 
@@ -152,6 +200,66 @@ class StoreProductionReturnRequest extends FormRequest
             "This material is measured in {$uom} — a whole number of items. Return a whole number, or the whole "
             .'quantity standing in production.',
         );
+    }
+
+    /**
+     * The units a handover reading has: the line's own, and its item master's.
+     *
+     * @return array<int, mixed>
+     */
+    private function unitsOfHandover(int $lineId): array
+    {
+        $line = DB::table('store_issue_lines as l')
+            ->join('items as i', 'i.id', '=', 'l.item_id')
+            ->where('l.id', $lineId)
+            ->first(['l.uom as line_uom', 'i.uom as item_uom']);
+
+        return $line === null ? [] : [$line->line_uom, $line->item_uom];
+    }
+
+    /** @return array<int, mixed> */
+    private function unitsOfItem(int $itemId): array
+    {
+        if ($itemId <= 0) {
+            return [];
+        }
+
+        $uom = DB::table('items')->where('id', $itemId)->value('uom');
+
+        return $uom === null ? [] : [$uom];
+    }
+
+    /**
+     * Is this the WHOLE of what is standing — the line's outstanding quantity
+     * for an attributed return, the production balance for an unattributed
+     * one? Only then may a fraction of a counted material come home.
+     */
+    private function isEverythingStanding(int $lineId, int $itemId, string $quantity): bool
+    {
+        if ($lineId > 0) {
+            $line = DB::table('store_issue_lines')
+                ->where('id', $lineId)
+                ->first(['quantity_issued', 'quantity_returned']);
+
+            if ($line === null) {
+                return false;
+            }
+
+            $outstanding = bcsub(
+                (string) ($line->quantity_issued ?? '0'),
+                (string) ($line->quantity_returned ?? '0'),
+                4,
+            );
+
+            return bccomp($quantity, $outstanding, 4) === 0;
+        }
+
+        $standing = DB::table('stock_balances')
+            ->where('item_id', $itemId)
+            ->where('warehouse_id', (int) ($this->productionWarehouseId() ?? 0))
+            ->value('quantity');
+
+        return $standing !== null && bccomp($quantity, (string) $standing, 4) === 0;
     }
 
     private function productionWarehouseId(): ?int

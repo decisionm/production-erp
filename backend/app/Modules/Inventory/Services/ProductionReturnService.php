@@ -216,13 +216,16 @@ class ProductionReturnService
 
         return DB::transaction(function () use ($lines, $toWarehouseId, $wipId, $recordedBy, $notes) {
             // ATTRIBUTED LINES ARE RESOLVED AND LOCKED FIRST, and the order
-            // is the point. StoreIssueService::returnUnused locks the ISSUE
-            // LINE and then moves stock, which locks the balance — line, then
-            // balance. Taking the balance first here (budgetsFor) and the
-            // line afterwards would give two concurrent returns of the same
-            // material opposite lock orders, and InnoDB resolves that by
-            // killing one of them at the end of a shift. So: lines, then
-            // balances, on both paths.
+            // is the point: StoreIssueService::returnUnused locks the ISSUE
+            // LINE and then moves stock. Taking them the other way round would
+            // give two concurrent returns of one material opposite orders, and
+            // InnoDB resolves that by killing one — at the end of a shift,
+            // which is the only time this screen is used.
+            //
+            // Only store_issue_lines is locked here. NOTHING on this path
+            // locks a balance before the transfer does, because the transfer's
+            // own order — bags, then balances — is pinned by
+            // StockOutflowQcHoldTest and must not be reversed.
             $attributed = $this->lockAttributedLines($this->attributedAsks($lines), $wipId);
 
             // Read ONCE, before the first line moves, and spent down as the
@@ -282,6 +285,11 @@ class ProductionReturnService
                     'to_warehouse_id' => $toWarehouseId,
                 ]);
             }
+
+            // THE GUARANTEE, taken after the unattributed moves and before
+            // the attributed ones: whatever went home, what is left standing
+            // in production must still cover every open handover.
+            $this->assertNothingTakenFromAnOpenIssue($this->unattributedItemIds($lines), $wipId);
 
             foreach ($attributed as $issueId => $issueLines) {
                 $issue = StoreIssue::query()->whereKey($issueId)->firstOrFail();
@@ -347,14 +355,20 @@ class ProductionReturnService
      * MOVES, and spent down as the lines are honoured: two lines of one
      * material must not each be told the whole residue is theirs.
      *
-     * THE BALANCE IS LOCKED BEFORE THE STANDING QUANTITY IS READ, and the
-     * materials are locked in ITEM-ID ORDER. Both matter under concurrency:
-     * the lock is what makes a second return of the same material wait and
-     * then re-read a balance this one has already spent, and a stable order
-     * is what stops two returns touching the same two materials from taking
-     * each other's rows in opposite orders. Note the guarantee is the
-     * DATABASE'S — `lockForUpdate` is a no-op on SQLite, so no test here can
-     * demonstrate it, and MySQL is where it has to hold.
+     * THESE READS TAKE NO LOCK, deliberately, and that is a correction.
+     *
+     * An earlier version locked the balance here, before the transfer read
+     * `material_bags`. `StockOutflowQcHoldTest::test_bags_are_read_before_
+     * balances_in_every_decrement` pins the opposite order — BAGS FIRST,
+     * BALANCE SECOND, on every outflow door, "so no pair of these can wait on
+     * each other" — and reversing it here would have made this door the one
+     * pair that can. Trading a theoretical deadlock for a pinned one is not a
+     * fix.
+     *
+     * So this is a PRE-CHECK, not the guarantee: it exists to refuse early
+     * with figures a person can read. The guarantee is `assertNothingTakenFrom
+     * AnOpenIssue()`, which re-reads the same arithmetic AFTER the moves —
+     * under the locks the transfers themselves took, in the contract's order.
      *
      * @param  array<int, int>  $itemIds
      * @return array<int, string>
@@ -370,11 +384,7 @@ class ProductionReturnService
         $balances = [];
 
         foreach ($itemIds as $itemId) {
-            $balances[$itemId] = (string) (StockBalance::query()
-                ->where('item_id', $itemId)
-                ->where('warehouse_id', $wipId)
-                ->lockForUpdate()
-                ->value('quantity') ?? '0');
+            $balances[$itemId] = $this->balanceOf($itemId, $wipId);
         }
 
         // One join for every material on the return, not one per line.
@@ -390,6 +400,56 @@ class ProductionReturnService
         }
 
         return $budgets;
+    }
+
+    /**
+     * AFTER THE MOVES: is every open handover still covered by what is
+     * standing in production?
+     *
+     * This is the real bound, and the pre-check in budgetsFor() is only its
+     * friendlier face. By the time this runs the transfers have taken their
+     * own row locks — in the order `StockOutflowQcHoldTest` pins, bags before
+     * balances — so the figures it reads are the serialized ones. A return
+     * that raced another return of the same material past the pre-check is
+     * refused here, and the whole transaction rolls back.
+     *
+     * @param  array<int, int>  $itemIds
+     */
+    private function assertNothingTakenFromAnOpenIssue(array $itemIds, int $wipId): void
+    {
+        if ($itemIds === []) {
+            return;
+        }
+
+        $standing = $this->standingByItem($itemIds, $wipId);
+
+        foreach ($itemIds as $itemId) {
+            $attributed = $standing
+                ->get($itemId, collect())
+                ->reduce(fn (string $carry, array $line) => bcadd($carry, $line['outstanding'], 4), '0.0000');
+
+            $left = $this->balanceOf($itemId, $wipId);
+
+            if (bccomp($left, $attributed, 4) === -1) {
+                throw ValidationException::withMessages([
+                    'lines' => $this->residueRefusal(
+                        $itemId,
+                        $wipId,
+                        '0.0000',
+                        bcsub($attributed, $left, 4),
+                    ),
+                ]);
+            }
+        }
+    }
+
+    /** What the books hold for one material in one location, to 4 places. */
+    private function balanceOf(int $itemId, int $warehouseId): string
+    {
+        return (string) (StockBalance::query()
+            ->where('item_id', $itemId)
+            ->where('warehouse_id', $warehouseId)
+            ->value('quantity') ?? '0');
     }
 
     /** max(0, on floor − standing against open issues), to 4 places. */

@@ -55,6 +55,9 @@ class ProductionReturnToStoreTest extends TestCase
 
     private Item $retiredCap;
 
+    /** Counted, active and issuable — the handover half of the fractional rule. */
+    private Item $preform;
+
     private Warehouse $store;
 
     private Warehouse $wip;
@@ -77,6 +80,11 @@ class ProductionReturnToStoreTest extends TestCase
         // A deactivated counted material — the live shape of the orphans.
         $this->retiredCap = Item::create([
             'sku' => 'CAP-28MM', 'name' => '28mm Tamper-Evident Cap', 'uom' => 'Nos', 'is_active' => false,
+        ]);
+
+        $this->preform = Item::create([
+            'sku' => 'PREFORM-28G', 'name' => 'PET Preform 28g', 'uom' => 'Nos',
+            'is_production_input' => true,
         ]);
 
         app(ProductionWipLocationResolver::class)->setWarehouseId($this->wip->id);
@@ -491,6 +499,57 @@ class ProductionReturnToStoreTest extends TestCase
 
         $this->assertSame('0.0000', $this->balance($this->wip, $this->retiredCap));
         $this->assertSame('2.5000', $this->balance($this->store, $this->retiredCap));
+    }
+
+    public function test_half_a_cap_does_not_come_back_against_a_handover_either(): void
+    {
+        // The service calls returnUnused() directly, so the store-issue
+        // return's own FormRequest never runs on this path. Before the rule
+        // was applied here, half a counted cap came back with a 201.
+        $this->stockInStore($this->preform, '4000');
+
+        $issue = $this->postJson('/api/v1/inventory/store-issues', [
+            'received_by' => $this->supervisor->id,
+            'lines' => [['item_id' => $this->preform->id, 'quantity' => '100']],
+        ])->assertCreated()->json('data');
+
+        $this->postJson('/api/v1/inventory/production-returns', [
+            'to_warehouse_id' => $this->store->id,
+            'lines' => [['store_issue_line_id' => $issue['lines'][0]['id'], 'quantity' => '10.5']],
+        ])->assertStatus(422);
+
+        $this->assertSame('0.0000', (string) StoreIssue::query()->sole()->lines()->sole()->quantity_returned);
+        $this->assertSame('100.0000', $this->balance($this->wip, $this->preform));
+
+        // A whole number still comes home through the same door.
+        $this->postJson('/api/v1/inventory/production-returns', [
+            'to_warehouse_id' => $this->store->id,
+            'lines' => [['store_issue_line_id' => $issue['lines'][0]['id'], 'quantity' => '10']],
+        ])->assertCreated();
+
+        $this->assertSame('10.0000', (string) StoreIssue::query()->sole()->lines()->sole()->quantity_returned);
+    }
+
+    public function test_a_fifth_decimal_place_is_refused_not_quietly_dropped(): void
+    {
+        // bcadd(..., 4) would truncate 1.23459 to 1.2345 and answer 201: the
+        // storekeeper told a figure came home that is not the one that moved.
+        $this->openingStockInProduction($this->resin, '860');
+
+        $this->postJson('/api/v1/inventory/production-returns', [
+            'to_warehouse_id' => $this->store->id,
+            'lines' => [['item_id' => $this->resin->id, 'quantity' => '1.23459']],
+        ])->assertStatus(422)->assertJsonFragment([
+            'Quantities are kept to four decimal places. Round this to four before recording it.',
+        ]);
+
+        $this->assertSame('860.0000', $this->balance($this->wip, $this->resin));
+
+        // Four places still work, and trailing zeros are not "precision".
+        $this->postJson('/api/v1/inventory/production-returns', [
+            'to_warehouse_id' => $this->store->id,
+            'lines' => [['item_id' => $this->resin->id, 'quantity' => '1.234500']],
+        ])->assertCreated();
     }
 
     public function test_the_door_needs_inventory_manage(): void
