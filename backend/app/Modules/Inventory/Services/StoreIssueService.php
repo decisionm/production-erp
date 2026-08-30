@@ -14,6 +14,7 @@ use App\Modules\Inventory\Models\StoreIssueBagScan;
 use App\Modules\Inventory\Models\StoreIssueLine;
 use App\Modules\Inventory\Models\Warehouse;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -87,32 +88,130 @@ class StoreIssueService
         // saying so first keeps a half-applied issue impossible.
         $wip = $this->wip->warehouseOrFail();
 
-        return DB::transaction(function () use ($data, $issuedBy, $wip) {
-            $issue = StoreIssue::create([
-                'issue_number' => $this->nextIssueNumber(),
-                'material_request_id' => $data['material_request_id'] ?? null,
-                'status' => StoreIssueStatus::Issued,
-                'issued_by' => $issuedBy,
-                'received_by' => $data['received_by'] ?? null,
-                'issued_at' => $data['issued_at'] ?? now(),
-                'notes' => $data['notes'] ?? null,
-            ]);
+        // IDEMPOTENCY — the goods-receipt pattern verbatim (GoodsReceiptService
+        // has replayed on `receipt_key` since 2026_07_30_000001).
+        //
+        // Without it a double-tap, or a request retried after a timeout, wrote
+        // a SECOND handover: two issue numbers and two transfer pairs moving
+        // material into Production/WIP twice. Nothing in the ledger looked
+        // wrong afterwards — both issues were real and every balance stayed
+        // consistent — the store had simply handed over twice what it believed.
+        $issueKey = isset($data['issue_key']) ? trim((string) $data['issue_key']) : null;
+        $issueKey = ($issueKey === null || $issueKey === '') ? null : $issueKey;
+        $payloadHash = $issueKey !== null ? $this->payloadHash($data) : null;
 
-            $deltas = [];
+        // The cheap read first: the ordinary replay is a retry long after the
+        // winner committed, and it should not have to open a transaction.
+        if ($issueKey !== null) {
+            $existing = StoreIssue::query()->where('issue_key', $issueKey)->first();
 
-            foreach ($data['lines'] ?? [] as $index => $line) {
-                $created = $this->addLine($issue, $wip, $line, "lines.{$index}");
+            if ($existing !== null) {
+                return $this->replay($existing, $payloadHash);
+            }
+        }
 
-                if ($created->material_request_line_id !== null) {
-                    $key = (int) $created->material_request_line_id;
-                    $deltas[$key] = bcadd($deltas[$key] ?? '0.0000', (string) $created->quantity_issued, 4);
+        try {
+            return DB::transaction(function () use ($data, $issuedBy, $wip, $issueKey, $payloadHash) {
+                // Read again under the row lock: two requests can both miss
+                // the read above, and everything short of a true constraint
+                // race is settled here.
+                if ($issueKey !== null) {
+                    $existing = StoreIssue::query()
+                        ->where('issue_key', $issueKey)
+                        ->lockForUpdate()
+                        ->first();
+
+                    if ($existing !== null) {
+                        return $this->replay($existing, $payloadHash);
+                    }
+                }
+
+                $issue = StoreIssue::create([
+                    'issue_number' => $this->nextIssueNumber(),
+                    'issue_key' => $issueKey,
+                    'issue_payload_hash' => $payloadHash,
+                    'material_request_id' => $data['material_request_id'] ?? null,
+                    'status' => StoreIssueStatus::Issued,
+                    'issued_by' => $issuedBy,
+                    'received_by' => $data['received_by'] ?? null,
+                    'issued_at' => $data['issued_at'] ?? now(),
+                    'notes' => $data['notes'] ?? null,
+                ]);
+
+                $deltas = [];
+
+                foreach ($data['lines'] ?? [] as $index => $line) {
+                    $created = $this->addLine($issue, $wip, $line, "lines.{$index}");
+
+                    if ($created->material_request_line_id !== null) {
+                        $key = (int) $created->material_request_line_id;
+                        $deltas[$key] = bcadd($deltas[$key] ?? '0.0000', (string) $created->quantity_issued, 4);
+                    }
+                }
+
+                $this->fulfilRequest($issue, $deltas);
+
+                return $issue->fresh(['lines.item', 'bagScans']);
+            });
+        } catch (QueryException $exception) {
+            // A genuine race: both transactions missed both reads, the unique
+            // index let one commit and rolled the other back BEFORE it could
+            // move stock a second time. Return the winner rather than an error
+            // — from the caller's side the handover did happen.
+            if ($issueKey !== null) {
+                $existing = StoreIssue::query()->where('issue_key', $issueKey)->first();
+
+                if ($existing !== null) {
+                    return $this->replay($existing, $payloadHash);
                 }
             }
 
-            $this->fulfilRequest($issue, $deltas);
+            throw $exception;
+        }
+    }
 
-            return $issue->fresh(['lines.item', 'bagScans']);
-        });
+    /**
+     * The same key twice. Identical data replays the original handover;
+     * DIFFERENT data is refused.
+     *
+     * The refusal is the load-bearing half. Without the payload check, a
+     * retry carrying CORRECTED quantities would return the first issue and
+     * report success while writing nothing — and the store would believe the
+     * correction had been recorded. Better to say plainly that the key is
+     * spent.
+     */
+    private function replay(StoreIssue $issue, ?string $payloadHash): StoreIssue
+    {
+        if ($issue->issue_payload_hash !== $payloadHash) {
+            throw ValidationException::withMessages([
+                'issue_key' => 'This issue key was already used for a different handover. Generate a new key.',
+            ]);
+        }
+
+        return $issue->fresh(['lines.item', 'bagScans']);
+    }
+
+    /**
+     * A stable fingerprint of the handover, so "the same request" means the
+     * same MATERIAL and QUANTITIES rather than the same byte order — a client
+     * that serialises its JSON keys differently on a retry is still retrying.
+     */
+    private function payloadHash(array $data): string
+    {
+        return hash('sha256', json_encode($this->canonicalize($data), JSON_THROW_ON_ERROR));
+    }
+
+    private function canonicalize(mixed $value): mixed
+    {
+        if (! is_array($value)) {
+            return $value;
+        }
+
+        if (! array_is_list($value)) {
+            ksort($value);
+        }
+
+        return array_map(fn (mixed $item) => $this->canonicalize($item), $value);
     }
 
     /**

@@ -207,6 +207,17 @@ export interface CreateMaterialRequestPayload {
  * this screen kept in step by hand.
  */
 export interface IssueToProductionPayload {
+    /**
+     * The idempotency key for this handover. A retry carrying the same key
+     * replays the original issue instead of moving the material a second
+     * time; the same key with DIFFERENT quantities is refused outright, so a
+     * correction can never be mistaken for a retry.
+     *
+     * Always sent by this app. It is optional on the wire only so an existing
+     * integration keeps working — an optional protection nobody exercises
+     * protects nothing.
+     */
+    issue_key: string;
     material_request_id: number;
     received_by?: number | null;
     notes?: string | null;

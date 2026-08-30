@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Col, DatePicker, Descriptions, Drawer, Empty, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import type { Dayjs } from 'dayjs';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { listShifts, listWorkCenters, machineLabel } from '@/features/production/api';
 import { itemLabel } from '@/lib/itemLabel';
 import { ListEmpty } from '@/lib/ListEmpty';
@@ -60,6 +60,24 @@ const OPEN_STATUSES = OPEN_REQUEST_STATUSES;
  * either fully issued or cancelled. No cadence is assumed — a request is not
  * a daily ritual, and nothing here expects one issue per day.
  */
+/**
+ * A fresh idempotency key for one handover.
+ *
+ * The lifecycle is the whole point, and it is deliberately asymmetric:
+ *   · a FAILED submit keeps the key, so the storekeeper's retry — after a
+ *     timeout, a flaky connection, a double-tap — replays the original issue
+ *     instead of handing the material over twice;
+ *   · a SUCCESSFUL submit rotates it, because the next part-issue against the
+ *     same request is a genuinely new handover and must not replay the last.
+ *
+ * Same shape as the goods receipt's key (GoodsReceiptsPage.newReceiptKey).
+ */
+function newIssueKey(): string {
+    return typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `si-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 export default function StoreIssueQueuePage() {
     const queryClient = useQueryClient();
     /**
@@ -113,9 +131,17 @@ export default function StoreIssueQueuePage() {
     const request = requestQuery.data;
     const issues = request?.issues ?? issuesQuery.data?.data ?? [];
 
+    // Re-minted whenever a different request is opened: two requests are two
+    // handovers and must never share a key.
+    const [issueKey, setIssueKey] = useState(newIssueKey);
+    useEffect(() => {
+        setIssueKey(newIssueKey());
+    }, [openRequestId]);
+
     const issueMutation = useMutation({
         mutationFn: () =>
             issueToProduction({
+                issue_key: issueKey,
                 material_request_id: (request as MaterialRequest).id,
                 received_by: receivedBy,
                 lines: Object.entries(issueQuantities)
@@ -142,6 +168,9 @@ export default function StoreIssueQueuePage() {
                 + 'A fully issued request leaves this queue; find it under "Fully issued".',
             );
             setIssueQuantities({});
+            // Rotate ONLY here. An error deliberately leaves the key alone so
+            // the retry is a replay rather than a second handover.
+            setIssueKey(newIssueKey());
             refresh();
         },
         onError: (error) => message.error(apiRefusalMessage(error, REFUSAL_MESSAGE.issue_refused)),

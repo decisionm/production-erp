@@ -18,7 +18,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * All writes go through StoreIssueService.
  */
 #[Fillable([
-    'issue_number', 'material_request_id', 'status', 'issued_by', 'received_by',
+    'issue_number', 'issue_key', 'issue_payload_hash',
+    'material_request_id', 'status', 'issued_by', 'received_by',
     'issued_at', 'closed_at', 'closed_by', 'cancellation_reason', 'notes',
 ])]
 class StoreIssue extends Model
