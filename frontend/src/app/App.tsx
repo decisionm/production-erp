@@ -24,6 +24,7 @@ import CapacityPlanPage from '@/features/production/pages/CapacityPlanPage';
 import CartonTracePage from '@/features/production/pages/CartonTracePage';
 import FactoryDayBinPage from '@/features/production/pages/FactoryDayBinPage';
 import MaterialRequestsPage from '@/features/material-flow/pages/MaterialRequestsPage';
+import ProductionReturnPage from '@/features/material-flow/pages/ProductionReturnPage';
 import StoreIssueQueuePage from '@/features/material-flow/pages/StoreIssueQueuePage';
 import MrpPage from '@/features/production/pages/MrpPage';
 import ProductionQueuePage from '@/features/production/pages/ProductionQueuePage';
@@ -120,6 +121,7 @@ export default function App() {
                                         because the store is its reader — the floor's
                                         half is /production/material-requests. */}
                                     <Route path="/inventory/store-issue-queue" element={<StoreIssueQueuePage />} />
+                                    <Route path="/inventory/production-returns" element={<ProductionReturnPage />} />
                                     {/* SALES ORDER FULFILMENT, the store's half:
                                         the queue of order lines waiting on stock,
                                         and the ETA dashboard behind what the store

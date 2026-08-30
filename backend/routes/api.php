@@ -30,6 +30,7 @@ use App\Modules\Inventory\Http\Controllers\MaterialBagController;
 use App\Modules\Inventory\Http\Controllers\MaterialLotController;
 use App\Modules\Inventory\Http\Controllers\MaterialLotCostVersionController;
 use App\Modules\Inventory\Http\Controllers\MaterialRequestController;
+use App\Modules\Inventory\Http\Controllers\ProductionReturnController;
 use App\Modules\Inventory\Http\Controllers\SerialNumberController;
 use App\Modules\Inventory\Http\Controllers\StockBalanceController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
@@ -250,6 +251,19 @@ Route::prefix('v1')->group(function () {
             Route::post('store-issues/{store_issue}/returns', [StoreIssueController::class, 'returnUnused']);
             Route::post('store-issues/{store_issue}/complete', [StoreIssueController::class, 'complete']);
             Route::post('store-issues/{store_issue}/cancel', [StoreIssueController::class, 'cancel']);
+
+            /*
+             * THE WAY HOME FROM THE PRODUCTION AREA — the daily return.
+             *
+             * `returnable` is the read: what is standing in production, split
+             * into the part open store issues are holding and the part that
+             * answers no document. The POST takes both kinds in ONE call —
+             * lines carry an OPTIONAL store_issue_line_id — because a
+             * storekeeper handing material back should not have to know which
+             * endpoint their kilograms belong to. See ProductionReturnService.
+             */
+            Route::get('production-returns/returnable', [ProductionReturnController::class, 'returnable']);
+            Route::post('production-returns', [ProductionReturnController::class, 'store']);
 
             // Phase 6 traceability (store side): supplier lots + bags with
             // unique barcodes, and the FIFO pick list. The whole surface
