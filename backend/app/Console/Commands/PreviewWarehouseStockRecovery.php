@@ -70,21 +70,64 @@ class PreviewWarehouseStockRecovery extends Command
 
     public const string VERDICT_NONE = 'VERDICT: nothing stranded — every non-zero balance sits in a warehouse a person can still pick.';
 
-    /** A movement reference that proves the row is a rehearsal opening balance. */
-    private const PILOT_PATTERN = '/provisional opening stock/i';
-
-    /** A movement reference that proves the row is a wiring check or a demo document. */
+    /**
+     * A wiring check or a demo document. Checked FIRST, so a reference that is
+     * both an opening balance and a test ("Opening stock for SPE-3 test")
+     * lands in the stricter bucket rather than the kinder one.
+     */
     private const TEST_PATTERN = '/\bTEST\b|\bDEMO\b/i';
+
+    /**
+     * ANY opening balance, not just the one the pilot happened to write.
+     *
+     * The first cut of this matched the literal 'Provisional opening stock
+     * (pilot)'. That is the string this factory used, and matching it would
+     * have worked — right up to 'Opening stock top-up', which is a wiring
+     * artefact on the live instance, matches neither that literal nor the
+     * TEST pattern, and would therefore have been classified as ordinary
+     * factory stock AND printed with the live Store as its destination. A
+     * report that proposes moving material the factory never received is the
+     * exact failure this command exists to prevent, so the rule is drawn on
+     * the CONCEPT rather than on one factory's wording:
+     *
+     *   an opening balance is a figure somebody seeded, not a document
+     *   recording that material arrived.
+     *
+     * So every 'opening stock' reference is withheld and a person looks at
+     * it. That is deliberately over-inclusive: a genuine opening balance that
+     * really is standing in the store is withheld too, and the cost of that
+     * is one owner conversation, against the cost of silently crediting the
+     * Store with thousands of kilograms it does not have.
+     */
+    private const OPENING_PATTERN = '/opening stock/i';
 
     public function handle(ProductionWipLocationResolver $wipLocation): int
     {
+        // DB::table, not the model, and that is on purpose: Warehouse soft
+        // deletes, and a TRASHED warehouse still carries its stock_balances
+        // rows (the one cascadeSide() check with no database backstop). An
+        // Eloquent read would apply the soft-delete scope and quietly drop
+        // exactly the rows most likely to be stranded — the ones nobody can
+        // even see in the admin list any more.
         $warehouses = DB::table('warehouses')
-            ->select(['id', 'code', 'name', 'is_active', 'tally_guid'])
+            ->select(['id', 'code', 'name', 'is_active', 'tally_guid', 'deleted_at'])
             ->orderBy('id')
             ->get()
             ->keyBy('id');
 
-        $active = $warehouses->filter(fn ($w) => (bool) $w->is_active);
+        // A trashed row is not pickable whatever its is_active says, so it is
+        // never a destination — and its stock is stranded by definition.
+        $active = $warehouses->filter(fn ($w) => (bool) $w->is_active && $w->deleted_at === null);
+
+        $trashedWithRows = $warehouses->filter(fn ($w) => $w->deleted_at !== null);
+
+        if ($trashedWithRows->isNotEmpty()) {
+            $this->warn(sprintf(
+                '  %d warehouse row(s) are SOFT DELETED and are treated as unpickable here: %s.',
+                $trashedWithRows->count(),
+                $trashedWithRows->pluck('code')->implode(', '),
+            ));
+        }
 
         // The WIP row through the SAME resolver the issue path uses, so the
         // two can never disagree about which row is Production/WIP.
@@ -134,10 +177,10 @@ class PreviewWarehouseStockRecovery extends Command
 
             if (preg_match(self::TEST_PATTERN, $reference) === 1) {
                 $evidence[$key]['test'] = true;
-            } elseif (preg_match(self::PILOT_PATTERN, $reference) === 1) {
-                $evidence[$key]['pilot'] = true;
+            } elseif (preg_match(self::OPENING_PATTERN, $reference) === 1) {
+                $evidence[$key]['opening'] = true;
             } else {
-                $evidence[$key]['real'] = true;
+                $evidence[$key]['documented'] = true;
             }
         }
 
@@ -150,7 +193,7 @@ class PreviewWarehouseStockRecovery extends Command
 
         $rows = [];
         $negatives = [];
-        $buckets = ['REAL' => 0, 'PILOT' => 0, 'TEST' => 0, 'MIXED' => 0];
+        $buckets = ['DOCUMENTED' => 0, 'OPENING' => 0, 'TEST' => 0, 'MIXED' => 0];
 
         foreach (DB::table('stock_balances')
             ->select(['item_id', 'warehouse_id', 'quantity'])
@@ -159,7 +202,10 @@ class PreviewWarehouseStockRecovery extends Command
             ->lazy(1000) as $balance) {
             $warehouse = $warehouses[$balance->warehouse_id] ?? null;
 
-            if ($warehouse === null || (bool) $warehouse->is_active) {
+            // "Pickable" is the whole test, and it is not is_active alone: a
+            // soft-deleted row can still carry is_active = true and no picker
+            // will ever offer it.
+            if ($warehouse === null || $active->has($warehouse->id)) {
                 continue;
             }
 
@@ -176,8 +222,8 @@ class PreviewWarehouseStockRecovery extends Command
             $key = "{$balance->item_id}@{$balance->warehouse_id}";
             $seen = $evidence[$key] ?? [];
             $kinds = array_values(array_filter([
-                isset($seen['real']) ? 'REAL' : null,
-                isset($seen['pilot']) ? 'PILOT' : null,
+                isset($seen['documented']) ? 'DOCUMENTED' : null,
+                isset($seen['opening']) ? 'OPENING' : null,
                 isset($seen['test']) ? 'TEST' : null,
             ]));
             $bucket = match (true) {
@@ -198,7 +244,7 @@ class PreviewWarehouseStockRecovery extends Command
                 'bucket' => $bucket.($negative ? ' (negative)' : ''),
                 'destination' => $negative
                     ? '— resolve first'
-                    : ($bucket === 'REAL' ? ($destination->code ?? '— unresolved') : '— owner decision'),
+                    : ($bucket === 'DOCUMENTED' ? ($destination->code ?? '— unresolved') : '— owner decision'),
                 'movements' => (string) ($seen['count'] ?? 0),
                 'lots' => (string) ($lotsByItem[$balance->item_id] ?? 0),
                 'bags here' => (string) ($bagsByWarehouse[$balance->warehouse_id] ?? 0),
@@ -244,18 +290,30 @@ class PreviewWarehouseStockRecovery extends Command
             }
         }
 
-        $movable = $buckets['REAL'];
-        $withheld = $buckets['PILOT'] + $buckets['TEST'] + $buckets['MIXED'];
+        $candidates = $buckets['DOCUMENTED'];
+        $withheld = $buckets['OPENING'] + $buckets['TEST'] + $buckets['MIXED'];
 
         $this->newLine();
         $this->line(sprintf(
-            '  VERDICT: %d row(s) carry ordinary factory documents and are candidates to recover into the Store.'
-            .' %d row(s) are withheld — their movements are rehearsal openings, wiring checks or a mixture, and'
-            .' moving them would credit the Store with material the factory never received.',
-            $movable,
+            '  VERDICT: %d row(s) are backed only by ordinary factory documents and are CANDIDATES to recover'
+            .' into the Store. %d row(s) are withheld — their movements are opening balances, wiring checks or'
+            .' a mixture, and moving those would credit the Store with material the factory never received.',
+            $candidates,
             $withheld,
         ));
-        $this->line('  Nothing was changed. What happens to the withheld rows is an owner decision, not a side effect of this check.');
+
+        $this->newLine();
+        $this->warn('  TWO THINGS A PERSON MUST SETTLE BEFORE ANY OF THIS MOVES:');
+        $this->warn('   1. Does a document reference from a retired location prove the material is PHYSICALLY there'
+            .' today? This report reads references, not shelves. The candidate list above is only as good as that'
+            .' assumption, and confirming it is the owner\'s call, not this command\'s.');
+        $this->warn('   2. A transfer carries the SOURCE row\'s average cost into the destination, where the'
+            .' weighted average is recomputed. Recovering these rows would therefore re-value the Store\'s existing'
+            .' stock of the same items, blending in costs that came from a rehearsal seeder or an older Tally'
+            .' company. That is an Accounts consequence and it is not this report\'s to accept.');
+
+        $this->newLine();
+        $this->line('  Nothing was changed. This command has no write mode. What happens next is an owner decision.');
 
         return self::SUCCESS;
     }

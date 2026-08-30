@@ -33,7 +33,26 @@ import type { User } from '@/features/auth/types';
 // on the constant itself.
 import { ADOPTED_MODULES } from '@/lib/adoptedModules';
 
-const SIDER_WIDTH = 200;
+/**
+ * WIDE ENOUGH FOR THE LONGEST LABEL, measured rather than guessed.
+ *
+ * At 200 a child entry gave its label a 113px box, and NINE of the ten
+ * longest names in this menu overflowed it — "Barcode & Lab…",
+ * "Store Issue Qu…", "Stock Moveme…", "Fulfilment Plan…",
+ * "Production Configurat…" and the rest. A menu whose entries cannot be read
+ * is not a menu, and the factory reported exactly that.
+ *
+ * The arithmetic, measured on the rendered menu (Ant Design child item, the
+ * 14px system stack): 48px padding-left + 175px for the longest label
+ * ("Non-Conformance Reports") + 16px padding-right = 239px. 248 leaves nine
+ * pixels of headroom for a scrollbar and sub-pixel rounding.
+ *
+ * SHORTENING THE NAMES WAS THE OTHER OPTION AND WAS REJECTED: they are what
+ * the factory calls these screens, several are pinned by
+ * AppLayout.nav.test.ts, and renaming a page to fit a number is the wrong way
+ * round. Widen the shelf, keep the words.
+ */
+const SIDER_WIDTH = 248;
 const SIDER_COLLAPSED_WIDTH = 80;
 
 interface NavLeaf {

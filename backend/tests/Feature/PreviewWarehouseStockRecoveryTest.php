@@ -89,18 +89,18 @@ class PreviewWarehouseStockRecoveryTest extends TestCase
 
         $this->artisan('inventory:preview-warehouse-recovery')
             ->expectsOutputToContain('BTL-500')
-            ->expectsOutputToContain('REAL')
+            ->expectsOutputToContain('DOCUMENTED')
             ->expectsOutputToContain('STORE')
             ->assertSuccessful();
     }
 
-    public function test_a_rehearsal_opening_balance_is_withheld_rather_than_moved(): void
+    public function test_an_opening_balance_is_withheld_rather_than_moved(): void
     {
         $resin = $this->item('PILOT-RESIN');
         $this->stranded($resin, $this->retired, '9000.0000', 'Provisional opening stock (pilot)');
 
         $this->artisan('inventory:preview-warehouse-recovery')
-            ->expectsOutputToContain('PILOT')
+            ->expectsOutputToContain('OPENING')
             ->expectsOutputToContain('owner decision')
             ->expectsOutputToContain('material the factory never received')
             ->assertSuccessful();
@@ -156,6 +156,57 @@ class PreviewWarehouseStockRecoveryTest extends TestCase
 
         $this->artisan('inventory:preview-warehouse-recovery')
             ->expectsOutputToContain('MIXED')
+            ->assertSuccessful();
+    }
+
+    /**
+     * THE PREFIX COLLISION, pinned.
+     *
+     * "Opening stock top-up" is a wiring artefact on the live instance. It
+     * contains neither TEST nor DEMO, and it is not the literal string the
+     * pilot wrote, so a classifier keyed on those two would have called it an
+     * ordinary factory document AND printed the live Store as its
+     * destination — proposing that the factory be credited with material it
+     * never received. The rule is drawn on "opening stock" as a concept for
+     * exactly this reason, and this test is what stops it drifting back.
+     */
+    public function test_an_opening_stock_variant_is_never_mistaken_for_a_factory_document(): void
+    {
+        foreach ([
+            'Opening stock top-up',
+            'Opening stock for SPE-3 test',
+            'Provisional opening stock (pilot)',
+            'OPENING STOCK',
+        ] as $index => $reference) {
+            $item = $this->item('OPENING-'.$index);
+            $this->stranded($item, $this->retired, '100.0000', $reference);
+        }
+
+        $this->artisan('inventory:preview-warehouse-recovery')
+            ->doesntExpectOutputToContain('DOCUMENTED')
+            ->expectsOutputToContain('owner decision')
+            ->assertSuccessful();
+    }
+
+    public function test_a_soft_deleted_warehouse_is_unpickable_and_its_stock_is_still_listed(): void
+    {
+        $gone = Warehouse::create(['code' => 'GONE', 'name' => 'Deleted Store', 'is_active' => true]);
+        $this->stranded($this->item('LOST-BTL', 'Nos.'), $gone, '500.0000', 'QC release to FG store');
+        $gone->delete();
+
+        $this->artisan('inventory:preview-warehouse-recovery')
+            ->expectsOutputToContain('SOFT DELETED')
+            ->expectsOutputToContain('LOST-BTL')
+            ->assertSuccessful();
+    }
+
+    public function test_it_says_out_loud_that_a_recovery_would_re_value_the_stores_stock(): void
+    {
+        $this->stranded($this->item('BTL-500', 'Nos.'), $this->retired, '1980.0000', 'QC release to FG store');
+
+        $this->artisan('inventory:preview-warehouse-recovery')
+            ->expectsOutputToContain('average cost')
+            ->expectsOutputToContain('PHYSICALLY there')
             ->assertSuccessful();
     }
 
