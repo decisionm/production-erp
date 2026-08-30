@@ -708,7 +708,7 @@ class GoodsReceiptService
      * The ONLY writer of goods_receipt_notes.tally_staging — the mirror of
      * PurchaseOrderService::recordTallyStaging(), and called by the same
      * listener family (TallySyncEventServiceProvider): disabled (the flag
-     * is off; PENDING Q63) / refused (named reasons — an unmapped item, an
+     * is off — the factory does not use Tally Receipt Notes, DEC-20260830-001) / refused (named reasons — an unmapped item, an
      * unmapped vendor ledger, no allowed company) / enqueued (entry_id).
      * Writes this one column and nothing else — no Tally, no stock, no
      * status change.

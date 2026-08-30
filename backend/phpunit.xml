@@ -49,8 +49,8 @@
         <!-- Pinned ON: most of the existing TallySync suite fires GoodsReceiptNoteReceived
              directly and asserts a Receipt Note voucher is staged from it — the pre-existing,
              tested contract. The application default (config/tally-sync.php, no env set) is
-             OFF, per the owner's confirmation that the factory does not use Tally Receipt
-             Notes; ReceiptNoteFeatureFlagTest exercises that OFF behaviour explicitly. -->
+             OFF, per DEC-20260830-001 (the factory does not use Tally Receipt Notes);
+             ReceiptNoteFeatureFlagTest exercises that OFF behaviour explicitly. -->
         <env name="TALLY_SYNC_RECEIPT_NOTES_ENABLED" value="true"/>
         <!-- Same rule as the PO allowed-company pin above: synthetic, FC-06-safe,
              so the suite's staged Receipt Notes pass the fail-closed company gate

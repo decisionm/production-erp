@@ -4,9 +4,9 @@
  * reader who has learned one cell has learned both. What differs is only
  * what a receipt genuinely lacks: no mirror case (a GRN is never pulled
  * FROM Tally), no draft/cancelled lifecycle, no dismissed state (nothing
- * withdraws a staged Receipt Note), and the disabled words name Q63 (does
- * the factory book Tally Receipt Notes at all?) rather than the PO's owner
- * gate.
+ * withdraws a staged Receipt Note), and the disabled words name the
+ * decision — the factory does not use Tally Receipt Notes
+ * (DEC-20260830-001) — rather than the PO's owner gate.
  *
  * The order of precedence is the order of certainty:
  *   1. a queue entry (`tally` link) — its status is the live fact, worded

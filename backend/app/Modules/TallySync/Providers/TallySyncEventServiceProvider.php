@@ -55,10 +55,9 @@ class TallySyncEventServiceProvider extends ServiceProvider
         // explicit domain events (not model events) because the receipt/delivery
         // are posted at creation — after their lines exist — and production
         // approval is an atomic query update that fires no model event.
-        // Gated on tally-sync.receipt_notes_enabled, OFF by default —
-        // whether the factory uses Tally Receipt Notes at all is PENDING Q63
-        // and unanswered, so off is the fail-closed reading of an open
-        // question rather than a decision anyone has taken. OFF means this
+        // Gated on tally-sync.receipt_notes_enabled, OFF as the DECIDED
+        // state — the factory does not use Tally Receipt Notes
+        // (DEC-20260830-001). OFF means this
         // stages nothing — no queue row, no XML, and nothing about a past
         // GRN or a past Receipt Note voucher is touched — and, like the PO
         // listener, what staging concluded is RECORDED on the receipt
@@ -207,14 +206,14 @@ class TallySyncEventServiceProvider extends ServiceProvider
         $receipts = $this->app->make(GoodsReceiptService::class);
 
         if (! config('tally-sync.receipt_notes_enabled')) {
-            Log::debug('Goods receipt received; Tally Receipt Note staging disabled (tally-sync.receipt_notes_enabled = false — PENDING Q63).', [
+            Log::debug('Goods receipt received; Tally Receipt Note staging disabled (the factory does not use Tally Receipt Notes — DEC-20260830-001).', [
                 'goods_receipt_note_id' => $note->id,
             ]);
             $receipts->recordTallyStaging($note, [
                 'state' => 'disabled',
                 'reasons' => [[
                     'code' => 'receipt_notes_disabled',
-                    'detail' => 'Receipt Note posting to Tally is off (whether the factory books Tally Receipt Notes is open — Q63). Nothing was staged.',
+                    'detail' => 'Receipt Note posting to Tally is off — the factory does not use Tally Receipt Notes (DEC-20260830-001). Nothing was staged.',
                 ]],
                 'at' => $at,
             ]);

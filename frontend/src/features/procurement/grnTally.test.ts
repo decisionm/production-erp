@@ -31,9 +31,9 @@ describe('grnTallyStateLine', () => {
         );
     });
 
-    it('disabled staging names the open question, not a generic off-switch', () => {
+    it('disabled staging names the decision, not a generic off-switch', () => {
         const line = grnTallyStateLine({ tally: null, tally_staging: { state: 'disabled', reasons: [] } });
-        expect(line.text).toBe('Not sent to Tally — Receipt Note posting is off (open question Q63)');
+        expect(line.text).toBe('Not sent to Tally — the factory does not use Tally Receipt Notes (DEC-20260830-001)');
     });
 
     it('enqueued without a readable link says the entry exists and where it went', () => {

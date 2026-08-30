@@ -1631,7 +1631,16 @@ flow already built — reserve, release, re-point and send-to-production all
 require a person, and every one of them records who and why.
 *Open since 2026-08-26.*
 
-## Q63 · Does the factory use Tally Receipt Notes (GRNs) at all?
+## Q63 · Does the factory use Tally Receipt Notes (GRNs) at all? — RESOLVED
+
+**Resolved 2026-08-30 by DEC-20260830-001: the factory does NOT use Tally
+Receipt Notes.** The ERP's goods receipt stays the arrival record (inward,
+QC, barcodes, inventory); no Receipt Note voucher is posted or staged to
+Tally, and `tally-sync.receipt_notes_enabled` stays OFF as a decided state
+rather than a fail-closed reading. The related half the decision expressly
+does NOT answer — what Tally should receive when material is rejected at
+incoming QA — remains open inside DEC-20260825-001, for Accounts. Was open
+since 2026-08-26; the original entry follows for history.
 
 The 26-Aug XML export batch from the standalone Testing company was expected
 to contain a goods-receipt-note sample (`receipt_note.xml`), but its 20

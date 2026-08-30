@@ -8,7 +8,8 @@ use Illuminate\Support\Facades\Schema;
  * goods_receipt_notes.tally_staging — what the Tally side made of this
  * receipt, recorded where the receiving desk reads it. The exact shape
  * purchase_orders.tally_staging already carries (state / reasons / at /
- * entry_id): disabled (the flag is off; PENDING Q63) · refused (named
+ * entry_id): disabled (the flag is off — the factory does not use Tally
+ * Receipt Notes, DEC-20260830-001) · refused (named
  * reasons — an unmapped item, an unmapped vendor ledger, no allowed
  * company) · enqueued (entry_id). Written only by
  * GoodsReceiptService::recordTallyStaging(); NULL on every receipt that

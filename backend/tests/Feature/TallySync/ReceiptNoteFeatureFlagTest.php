@@ -17,11 +17,10 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * tally-sync.receipt_notes_enabled — the fail-closed reading of an OPEN
- * question. Whether the factory uses Tally Receipt Notes for GRN/inward at
- * all is PENDING Q63, unanswered since 26-Aug-2026: no export read so far
- * holds a GRN voucher sample, and no decision record settles it. Nothing
- * here asserts the owner has ruled. The application default (no env set)
+ * tally-sync.receipt_notes_enabled — OFF as the DECIDED state: the factory
+ * does not use Tally Receipt Notes (DEC-20260830-001, resolving Q63). The
+ * machinery is kept disabled rather than deleted, so these locks still
+ * guard the decision. The application default (no env set)
  * is OFF; this suite pins it ON (phpunit.xml) purely so the rest of the
  * TallySync suite — written against the pre-existing, always-on contract —
  * keeps passing unmodified. This file is the one place both states are

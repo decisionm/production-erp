@@ -70,7 +70,7 @@ class ReceiptNoteStagingRecordTest extends TestCase
         $this->assertSame(TallySyncEntry::query()->where('tally_voucher_type', 'Receipt Note')->sole()->id, $staging['entry_id']);
     }
 
-    public function test_with_the_flag_off_the_receipt_records_disabled_and_names_the_open_question(): void
+    public function test_with_the_flag_off_the_receipt_records_disabled_and_names_the_decision(): void
     {
         config(['tally-sync.receipt_notes_enabled' => false]);
 
@@ -79,7 +79,7 @@ class ReceiptNoteStagingRecordTest extends TestCase
         $staging = $grn->fresh()->tally_staging;
         $this->assertSame('disabled', $staging['state']);
         $this->assertSame('receipt_notes_disabled', $staging['reasons'][0]['code']);
-        $this->assertStringContainsString('Q63', $staging['reasons'][0]['detail']);
+        $this->assertStringContainsString('DEC-20260830-001', $staging['reasons'][0]['detail']);
         $this->assertSame(0, TallySyncEntry::query()->count(), 'disabled stages nothing');
     }
 

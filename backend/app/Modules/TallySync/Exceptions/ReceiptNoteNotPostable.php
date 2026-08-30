@@ -12,9 +12,9 @@ use RuntimeException;
  * TWO families of refusal share this exception, and the reasons list keeps
  * them apart:
  *
- * THE FLAG. Whether the factory uses Tally Receipt Notes at all is PENDING
- * Q63 and unanswered, so tally-sync.receipt_notes_enabled is OFF by default
- * as the fail-closed reading of an open question. The event listener
+ * THE FLAG. The factory does not use Tally Receipt Notes (DEC-20260830-001),
+ * so tally-sync.receipt_notes_enabled is OFF as the DECIDED state — no
+ * longer a fail-closed reading of an open question. The event listener
  * (TallySyncEventServiceProvider) checks this config itself and never calls
  * enqueueGoodsReceiptNote() while it is off, so this guard is not that
  * listener's path — it is the SECOND lock: the service method refuses on
@@ -73,7 +73,7 @@ class ReceiptNoteNotPostable extends RuntimeException implements DomainException
         return new self([[
             'code' => 'receipt_notes_disabled',
             'detail' => 'Receipt Note posting to Tally is disabled (tally-sync.receipt_notes_enabled = false — '
-                .'whether the factory uses Tally Receipt Notes at all is PENDING Q63).',
+                .'the factory does not use Tally Receipt Notes; DEC-20260830-001).',
         ]]);
     }
 

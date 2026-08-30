@@ -13,7 +13,8 @@ import { instant } from '@/features/tally-sync/drawer';
  * With a queue entry it IS the Sales pages' TallyLinkCell — the same status
  * Tag the Tally Sync page uses, the voucher type and number, the deep link
  * into Tally Sync. Without one it is a single honest sentence: not sent
- * because Receipt Note posting is off (Q63), not sent because staging
+ * because the factory does not use Tally Receipt Notes (DEC-20260830-001),
+ * not sent because staging
  * refused (and why — an unmapped item, an unmapped vendor ledger, no
  * allowed company), queued but unreadable, or recorded before staging
  * existed. Never a dash: for a receipt "no entry" is not silence, it has a
