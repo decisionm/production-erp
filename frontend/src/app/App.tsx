@@ -71,6 +71,7 @@ import PurchaseRequisitionsPage from '@/features/procurement/pages/PurchaseRequi
 import VendorsPage from '@/features/procurement/pages/VendorsPage';
 import CustomersPage from '@/features/sales/pages/CustomersPage';
 import DeliveriesPage from '@/features/sales/pages/DeliveriesPage';
+import FulfilmentControlPage from '@/features/sales/pages/FulfilmentControlPage';
 import InvoicesPage from '@/features/sales/pages/InvoicesPage';
 import SalesOrdersPage from '@/features/sales/pages/SalesOrdersPage';
 import AgentTokensPage from '@/features/tally-sync/pages/AgentTokensPage';
@@ -213,6 +214,7 @@ export default function App() {
                                     <Route path="/sales/sales-orders" element={<SalesOrdersPage />} />
                                     <Route path="/sales/deliveries" element={<DeliveriesPage />} />
                                     <Route path="/sales/invoices" element={<InvoicesPage />} />
+                                    <Route path="/sales/fulfilment-control" element={<FulfilmentControlPage />} />
                                     <Route path="/finance/chart-of-accounts" element={<ChartOfAccountsPage />} />
                                     <Route path="/finance/journal-entries" element={<JournalEntriesPage />} />
                                     <Route path="/finance/reports" element={<ReportsPage />} />
