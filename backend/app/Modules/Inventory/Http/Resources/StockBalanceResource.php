@@ -20,6 +20,17 @@ class StockBalanceResource extends JsonResource
             'item' => ItemResource::make($this->whenLoaded('item')),
             'warehouse' => WarehouseResource::make($this->whenLoaded('warehouse')),
             'quantity' => $this->quantity,
+            // THE FOUR FIGURES a storekeeper actually needs, attached by the
+            // controller for the page it just read. Quantities only — no rate
+            // may ride along here (FC-06).
+            //
+            // `free_to_issue` subtracts the QC hold AND customer reservations,
+            // which is STRICTER than the write path (that consults only the
+            // hold). The owner ruled on 31-Aug that the screen must
+            // under-report rather than let a storekeeper give away promised
+            // stock by accident; the components sit beside it so nothing is
+            // hidden.
+            ...($this->stock_state === null ? [] : ['state' => $this->stock_state]),
             ...($showsCost ? ['average_cost' => $this->average_cost] : []),
         ];
     }

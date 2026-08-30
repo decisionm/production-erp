@@ -1854,7 +1854,7 @@ because this file re-mints question numbers at merge.
 supplier-bill screen, its arithmetic, its matching and its attachment work
 under either answer. *Open since 2026-08-28.*
 
-## Q69 · Does a document reference from a retired warehouse prove the material is physically on the shelf today?
+## Q69 · Does a document reference from a retired warehouse prove the material is physically on the shelf today? — RESOLVED (DEC-20260831-001)
 
 `inventory:preview-warehouse-recovery` lists the stock standing in
 warehouses no picker offers and classifies each row from its own movement
@@ -1949,7 +1949,7 @@ Sales, or does the Storekeeper simply not do it?
 **Blocks:** those two capabilities only. The rest of the Storekeeper role
 works without them. *Open since 2026-08-30.*
 
-## Q74 · What should the stock screen call the quantity a storekeeper may act on?
+## Q74 · What should the stock screen call the quantity a storekeeper may act on? — RESOLVED (DEC-20260831-002)
 
 The stock list can be decomposed per row into on-hand, quantity held for
 incoming QC, quantity reserved for a customer line, and quantity standing in
