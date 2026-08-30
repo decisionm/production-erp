@@ -140,6 +140,11 @@ export const allNavItems: readonly NavGroup[] = [
             // fulfilled — in part or in full — here. Issuing is not
             // consuming: it moves stock into Production/WIP.
             { key: '/inventory/store-issue-queue', label: 'Store Issue Queue' },
+            // THE OTHER HALF OF THE SAME DAY. The store issues in the morning
+            // and the balance comes back in the evening — and until 30-Aug-2026
+            // the second half had no screen and, for material no handover put
+            // there, no way home at all.
+            { key: '/inventory/production-returns', label: 'Return to Store' },
             { key: '/inventory/warehouses', label: 'Warehouses' },
             // The ledger, first-class since 27-Aug-2026. It was NOT in this
             // menu before, and the reason recorded here was true at the time:

@@ -181,6 +181,7 @@ describe('the Inventory menu', () => {
             '/inventory/stock',
             '/inventory/barcode-labels',
             '/inventory/store-issue-queue',
+            '/inventory/production-returns',
             '/inventory/warehouses',
             '/inventory/stock-movements',
             '/inventory/fulfilment',
