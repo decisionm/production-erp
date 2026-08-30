@@ -2,7 +2,7 @@ name: Preview warehouse stock recovery
 
 # Lists the stock standing in warehouses no picker offers, says which single
 # Store each row would move to, and classifies every row from the evidence in
-# its own movement history. It answers the question DEC-20260817-001 insists is
+# its own movement history. It answers the question DEC-20260830-002 insists is
 # answered per row — dependency and stock history proven — BEFORE anything is
 # merged, deactivated or moved.
 #
@@ -84,7 +84,7 @@ jobs:
             echo 'Read-only. Nothing was changed, and this workflow has no write mode.'
             echo 'Production/WIP is excluded by design — it holds material issued to production but not yet consumed.'
             echo ''
-            echo 'A row in the PILOT or TEST bucket is stock the factory never received. Moving those into the'
+            echo 'A row in the OPENING or TEST bucket is stock the factory never received. Moving those into the'
             echo 'Store would credit it with material that does not exist; what happens to them is an owner decision.'
             echo ''
             echo '```'

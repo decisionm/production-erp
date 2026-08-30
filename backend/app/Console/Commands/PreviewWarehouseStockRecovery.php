@@ -15,12 +15,17 @@ use Illuminate\Support\Facades\DB;
  * WHY THIS EXISTS. The factory is one physical Godown/Store, and the pickers
  * filter on `is_active`, so a balance sitting in a retired warehouse is
  * visible on the Stock page and reachable by no stock action at all. This
- * command is the per-row evidence DEC-20260817-001 demands before any merge,
+ * command is the per-row evidence DEC-20260830-002 demands before any merge,
  * deactivation or move: "no merge, deletion or deactivation of them happens
  * until dependency and stock history have been proven for each row."
  *
+ * (DEC-20260830-002 is the one-Store decision, recorded 30-Aug-2026. It
+ * supersedes DEC-20260817-001's reading of three separate places while
+ * deliberately KEEPING that decision's invariant and its no-merge clause,
+ * which are the two things this command rests on.)
+ *
  * PRODUCTION/WIP IS NOT IN SCOPE, and that is the load-bearing exclusion.
- * DEC-20260817-001 makes Production/WIP the inventory location holding
+ * DEC-20260830-002 makes Production/WIP the inventory location holding
  * material issued to production but not yet consumed — "which is what makes
  * 'issued to production' a real stock state distinct from both store stock
  * and consumption". It is retired ONLY in the sense that no picker offers it;
@@ -139,7 +144,7 @@ class PreviewWarehouseStockRecovery extends Command
         if ($wipId !== null) {
             $this->line(sprintf(
                 '  Production/WIP is warehouse %d (%s) and is EXCLUDED — it is the internal location holding'
-                .' material issued to production but not yet consumed (DEC-20260817-001), not stranded stock.',
+                .' material issued to production but not yet consumed (DEC-20260830-002), not stranded stock.',
                 $wipId,
                 $warehouses[$wipId]->code ?? '?',
             ));

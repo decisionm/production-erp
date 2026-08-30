@@ -981,7 +981,7 @@ identity to a reader without finance standing.
 
 *Opened 2026-08-17; resolved the same day by inspection, no owner ruling required.*
 
-## Q51 · ANSWERED (DEC-20260817-001) · How many stores does the factory actually have, and which rows are they?
+## Q51 · ANSWERED (DEC-20260830-002) · How many stores does the factory actually have, and which rows are they?
 
 The ERP holds five warehouses. Two pairs are functionally duplicated and the
 evidence says accidentally so (full audit:
@@ -1122,7 +1122,7 @@ trust check at all. *Open since 2026-08-17.*
 
 ## Q54 · Five things the Store -> Production material flow cannot decide for itself
 
-Phase 7.5 builds the workflow the lead confirmed on 17-Aug (Q50, DEC-20260817-001):
+Phase 7.5 builds the workflow the lead confirmed on 17-Aug (Q50, DEC-20260830-002):
 Store Stock -> Material Request -> Store Issue -> Scan/Handover -> Issued to
 Production (the WIP location) -> Consumption -> Return unused. Building it raised
 five points that are the factory's call, not engineering's. **None of them is
@@ -1201,7 +1201,7 @@ masterbatch request; (d) decides one sentence on one internal screen; (b), (c) a
 
 ## Q55 · Retiring the Day Bin — two things the code cannot decide, and one that must be built first
 
-DEC-20260817-001 settled the inventory locations: **RM Store → Production/WIP → FG Store,
+DEC-20260830-002 settled the inventory locations: **RM Store → Production/WIP → FG Store,
 and there is no Day Bin.** A full audit of every remaining Day Bin reference (18-Aug-2026)
 found that the *target workflow* is indeed free of it, but the *running system* is not: the
 Day Bin is still load-bearing in two places, and one of them prices every batch.
@@ -1343,7 +1343,7 @@ blocked is any screen that wants to say "these specific bags are on the floor ri
 
 **Related:** a fully-poured bag is marked with the status `consumed` by the shared pour path,
 on a store issue as well as on the day-bin scan. On a handover that word contradicts
-DEC-20260817-001 — the material has been handed over, not consumed. The enum value is shared
+DEC-20260830-002 — the material has been handed over, not consumed. The enum value is shared
 with the day-bin path and written into historical rows, so renaming it is a data decision
 rather than a code one. Worth settling alongside the above.
 *Open since 2026-08-18.*

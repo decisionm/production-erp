@@ -21,7 +21,7 @@ use Tests\TestCase;
  *
  * The WIP exclusion is the one that matters. Production/WIP is retired only
  * in the sense that no picker offers it; it is the location holding material
- * issued to production and not yet consumed (DEC-20260817-001). A preview
+ * issued to production and not yet consumed (DEC-20260830-002). A preview
  * that listed it as "stranded" would invite a move that destroys the only
  * state separating the floor from the store, so the exclusion is pinned here
  * rather than left to the reader of the docblock.
