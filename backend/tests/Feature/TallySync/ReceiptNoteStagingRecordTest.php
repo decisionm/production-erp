@@ -12,6 +12,7 @@ use App\Modules\Procurement\Models\Vendor;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\TallySyncService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
@@ -169,6 +170,26 @@ class ReceiptNoteStagingRecordTest extends TestCase
             ->json('data');
 
         $this->assertSame('disabled', $data['tally_staging']['state']);
+    }
+
+    public function test_tally_staging_reads_back_in_one_canonical_key_order_whatever_the_engine_stored(): void
+    {
+        config(['tally-sync.receipt_notes_enabled' => false]);
+        $grn = $this->receive();
+
+        // MySQL's JSON type reorders object keys (by length, then bytes);
+        // sqlite preserves insertion order. Simulate the worst case by
+        // storing a deliberately shuffled object and assert the cast hands
+        // back the writers' canonical order either way — the idempotent
+        // replay contract compares responses STRICTLY.
+        DB::table('goods_receipt_notes')->where('id', $grn->id)->update([
+            'tally_staging' => '{"at":"2026-08-30T00:00:00+00:00","entry_id":7,"reasons":[{"detail":"x","code":"receipt_notes_disabled"}],"state":"disabled"}',
+        ]);
+
+        $staging = $grn->fresh()->tally_staging;
+
+        $this->assertSame(['state', 'reasons', 'at', 'entry_id'], array_keys($staging));
+        $this->assertSame(['code', 'detail'], array_keys($staging['reasons'][0]));
     }
 
     /** One arrival through the real endpoint, as Store Keeper. */

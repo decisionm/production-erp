@@ -4,6 +4,7 @@ namespace App\Modules\Procurement\Models;
 
 use App\Models\User;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
+use App\Support\Tally\CanonicalTallyStaging;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -65,7 +66,9 @@ class PurchaseOrder extends Model
             'expected_date' => 'date',
             'closed_at' => 'datetime',
             'cancelled_at' => 'datetime',
-            'tally_staging' => 'array',
+            // Canonical key order on every read/write (the GRN's cast, same
+            // latent defect): MySQL's JSON type reorders object keys.
+            'tally_staging' => CanonicalTallyStaging::class,
         ];
     }
 

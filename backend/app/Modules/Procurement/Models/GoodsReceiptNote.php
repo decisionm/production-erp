@@ -5,6 +5,7 @@ namespace App\Modules\Procurement\Models;
 use App\Models\User;
 use App\Modules\Inventory\Models\MaterialLot;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Support\Tally\CanonicalTallyStaging;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -38,8 +39,11 @@ class GoodsReceiptNote extends Model
         return [
             'received_date' => 'datetime',
             // Written only by GoodsReceiptService::recordTallyStaging() —
-            // deliberately NOT in Fillable, exactly as purchase_orders'.
-            'tally_staging' => 'array',
+            // deliberately NOT in Fillable. Canonical key order on every
+            // read/write (see the cast): MySQL's JSON type reorders object
+            // keys, and the idempotent replay must return the original
+            // receipt byte-for-byte.
+            'tally_staging' => CanonicalTallyStaging::class,
         ];
     }
 
