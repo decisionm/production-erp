@@ -5,6 +5,7 @@ namespace App\Modules\TallySync\Services;
 use App\Modules\TallySync\Models\Ledger;
 use App\Modules\TallySync\Models\LedgerGroup;
 use App\Support\Tally\HierarchyUpsert;
+use App\Support\Tally\TallyText;
 use Illuminate\Support\Carbon;
 
 /**
@@ -93,6 +94,15 @@ class LedgerSyncService
      * An explicit null still clears, because that is Tally saying the ledger
      * has no GSTIN rather than the agent saying it did not look.
      *
+     * EVERY VALUE IS CLEANED HERE, not merely trimmed, and this is where the
+     * 31-Aug-2026 outage is actually fixed. Tally exports numeric character
+     * references — `&#13;&#10;` on a value someone pressed Enter in — and
+     * `fast-xml-parser` does not decode them, so what arrives is those ten
+     * characters LITERALLY, all printable, past any control-character strip.
+     * TallyText decodes them, which RECOVERS the real GSTIN rather than
+     * discarding it; a value still unusable afterwards is dropped on its own,
+     * leaving the other 1741 ledgers to sync.
+     *
      * EMAIL AND PHONE JOIN ON THE SAME CONTRACT and for the same reason. The
      * live All Masters export shows the contact tags are sparse (78 phones and
      * 4 emails across 1742 ledgers) and spelled several ways, so the agent
@@ -107,13 +117,23 @@ class LedgerSyncService
     {
         $details = [];
 
-        foreach (['gstin', 'state_name', 'email', 'phone'] as $key) {
+        // The column each value has to fit, and how it is judged. A value that
+        // does not fit becomes NULL for that field on that ledger — never a
+        // truncation (a shortened GSTIN or phone number is a WRONG one, and
+        // wrong is worse than absent) and never a refusal of the whole pull.
+        $fields = [
+            'gstin' => fn (mixed $v): ?string => TallyText::gstin($v),
+            'state_name' => fn (mixed $v): ?string => TallyText::fitting($v, 255),
+            'email' => fn (mixed $v): ?string => TallyText::fitting($v, 255),
+            'phone' => fn (mixed $v): ?string => TallyText::fitting($v, 255),
+        ];
+
+        foreach ($fields as $key => $judge) {
             if (! array_key_exists($key, $row)) {
                 continue;
             }
 
-            $value = is_string($row[$key]) ? trim($row[$key]) : null;
-            $details[$key] = $value !== null && $value !== '' ? $value : null;
+            $details[$key] = $judge($row[$key]);
         }
 
         return $details;
