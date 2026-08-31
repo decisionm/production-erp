@@ -162,6 +162,10 @@ export const allNavItems: readonly NavGroup[] = [
             // product's identity is fixed, so it opens the group; Stock and
             // the label bench are what a storekeeper touches every day;
             // Warehouses is setup and sits below them.
+            // FIRST in the group, because it is the entry point for a person
+            // who has a number and does not know which of the eight screens
+            // below owns it — which is the ordinary case on the floor.
+            { key: '/inventory/find', label: 'Find' },
             { key: '/inventory/items', label: 'Item Master' },
             { key: '/inventory/stock', label: 'Stock' },
             // TWO LABEL REGISTERS, ONE ENTRY. They are still not the same

@@ -23,6 +23,7 @@ use App\Modules\HRMS\Http\Controllers\LeaveBalanceController;
 use App\Modules\HRMS\Http\Controllers\LeaveRequestController;
 use App\Modules\HRMS\Http\Controllers\LeaveTypeController;
 use App\Modules\Inventory\Http\Controllers\BatchController;
+use App\Modules\Inventory\Http\Controllers\FactoryLookupController;
 use App\Modules\Inventory\Http\Controllers\FulfilmentController;
 use App\Modules\Inventory\Http\Controllers\ItemController;
 use App\Modules\Inventory\Http\Controllers\ItemIdentityController;
@@ -212,6 +213,19 @@ Route::prefix('v1')->group(function () {
              * nothing — the warnings they carry are surfaces for OPEN owner
              * questions (Q43, Q59, Q60), never rules.
              */
+            /**
+             * WHAT IS THIS NUMBER? One box over every identifier space the
+             * factory writes on something — SKU, bag barcode, supplier lot,
+             * batch, serial, store issue.
+             *
+             * OUTSIDE the `traceability` group on purpose even though bags
+             * and lots live inside it: the service reads the flag and says
+             * those kinds were not looked up. A 404 here would tell a
+             * storekeeper their bag is unknown when the truth is the ERP was
+             * never asked.
+             */
+            Route::get('lookup', FactoryLookupController::class);
+
             Route::get('identity/health', [ItemIdentityController::class, 'health']);
             Route::get('identity/items', [ItemIdentityController::class, 'items']);
 
