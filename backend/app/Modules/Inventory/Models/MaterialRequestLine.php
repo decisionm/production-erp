@@ -14,18 +14,27 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * tape filed as 229 Nos is a different number about a different thing, and
  * that reached the live factory once.
  *
+ * `quantity` is the NET ask — what the STORE must hand over. Owner decision,
+ * 31-Aug-2026: a request is raised for what the floor needs MINUS what is
+ * already standing in Production/WIP, floored at zero, so the store is not
+ * asked twice for the same kilograms. `required_quantity` keeps what the
+ * shift actually needed, which is the only way to tell "we needed 70" from
+ * "we needed 100 and 30 was already on the floor". NULL on every line raised
+ * before that decision: not netted, rather than netted and found nothing.
+ *
  * `issued_quantity` is how much the store has handed over so far. It is
  * written ONLY through MaterialRequestService::applyIssuedQuantities, and
  * it is NOT consumption: issued material is standing in Production/WIP
  * (DEC-20260817-001) until a batch calculates that it used some of it.
  */
-#[Fillable(['material_request_id', 'item_id', 'quantity', 'uom', 'issued_quantity', 'notes'])]
+#[Fillable(['material_request_id', 'item_id', 'quantity', 'required_quantity', 'uom', 'issued_quantity', 'notes'])]
 class MaterialRequestLine extends Model
 {
     protected function casts(): array
     {
         return [
             'quantity' => 'decimal:4',
+            'required_quantity' => 'decimal:4',
             'issued_quantity' => 'decimal:4',
         ];
     }

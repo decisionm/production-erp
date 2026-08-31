@@ -397,8 +397,19 @@ export default function MaterialRequestsPage() {
                                     <InputNumber
                                         min={0}
                                         value={line.quantity}
+                                        // "Total required", not "Quantity",
+                                        // because the number the floor types
+                                        // is no longer the number the store
+                                        // is asked for: the ERP subtracts
+                                        // what is already standing in
+                                        // production (DEC-20260831-006). A
+                                        // box labelled "Quantity" would make
+                                        // the request look wrong to the
+                                        // person who raised it.
                                         placeholder={
-                                            line.item_id === null ? 'Quantity' : `Quantity (${materialsById.get(line.item_id)?.uom ?? ''})`
+                                            line.item_id === null
+                                                ? 'Total required'
+                                                : `Total required (${materialsById.get(line.item_id)?.uom ?? ''})`
                                         }
                                         style={{ width: '100%' }}
                                         onChange={(value) =>

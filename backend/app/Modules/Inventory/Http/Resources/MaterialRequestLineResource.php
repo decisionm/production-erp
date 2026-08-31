@@ -11,7 +11,13 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * handed over so far, and what is still owed.
  *
  * THREE NUMBERS, THREE MEANINGS, none of them consumption:
- *   quantity            what the floor asked for
+ *   quantity            what the STORE is asked to hand over — the NET,
+ *                       after subtracting what is already standing in
+ *                       Production/WIP (owner decision, 31-Aug-2026)
+ *   required_quantity   what the shift actually needed, before that
+ *                       subtraction. NULL on lines raised before the rule
+ *                       existed, which is "not netted", not "netted to the
+ *                       same number"
  *   issued_quantity     what the store has handed over — this material is
  *                       standing in Production/WIP (DEC-20260817-001), NOT
  *                       used up. What a batch consumed is calculated later
@@ -44,6 +50,7 @@ class MaterialRequestLineResource extends JsonResource
                 'uom' => $line->item->uom,
             ] : null,
             'quantity' => $line->quantity,
+            'required_quantity' => $line->required_quantity,
             // Snapshotted from the item when the request was raised (FC-03).
             'uom' => $line->uom,
             'issued_quantity' => $line->issued_quantity,

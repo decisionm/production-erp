@@ -83,6 +83,26 @@ function newIssueKey(): string {
  * of its own, so the shell owns the heading and the banner. Nothing else
  * about the screen changes: same reads, same filters, same write paths.
  */
+/**
+ * Has this handover material still out on the floor?
+ *
+ * NOT `issue.is_open`, and the difference is the whole point. `is_open` is
+ * Issued | PartiallyReturned, so a COMPLETED handover with kilograms still
+ * outstanding failed that test and lost its Return button — while the server
+ * has never gated returnUnused on status, and ProductionReturnService keeps
+ * completed issues standing deliberately. The material was reachable only
+ * from the Returns tab, and any attempt to tidy the two return doors into one
+ * would have stranded it completely.
+ *
+ * The owner settled it on 31-Aug-2026: a return must name its store issue for
+ * open, partially returned AND completed issues, while returnable quantity
+ * remains. So the door opens on exactly that condition — what is outstanding,
+ * not what the paperwork is called.
+ */
+function hasMaterialOutstanding(issue: StoreIssue): boolean {
+    return (issue.lines ?? []).some((line) => Number(line.quantity_outstanding ?? 0) > 0);
+}
+
 export default function StoreIssueQueuePage({ embedded = false }: { embedded?: boolean }) {
     const queryClient = useQueryClient();
     /**
@@ -494,7 +514,7 @@ export default function StoreIssueQueuePage({ embedded = false }: { embedded?: b
                             issues.map((issue) => (
                                 <div key={issue.id}>
                                     <HandoverPanel issue={issue} onChanged={refresh} />
-                                    {issue.is_open ? (
+                                    {hasMaterialOutstanding(issue) ? (
                                         <Space style={{ marginBottom: 16 }}>
                                             <Button onClick={() => setReturningIssue(issue)}>
                                                 {TRANSITION_LABEL.return_to_store}

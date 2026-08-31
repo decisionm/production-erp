@@ -279,9 +279,9 @@ class ProductionReturnService
 
                 $residues[$itemId] ??= '0.0000';
 
-                if (bccomp($this->standingAgainstOpenIssues($itemId, $wipId), '0', 4) === 1) {
+                if (bccomp($this->standingAgainstIssues($itemId, $wipId), '0', 4) === 1) {
                     throw ValidationException::withMessages([
-                        "lines.{$index}.quantity" => $this->undecidedRefusal($itemId, $wipId),
+                        "lines.{$index}.quantity" => $this->attributionRequiredRefusal($itemId, $wipId),
                     ]);
                 }
 
@@ -485,7 +485,7 @@ class ProductionReturnService
     }
 
     /** What every open handover is standing on, for one material in production. */
-    private function standingAgainstOpenIssues(int $itemId, int $wipId): string
+    private function standingAgainstIssues(int $itemId, int $wipId): string
     {
         return $this->standingByItem([$itemId], $wipId)
             ->get($itemId, collect())
@@ -493,10 +493,26 @@ class ProductionReturnService
     }
 
     /**
-     * The refusal for a material an open handover is standing on — Q69, not a
-     * bug. It names the other door, because that door always works.
+     * The refusal for material a handover is still standing on. It names the
+     * other door, because that door always works.
+     *
+     * SETTLED 31-Aug-2026 (DEC-20260831-003 and DEC-20260831-004), and
+     * it used to be an open
+     * question. Until then this refusal existed because the owner had not
+     * ruled on whether a storekeeper MAY choose to record such a return
+     * without naming its handover, and refusing was the conservative
+     * direction: an unattributed movement can never be re-attributed
+     * afterwards, so guessing wrong was the one mistake that could not be
+     * undone. The answer is that material which came through a store issue
+     * must return against that exact issue — for open, partially returned
+     * AND completed issues, while returnable quantity remains — so the
+     * refusal stays and stops apologising for itself.
+     *
+     * `standingByItem` already carries the completed case (it excludes only
+     * CANCELLED issues and keeps any line still outstanding), which is why
+     * the rule needed no new condition, only settled words.
      */
-    private function undecidedRefusal(int $itemId, int $wipId): string
+    private function attributionRequiredRefusal(int $itemId, int $wipId): string
     {
         $issues = $this->standingByItem([$itemId], $wipId)
             ->get($itemId, collect())
@@ -508,9 +524,9 @@ class ProductionReturnService
         $name = $item?->display_name ?: ($item?->name ?: 'This material');
 
         return sprintf(
-            '%s is still standing against store issue %s. Return it against that issue so the handover closes. '
-            .'Whether material may come back without naming its handover is an open question for the owner, and '
-            .'a return recorded without one cannot be attributed afterwards.',
+            '%s came out of the store on store issue %s and has to go back against it, so that handover\'s own '
+            .'arithmetic closes. Open it in the Issues tab and return it from there. Material with no store '
+            .'issue behind it is the only kind that comes home without naming one.',
             $name,
             $issues,
         );

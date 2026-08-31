@@ -328,9 +328,16 @@ export interface QuantityCell {
 export function describeRequestLine(quantities: RequestLineQuantities, uom?: string | null): QuantityCell[] {
     return [
         {
+            // "Asked of the store", not "Requested", since DEC-20260831-006.
+            // The two stopped being the same number: production states what
+            // the shift needs in total and the ERP subtracts what is already
+            // standing in Production/WIP, so this figure is the shortfall the
+            // store must hand over. Calling it "Requested" beside a "Total
+            // required" box holding a bigger number is how a storekeeper
+            // concludes the ERP lost part of the request.
             key: 'requested',
-            label: 'Requested',
-            help: 'What production asked the store for.',
+            label: 'Asked of the store',
+            help: 'What the store is asked to hand over — the total the shift needs, less whatever is already standing in Production/WIP.',
             value: formatQuantity(quantities.requested, uom),
         },
         {

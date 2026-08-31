@@ -44,8 +44,18 @@ export interface MaterialRequestLine {
     id: number;
     item_id: number;
     item: MaterialFlowItemRef | null;
-    /** What the floor asked for. */
+    /**
+     * What the STORE is asked to hand over — the NET, after subtracting what
+     * is already standing in Production/WIP (DEC-20260831-006). Every
+     * fulfilment figure on this line is computed against it.
+     */
     quantity: string;
+    /**
+     * What the shift actually needed, before that subtraction. NULL on lines
+     * raised before the rule existed: "not netted", which is a different fact
+     * from "netted and found nothing on the floor".
+     */
+    required_quantity: string | null;
     /** Snapshotted from the item when the request was raised (FC-03). */
     uom: string;
     /** Handed over — standing in Production/WIP, NOT consumed. */

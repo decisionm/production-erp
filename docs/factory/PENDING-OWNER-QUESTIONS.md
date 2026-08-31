@@ -1854,7 +1854,7 @@ because this file re-mints question numbers at merge.
 supplier-bill screen, its arithmetic, its matching and its attachment work
 under either answer. *Open since 2026-08-28.*
 
-## Q69 · When material comes back from production, must it be returned against the store issue that put it there?
+## Q69 · When material comes back from production, must it be returned against the store issue that put it there? — RESOLVED (DEC-20260831-003, DEC-20260831-004)
 
 The daily return was built on 30-Aug-2026: the store issues material to the
 production area, production makes finished goods from it, and the balance is
@@ -2103,7 +2103,7 @@ headline figure net customer holds or not?
 **Blocks:** shipping the stock-state decomposition to the Stock page. The
 underlying figures are unaffected. *Open since 2026-08-30.*
 
-## Q80 · On the merged Store ↔ Production screen there are two doors home for the same material. Which one should a storekeeper be told to use?
+## Q80 · On the merged Store ↔ Production screen there are two doors home for the same material. Which one should a storekeeper be told to use? — RESOLVED (DEC-20260831-003, DEC-20260831-004)
 
 Store issues and production returns became two tabs of one screen on
 31-Aug-2026. Both tabs can send material back to the store, and they do not
@@ -2137,7 +2137,7 @@ decides which one gets the plain wording and which gets the caveat.
 
 **Blocks:** nothing shipping. Both doors work today. *Open since 2026-08-31.*
 
-## Q81 · Does "material stays available for the next day's production" cover material no store issue put there?
+## Q81 · Does "material stays available for the next day's production" cover material no store issue put there? — RESOLVED (DEC-20260831-005)
 
 The instruction of 31-Aug-2026 ends: *"Material remaining in Production/WIP
 stays available for the next day's production."* For material a store issue
@@ -2164,3 +2164,33 @@ consumed from where it stands?
 **Blocks:** nothing today. Changing it would alter where a batch takes its
 stock from, which is a stock figure and a write path, so it is not something
 to adjust as part of a screen change. *Open since 2026-08-31.*
+
+---
+
+## Resolutions recorded 31-Aug-2026
+
+**Q69 and Q80 — DEC-20260831-003 and DEC-20260831-004.** Material that came
+out of the store on a Store Issue returns against that exact issue, for open,
+partially returned AND completed issues, while returnable quantity remains.
+The unattributed door is for material with no originating Store Issue and
+nothing else. So the two doors on the merged screen are not rivals after all:
+the handover drawer is THE door for anything a Store Issue put on the floor,
+and the Returns tab's free input is the door for everything else — which on
+the live instance is seven of the nine materials standing in production.
+
+Nothing recorded before this needs unwinding, and that is checkable rather
+than hoped for: `undecidedRefusal` was present in 05c86e1, the same and only
+commit that ever shipped the unattributed door, so the door was never open
+for material an issue was standing on.
+
+The related question the Q69 block raised — whether anything should CHASE an
+overdue return, and against what clock — was not part of this ruling and
+stays open.
+
+**Q81 — DEC-20260831-005.** Yes: material in Production/WIP is available to
+the next production day whatever put it there, and the Store Issue condition
+on `consumptionSource` is gone. One consequence is worth writing down because
+nobody asked for it and it is now true: those materials draw WIP down to zero
+and then continue from the Store, and both movements carry purpose
+`consumption` differing only in `warehouse_id` — so the moment the floor ran
+out is not marked anywhere in the consumption history.

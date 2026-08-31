@@ -7,6 +7,7 @@ use App\Modules\Inventory\Exceptions\MaterialRequestLifecycleException;
 use App\Modules\Inventory\Models\Enums\MaterialRequestStatus;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialRequest;
+use App\Modules\Inventory\Models\StockBalance;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -147,6 +148,40 @@ class MaterialRequestService
         return Item::query()->whereKey($itemId)->productionInput()->where('is_active', true)->exists();
     }
 
+    /**
+     * THE USABLE PRODUCTION/WIP BALANCE for one material — what the floor
+     * already has, and therefore does not need the store to hand over again.
+     *
+     * FLOORED AT ZERO, because a NEGATIVE Production/WIP balance is an
+     * over-draw, not a supply. Netting against it would ADD to the request
+     * ("you are 70 kg overdrawn, so ask for 70 more"), quietly turning a
+     * bookkeeping problem into a larger handover. The over-draw is a real
+     * thing that needs fixing; it is not stock anybody can pick up.
+     *
+     * SAME ITEM IS SAME UOM, so the decision's "for the same item and UOM"
+     * needs no unit comparison: `items.uom` is one column on one row, and
+     * both the balance and the request line resolve their unit from it (FC-03
+     * — the ITEM's unit, never the caller's). There is no path by which a
+     * balance in one unit could be netted against a requirement in another.
+     */
+    private function usableProductionWipBalance(int $itemId): string
+    {
+        $wipId = app(ProductionWipLocationResolver::class)->warehouseId();
+
+        if ($wipId === null) {
+            return '0.0000';
+        }
+
+        $balance = StockBalance::query()
+            ->where('item_id', $itemId)
+            ->where('warehouse_id', $wipId)
+            ->value('quantity');
+
+        $balance = bcadd((string) ($balance ?? '0'), '0', 4);
+
+        return bccomp($balance, '0', 4) === 1 ? $balance : '0.0000';
+    }
+
     public function create(array $data, ?int $requestedBy): MaterialRequest
     {
         $workCenterId = $data['work_center_id'] ?? null;
@@ -180,9 +215,36 @@ class MaterialRequestService
             ]);
 
             foreach ($data['lines'] as $line) {
+                // NET AGAINST WHAT IS ALREADY ON THE FLOOR (owner decision,
+                // 31-Aug-2026):
+                //
+                //     net = max(0, total required − usable Production/WIP)
+                //
+                // The caller states what the shift NEEDS IN TOTAL; the store
+                // is asked only for the shortfall. `quantity` stays the net
+                // because every figure downstream of it — issued_quantity,
+                // remaining_quantity, the whole fulfilment arithmetic — is
+                // computed against it, and what the store must hand over is
+                // the number those are about. What was required is kept
+                // beside it so the netting can be read back.
+                //
+                // ZERO IS A REAL ANSWER and the line is KEPT at zero rather
+                // than dropped: "you need 30 and 30 is already in production"
+                // is exactly what the requester should see, and a line that
+                // silently vanished from the request they submitted would be
+                // a worse surprise than one reading nothing to issue.
+                $required = bcadd((string) $line['quantity'], '0', 4);
+                $usable = $this->usableProductionWipBalance((int) $line['item_id']);
+                $net = bcsub($required, $usable, 4);
+
+                if (bccomp($net, '0', 4) === -1) {
+                    $net = '0.0000';
+                }
+
                 $request->lines()->create([
                     'item_id' => $line['item_id'],
-                    'quantity' => $line['quantity'],
+                    'quantity' => $net,
+                    'required_quantity' => $required,
                     // The ITEM's unit, never the caller's (FC-03).
                     'uom' => ($items[$line['item_id']] ?? null)?->uom,
                     'issued_quantity' => '0',
