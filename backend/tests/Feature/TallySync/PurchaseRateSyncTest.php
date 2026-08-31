@@ -159,6 +159,33 @@ class PurchaseRateSyncTest extends TestCase
         $this->assertSame('Something Tally Alone Knows', $rate->stock_item_name);
     }
 
+    public function test_a_pull_that_found_nothing_is_recorded_rather_than_rejected(): void
+    {
+        // A Day Book window holding no purchase voucher is a legitimate state,
+        // not an error: the factory may simply have bought nothing. Rejecting
+        // it made the agent take a 422 and log the failure on the factory PC,
+        // where nobody on this side can see it — leaving the ERP looking
+        // exactly like a button nobody had pressed.
+        $this->actAsAgent();
+
+        $this->postRates([])->assertOk()->assertJsonPath('data.total', 0);
+
+        $this->assertSame(0, TallyPurchaseRate::count());
+    }
+
+    public function test_an_empty_pull_does_not_delete_rates_already_recorded(): void
+    {
+        // The tail-deletion only ever touches vouchers THIS pull carried, so a
+        // pull that carried nothing must withdraw nothing. Otherwise one empty
+        // window would silently wipe the lookup.
+        $this->actAsAgent();
+
+        $this->postRates([$this->line()])->assertOk();
+        $this->postRates([])->assertOk()->assertJsonPath('data.deleted', 0);
+
+        $this->assertSame(1, TallyPurchaseRate::count());
+    }
+
     public function test_an_unknown_voucher_kind_is_refused_rather_than_stored(): void
     {
         $this->actAsAgent();
