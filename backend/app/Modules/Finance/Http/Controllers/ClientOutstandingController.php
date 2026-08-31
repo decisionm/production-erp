@@ -1,14 +1,19 @@
 <?php
 
-namespace App\Modules\CRM\Http\Controllers;
+namespace App\Modules\Finance\Http\Controllers;
 
 use App\Http\Controllers\Controller;
-use App\Modules\CRM\Services\ClientOutstandingService;
+use App\Modules\Finance\Services\ClientOutstandingService;
 use Illuminate\Http\JsonResponse;
 
 /**
- * GET /crm/client-outstanding — what every client owes, how long they have
+ * GET /finance/client-outstanding — what every client owes, how long they have
  * owed it, and what the factory has still to ship them.
+ *
+ * GATED BY `module:finance`, not `module:crm`. The rows name a client and the
+ * money they owe, which is the same class of data `reports/receivables` next
+ * door is gated for; putting it behind the weaker CRM gate would have widened
+ * who can read the factory's debtor book (owner decision, 31-Aug-2026).
  *
  * A bare object, not a resource: it describes no single row. The whole
  * position is one read because the page's totals and its ageing columns must

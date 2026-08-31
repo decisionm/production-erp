@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Modules\CRM\Services;
+namespace App\Modules\Finance\Services;
 
 use App\Modules\Core\Services\AppSettingService;
 use App\Modules\Sales\Models\Customer;
@@ -16,6 +16,13 @@ use Illuminate\Support\Carbon;
  * READ-ONLY AND DERIVED. It owns no table. It reads the two Tally mirrors and
  * joins them to `customers` by the recorded ledger link, and every number it
  * returns is computed at read time from the stored position.
+ *
+ * IT LIVES IN FINANCE, BESIDE AccountsReceivableService, because that is what
+ * it is: a receivables report. The two are deliberately separate and answer
+ * different questions — this one reads the position mirrored out of TALLY,
+ * where this factory actually raises its sales; its neighbour reads the ERP's
+ * own `invoices`, which hold a handful of rows on this instance. Neither
+ * blends into the other, and the page names which it is showing.
  *
  * AGE IS NEVER STORED, ALWAYS COMPUTED. A bill that was 29 days overdue when
  * the pull ran is 30 the next morning; a stored age is a number that is wrong

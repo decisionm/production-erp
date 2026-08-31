@@ -10,11 +10,11 @@ use App\Modules\Core\Http\Controllers\ExportController;
 use App\Modules\Core\Http\Controllers\PermissionController;
 use App\Modules\Core\Http\Controllers\RoleController;
 use App\Modules\Core\Http\Controllers\UserController;
-use App\Modules\CRM\Http\Controllers\ClientOutstandingController;
 use App\Modules\CRM\Http\Controllers\LeadActivityController;
 use App\Modules\CRM\Http\Controllers\LeadController;
 use App\Modules\CRM\Http\Controllers\OpportunityController;
 use App\Modules\CRM\Http\Controllers\QuotationController;
+use App\Modules\Finance\Http\Controllers\ClientOutstandingController;
 use App\Modules\Finance\Http\Controllers\FinancialReportController;
 use App\Modules\Finance\Http\Controllers\GLAccountController;
 use App\Modules\Finance\Http\Controllers\JournalEntryController;
@@ -684,14 +684,23 @@ Route::prefix('v1')->group(function () {
             Route::get('reports/profit-and-loss', [FinancialReportController::class, 'profitAndLoss']);
             Route::get('reports/balance-sheet', [FinancialReportController::class, 'balanceSheet']);
             Route::get('reports/receivables', [FinancialReportController::class, 'receivables']);
-        });
 
-        Route::prefix('crm')->middleware('module:crm')->group(function () {
             // WHAT EVERY CLIENT OWES AND WHAT IS STILL TO SHIP THEM, from the
             // position the agent mirrored out of Tally. Read-only and derived:
             // it owns no table and writes nothing.
+            //
+            // HERE RATHER THAN UNDER `crm`, deliberately: these rows name a
+            // client and the money they owe, which is what `reports/receivables`
+            // directly above is gated for. The CRM gate is held by people who
+            // work leads, and it is the weaker of the two.
+            //
+            // It is a SIBLING of that report, not a replacement — this one
+            // reads Tally, where this factory raises its sales; that one reads
+            // the ERP's own invoices. They are not blended.
             Route::get('client-outstanding', [ClientOutstandingController::class, 'index']);
+        });
 
+        Route::prefix('crm')->middleware('module:crm')->group(function () {
             Route::apiResource('leads', LeadController::class)->only(['index', 'store', 'update']);
             Route::post('leads/{lead}/convert', [LeadController::class, 'convert']);
             Route::get('leads/{lead}/activities', [LeadActivityController::class, 'index']);

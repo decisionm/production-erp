@@ -402,10 +402,6 @@ export const allNavItems: readonly NavGroup[] = [
         label: 'CRM',
         module: 'crm',
         children: [
-            // First in the menu on purpose: it is the only CRM screen that
-            // answers a question about money already owed, and it is the one
-            // somebody opens every morning.
-            { key: '/crm/client-outstanding', label: 'Client Outstanding' },
             { key: '/crm/leads', label: 'Leads' },
             { key: '/crm/opportunities', label: 'Opportunities' },
             { key: '/crm/quotations', label: 'Quotations' },
@@ -417,6 +413,9 @@ export const allNavItems: readonly NavGroup[] = [
         label: 'Finance',
         module: 'finance',
         children: [
+            // First in the menu on purpose: it is the screen somebody opens
+            // every morning to see what is owed and how late it is.
+            { key: '/finance/client-outstanding', label: 'Client Outstanding' },
             { key: '/finance/chart-of-accounts', label: 'Chart of Accounts' },
             { key: '/finance/journal-entries', label: 'Journal Entries' },
             { key: '/finance/reports', label: 'Reports' },

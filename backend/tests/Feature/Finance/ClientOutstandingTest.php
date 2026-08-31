@@ -1,9 +1,9 @@
 <?php
 
-namespace Tests\Feature\CRM;
+namespace Tests\Feature\Finance;
 
 use App\Models\User;
-use App\Modules\CRM\Services\ClientOutstandingService;
+use App\Modules\Finance\Services\ClientOutstandingService;
 use App\Modules\Sales\Models\Customer;
 use App\Modules\TallySync\Models\TallyPendingSalesOrder;
 use App\Modules\TallySync\Models\TallyReceivableBill;
@@ -214,14 +214,16 @@ class ClientOutstandingTest extends TestCase
     public function test_the_endpoint_returns_the_position_with_its_as_at_date(): void
     {
         $user = User::factory()->create(['is_active' => true]);
-        // The route group is gated by `module:crm`; a GET needs crm.view.
-        Permission::findOrCreate('crm.view', 'web');
-        $user->givePermissionTo('crm.view');
+        // The route group is gated by `module:finance`; a GET needs
+        // finance.view. NOT crm.view: this is the factory's debtor book, and
+        // it sits behind the same gate as reports/receivables beside it.
+        Permission::findOrCreate('finance.view', 'web');
+        $user->givePermissionTo('finance.view');
         Sanctum::actingAs($user);
 
         $this->bill();
 
-        $response = $this->getJson('/api/v1/crm/client-outstanding');
+        $response = $this->getJson('/api/v1/finance/client-outstanding');
 
         $response->assertOk();
         $response->assertJsonPath('data.as_of', self::TODAY);
@@ -251,6 +253,25 @@ class ClientOutstandingTest extends TestCase
         // it with whichever row came back first is the bug this pins.
         $this->assertSame(1, $report['totals']['clients']);
         $this->assertSame('1000.0000', $report['totals']['outstanding_amount']);
+    }
+
+    public function test_the_crm_gate_no_longer_opens_the_debtor_book(): void
+    {
+        $user = User::factory()->create(['is_active' => true]);
+        Permission::findOrCreate('crm.view', 'web');
+        Permission::findOrCreate('crm.manage', 'web');
+        $user->givePermissionTo('crm.view');
+        $user->givePermissionTo('crm.manage');
+        Sanctum::actingAs($user);
+
+        $this->bill();
+
+        // THIS IS WHAT THE MOVE WAS FOR. Asserting only that finance.view
+        // WORKS would still pass if the route were left behind both gates, or
+        // moved back under `crm` — so the refusal is asserted directly, with
+        // the CRM permissions at their strongest. Whoever works leads must not
+        // be able to read what every client owes.
+        $this->getJson('/api/v1/finance/client-outstanding')->assertStatus(403);
     }
 
     public function test_totals_agree_with_the_rows_beneath_them(): void

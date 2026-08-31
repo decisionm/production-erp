@@ -2,8 +2,8 @@ import { useQuery } from '@tanstack/react-query';
 import { Alert, Card, Col, Empty, Input, Row, Segmented, Space, Statistic, Table, Tag, Tooltip, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getClientOutstanding } from '@/features/crm/api';
-import type { AgeingBucket, ClientOutstanding, OutstandingBill, PendingOrderLine } from '@/features/crm/types';
+import { getClientOutstanding } from '@/features/finance/api';
+import type { AgeingBucket, ClientOutstanding, OutstandingBill, PendingOrderLine } from '@/features/finance/types';
 
 const { Text } = Typography;
 
@@ -17,6 +17,12 @@ const { Text } = Typography;
  * blended the two would present a fraction of the real position as the whole
  * of it. `AccountsReceivableService` still answers the ERP-books question
  * separately, and is a different report on purpose.
+ *
+ * IT IS A FINANCE PAGE, GATED BY `module:finance`. The rows name a client and
+ * the money they owe — the factory's debtor book — which is the same class of
+ * data the ERP-books receivables report is gated for. The CRM gate is held by
+ * people who work leads and is the weaker of the two (owner decision,
+ * 31-Aug-2026).
  *
  * THE PAGE IS ONLY EVER AS CURRENT AS THE LAST PULL, and says so in a banner
  * rather than implying live figures. The agent reads Tally only when an
@@ -65,7 +71,7 @@ type Focus = 'all' | 'overdue' | 'pending';
 
 export default function ClientOutstandingPage() {
     const { data, isLoading, isError, error } = useQuery({
-        queryKey: ['crm', 'client-outstanding'],
+        queryKey: ['finance', 'client-outstanding'],
         queryFn: getClientOutstanding,
     });
 

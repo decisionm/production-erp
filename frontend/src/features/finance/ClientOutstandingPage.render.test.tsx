@@ -2,8 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
-import ClientOutstandingPage from '@/features/crm/pages/ClientOutstandingPage';
-import type { ClientOutstandingReport } from '@/features/crm/types';
+import ClientOutstandingPage from '@/features/finance/pages/ClientOutstandingPage';
+import type { ClientOutstandingReport } from '@/features/finance/types';
 
 /**
  * DOES THE SCREEN ACTUALLY RENDER, AND DO THE TOTALS SIT UNDER THEIR OWN
@@ -86,7 +86,7 @@ const report: ClientOutstandingReport = {
 function renderPage(): string {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     // Seeded, not fetched: a server render resolves no promise.
-    queryClient.setQueryData(['crm', 'client-outstanding'], report);
+    queryClient.setQueryData(['finance', 'client-outstanding'], report);
 
     return renderToString(
         <QueryClientProvider client={queryClient}>
