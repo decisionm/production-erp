@@ -2,7 +2,9 @@
 
 namespace App\Modules\CRM\Services;
 
+use App\Modules\Core\Services\AppSettingService;
 use App\Modules\Sales\Models\Customer;
+use App\Modules\TallySync\Http\Controllers\TallySettingsController;
 use App\Modules\TallySync\Models\TallyPendingSalesOrder;
 use App\Modules\TallySync\Models\TallyReceivableBill;
 use Illuminate\Support\Carbon;
@@ -37,6 +39,8 @@ use Illuminate\Support\Carbon;
  */
 class ClientOutstandingService
 {
+    public function __construct(private readonly AppSettingService $settings) {}
+
     /** Days past due, upper bound inclusive. The last bucket is unbounded. */
     public const BUCKETS = [
         'current' => [null, 0],
@@ -61,8 +65,23 @@ class ClientOutstandingService
     {
         $today = ($today ?? Carbon::today())->startOfDay();
 
-        $bills = TallyReceivableBill::query()->get();
-        $orders = TallyPendingSalesOrder::query()->get();
+        // SCOPED TO THE BOUND COMPANY, because the SYNC is. A pull replaces
+        // one company's rows, and the agent's 409 guard can only refuse a
+        // foreign pull once a company is actually bound — so before that, two
+        // companies' rows can coexist here. An unscoped read would sum both
+        // into one total and label it with whichever row came back first.
+        // With nothing bound there is nothing to scope to, and everything is
+        // read: that is the honest answer for a single-company instance that
+        // has not been through Tally settings yet.
+        $company = $this->settings->get(TallySettingsController::KEY_COMPANY);
+
+        $bills = TallyReceivableBill::query()
+            ->when($company !== null, fn ($q) => $q->where('tally_company', $company))
+            ->get();
+
+        $orders = TallyPendingSalesOrder::query()
+            ->when($company !== null, fn ($q) => $q->where('tally_company', $company))
+            ->get();
 
         // The link is by ledger GUID where the customer carries one, and by
         // ledger NAME otherwise — the import writes both, but a customer

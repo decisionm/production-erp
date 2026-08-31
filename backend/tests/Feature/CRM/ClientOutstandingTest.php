@@ -230,6 +230,29 @@ class ClientOutstandingTest extends TestCase
         $response->assertJsonPath('data.totals.outstanding_amount', '10000.0000');
     }
 
+    public function test_only_the_bound_company_is_reported(): void
+    {
+        app(\App\Modules\Core\Services\AppSettingService::class)
+            ->set(\App\Modules\TallySync\Http\Controllers\TallySettingsController::KEY_COMPANY, self::COMPANY);
+
+        $this->bill(['party_ledger_name' => 'Ours Ltd', 'party_ledger_guid' => 'g-ours', 'closing_amount' => '1000.0000']);
+        $this->bill([
+            'party_ledger_name' => 'Other Company Client',
+            'party_ledger_guid' => 'g-other',
+            'closing_amount' => '9999.0000',
+            'tally_company' => 'A DIFFERENT COMPANY LTD',
+        ]);
+
+        $report = $this->report();
+
+        // The SYNC replaces one company's rows, and the agent's 409 guard can
+        // only refuse a foreign pull once a company is bound — so rows from
+        // two companies can coexist. Summing both into one total and labelling
+        // it with whichever row came back first is the bug this pins.
+        $this->assertSame(1, $report['totals']['clients']);
+        $this->assertSame('1000.0000', $report['totals']['outstanding_amount']);
+    }
+
     public function test_totals_agree_with_the_rows_beneath_them(): void
     {
         $this->bill(['party_ledger_name' => 'A Ltd', 'party_ledger_guid' => 'g-a', 'closing_amount' => '1000.0000']);

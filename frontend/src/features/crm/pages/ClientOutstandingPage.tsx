@@ -342,17 +342,29 @@ export default function ClientOutstandingPage() {
                     totals == null ? null : (
                         <Table.Summary fixed>
                             <Table.Summary.Row>
-                                <Table.Summary.Cell index={0}><Text strong>Total ({clients.length} shown)</Text></Table.Summary.Cell>
-                                <Table.Summary.Cell index={1} align="right"><Text strong>{money(totals.pending_order_amount)}</Text></Table.Summary.Cell>
-                                <Table.Summary.Cell index={2} align="right"><Text strong>{money(totals.outstanding_amount)}</Text></Table.Summary.Cell>
-                                <Table.Summary.Cell index={3} align="right"><Text strong>{money(totals.overdue_amount)}</Text></Table.Summary.Cell>
-                                <Table.Summary.Cell index={4} />
+                                {/* THE EXPAND COLUMN. An expandable antd table
+                                    renders an extra leading cell in every header
+                                    and body row, but this summary row is written
+                                    by hand — without this spacer every total
+                                    renders one column to the LEFT of its heading
+                                    (outstanding money printed under "Overdue"),
+                                    with nothing throwing and nothing failing to
+                                    typecheck. ClientOutstandingPage.render.test
+                                    counts header cells against footer cells so
+                                    it can never drift back. */}
+                                <Table.Summary.Cell index={0} />
+                                <Table.Summary.Cell index={1}><Text strong>Total ({clients.length} shown)</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={2} align="right"><Text strong>{money(totals.pending_order_amount)}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={3} align="right"><Text strong>{money(totals.outstanding_amount)}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={4} align="right"><Text strong>{money(totals.overdue_amount)}</Text></Table.Summary.Cell>
+                                {/* Outstanding days: a total of ages is meaningless. */}
+                                <Table.Summary.Cell index={5} />
                                 {(Object.keys(BUCKET_LABELS) as AgeingBucket[]).map((bucket, i) => (
-                                    <Table.Summary.Cell key={bucket} index={5 + i} align="right">
+                                    <Table.Summary.Cell key={bucket} index={6 + i} align="right">
                                         <Text strong>{money(totals.ageing[bucket])}</Text>
                                     </Table.Summary.Cell>
                                 ))}
-                                <Table.Summary.Cell index={11} align="right"><Text strong>{totals.bill_count}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={12} align="right"><Text strong>{totals.bill_count}</Text></Table.Summary.Cell>
                             </Table.Summary.Row>
                         </Table.Summary>
                     )
