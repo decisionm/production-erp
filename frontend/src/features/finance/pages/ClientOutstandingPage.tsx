@@ -69,8 +69,19 @@ function overdueColor(days: number | null): string {
 
 type Focus = 'all' | 'overdue' | 'pending';
 
+
+/**
+ * Is this read one the reader must be WARNED about, rather than shown?
+ *
+ * Exported so the rule can be tested against the state TanStack actually
+ * produced here, which is the whole reason this exists — see the call site.
+ */
+export function isStalledRead(q: { isSuccess: boolean; isError: boolean; fetchStatus: string }): boolean {
+    return !q.isSuccess && (q.isError || q.fetchStatus === 'paused');
+}
+
 export default function ClientOutstandingPage() {
-    const { data, isLoading, isError, error } = useQuery({
+    const { data, isPending, isSuccess, isError, fetchStatus, failureReason, error } = useQuery({
         queryKey: ['finance', 'client-outstanding'],
         queryFn: getClientOutstanding,
     });
@@ -96,12 +107,63 @@ export default function ClientOutstandingPage() {
         });
     }, [data, search, focus]);
 
-    if (isError) {
-        return <Alert type="error" showIcon message="Could not load the outstanding position" description={(error as Error)?.message} />;
+    /*
+     * A READ THAT IS NOT COMING BACK IS SAID OUT LOUD.
+     *
+     * MEASURED, not assumed. Pointed at a backend without the route, this
+     * query settled at `status: "pending", fetchStatus: "paused",
+     * failureCount: 1, error: null` — TanStack's `networkMode: "online"`
+     * PAUSES a retry rather than failing it, so `isError` never becomes true
+     * and `status` never leaves "pending". A page that waits for `isError`
+     * waits for ever.
+     *
+     * That is why this is not written as `if (isError)`. It was, and it never
+     * fired: the screen showed the calm "nothing has been pulled from Tally
+     * yet" banner over a 404, telling the reader to go and press a button on
+     * the factory PC. A paused read and an empty position are opposite facts
+     * and must never render the same way.
+     *
+     * `paused` is reported separately from a hard failure because it is a
+     * different thing to act on: the request has not failed, it is not being
+     * sent. Both are "you are not looking at the position".
+     */
+    const stalled = isStalledRead({ isSuccess, isError, fetchStatus });
+
+    if (stalled) {
+        const reason = (error as Error | null) ?? (failureReason as Error | null);
+
+        return (
+            <Alert
+                type="error"
+                showIcon
+                message="Could not load the outstanding position"
+                description={
+                    fetchStatus === 'paused'
+                        ? `The request is paused and is not being retried, so this page is not showing the factory's position — do not read it as "nothing is owed". ${reason?.message ?? 'Check the connection and reload.'}`
+                        : (reason?.message ?? 'The server did not return the outstanding position. It has not been reported as empty — it has not been read at all.')
+                }
+            />
+        );
     }
 
     const totals = data?.totals;
-    const nothingPulled = !isLoading && (data?.as_of ?? null) === null;
+
+    /*
+     * ONLY A SUCCESSFUL READ MAY SAY "nothing has been pulled".
+     *
+     * This was `!isLoading && data?.as_of == null`, which is absence of data —
+     * and a failed request has no data either. Opening the page against a
+     * backend missing the route showed the calm yellow banner telling the
+     * reader to go and press a button on the factory PC, when what had
+     * actually happened was a 404. That is the worst kind of wrong: it reads
+     * as a normal, expected state, so nobody goes looking for a fault, and the
+     * operator is sent to press a tray button that will not help.
+     *
+     * `isSuccess` means the server answered and the answer was an empty
+     * position. Every other state — loading, retrying, errored — is not that,
+     * and must not borrow this message.
+     */
+    const nothingPulled = isSuccess && (data?.as_of ?? null) === null;
 
     const columns = [
         {
@@ -242,16 +304,16 @@ export default function ClientOutstandingPage() {
 
             <Row gutter={[16, 16]}>
                 <Col xs={24} sm={12} lg={6}>
-                    <Card><Statistic title="Total outstanding" value={money(totals?.outstanding_amount ?? null)} loading={isLoading} /></Card>
+                    <Card><Statistic title="Total outstanding" value={money(totals?.outstanding_amount ?? null)} loading={isPending} /></Card>
                 </Col>
                 <Col xs={24} sm={12} lg={6}>
-                    <Card><Statistic title="Overdue" value={money(totals?.overdue_amount ?? null)} loading={isLoading} valueStyle={{ color: num(totals?.overdue_amount ?? '0') > 0 ? '#cf1322' : undefined }} /></Card>
+                    <Card><Statistic title="Overdue" value={money(totals?.overdue_amount ?? null)} loading={isPending} valueStyle={{ color: num(totals?.overdue_amount ?? '0') > 0 ? '#cf1322' : undefined }} /></Card>
                 </Col>
                 <Col xs={24} sm={12} lg={6}>
-                    <Card><Statistic title="Pending purchases" value={money(totals?.pending_order_amount ?? null)} loading={isLoading} /></Card>
+                    <Card><Statistic title="Pending purchases" value={money(totals?.pending_order_amount ?? null)} loading={isPending} /></Card>
                 </Col>
                 <Col xs={24} sm={12} lg={6}>
-                    <Card><Statistic title="Clients" value={totals?.clients ?? 0} loading={isLoading} /></Card>
+                    <Card><Statistic title="Clients" value={totals?.clients ?? 0} loading={isPending} /></Card>
                 </Col>
             </Row>
 
@@ -276,7 +338,7 @@ export default function ClientOutstandingPage() {
 
             <Table<ClientOutstanding>
                 rowKey={(row) => row.party_ledger_guid ?? `name:${row.party_ledger_name}`}
-                loading={isLoading}
+                loading={isPending}
                 dataSource={clients}
                 columns={columns}
                 size="small"
