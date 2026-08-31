@@ -146,6 +146,7 @@ class MaterialRequestService
         foreach ($items as $item) {
             $row = $standing->get($item->id);
             $item->availableInProduction = $row['usable'] ?? '0.0000';
+            $item->standingInProduction = $row['quantity'] ?? '0.0000';
             $item->productionUnitMatches = $row['unit_matches'] ?? true;
         }
 

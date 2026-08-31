@@ -40,6 +40,12 @@ export interface NettedLine {
      * — the screen must not read as "the floor is empty".
      */
     unitMismatch: boolean;
+    /**
+     * What is ACTUALLY standing there, netted or not, negative included. Shown
+     * whenever it differs from what was netted, which is exactly the two cases
+     * the owner asked to stay visible: a negative balance and a unit mismatch.
+     */
+    standing: number;
 }
 
 interface Line {
@@ -62,21 +68,29 @@ export function netAgainstProduction(
         const required = line.quantity ?? 0;
 
         if (line.item_id === null) {
-            return { required, available: 0, ask: required, unitMismatch: false };
+            return { required, available: 0, ask: required, unitMismatch: false, standing: 0 };
         }
 
         const material = materials.get(line.item_id);
         const unitMismatch = material?.production_unit_matches === false;
-        const standing = Number(material?.available_in_production ?? 0);
+        const usable = Number(material?.available_in_production ?? 0);
+        // What is really there — negative included — for the display only.
+        const actuallyStanding = Number(material?.standing_in_production ?? 0);
 
         // A negative reaches here as 0 from the server, which already refuses
         // to call a discrepancy "available". Guarded again so a future shape
         // change cannot make the floor ask for MORE than it needs.
-        const left = Math.max(0, standing - (spent.get(line.item_id) ?? 0));
+        const left = Math.max(0, usable - (spent.get(line.item_id) ?? 0));
         const available = Math.min(Math.max(0, required), left);
 
         spent.set(line.item_id, (spent.get(line.item_id) ?? 0) + available);
 
-        return { required, available, ask: Math.max(0, required - available), unitMismatch };
+        return {
+            required,
+            available,
+            ask: Math.max(0, required - available),
+            unitMismatch,
+            standing: actuallyStanding,
+        };
     });
 }

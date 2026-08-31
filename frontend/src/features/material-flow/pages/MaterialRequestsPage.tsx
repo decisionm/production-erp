@@ -455,22 +455,48 @@ export default function MaterialRequestsPage() {
                                   read as an empty floor.
                                 */}
                                 <Col xs={6} sm={3}>
-                                    <Tooltip
-                                        title={
-                                            netted[index]?.unitMismatch
-                                                ? `Standing in production as ${
-                                                      materialsById.get(line.item_id ?? -1)?.uom ?? 'another unit'
-                                                  } — not netted`
-                                                : 'In production'
+                                    {/*
+                                      EXCLUDED FROM THE NETTING IS NOT THE SAME
+                                      AS ABSENT (DEC-20260831-005). A negative
+                                      balance and a unit the master no longer
+                                      agrees with are both left out of the
+                                      arithmetic and both stay on screen — the
+                                      real figure, struck through, so nobody
+                                      reads the row as an empty floor. Only when
+                                      the two agree is one number enough.
+                                    */}
+                                    {(() => {
+                                        const row = netted[index];
+                                        const excluded =
+                                            row !== undefined && row.standing !== row.available;
+
+                                        if (!excluded) {
+                                            return (
+                                                <Typography.Text type="secondary">
+                                                    {formatQuantity(row?.available ?? 0)}
+                                                </Typography.Text>
+                                            );
                                         }
-                                    >
-                                        <Typography.Text
-                                            type={netted[index]?.unitMismatch ? 'warning' : 'secondary'}
-                                            delete={netted[index]?.unitMismatch}
-                                        >
-                                            {formatQuantity(netted[index]?.available ?? 0)}
-                                        </Typography.Text>
-                                    </Tooltip>
+
+                                        return (
+                                            <Tooltip
+                                                title={
+                                                    row.unitMismatch
+                                                        ? `Standing in a different unit — not netted`
+                                                        : row.standing < 0
+                                                          ? 'Negative balance — not netted'
+                                                          : 'Not netted'
+                                                }
+                                            >
+                                                <Typography.Text
+                                                    type={row.standing < 0 || row.unitMismatch ? 'warning' : 'secondary'}
+                                                    delete={row.available === 0}
+                                                >
+                                                    {formatQuantity(row.standing)}
+                                                </Typography.Text>
+                                            </Tooltip>
+                                        );
+                                    })()}
                                 </Col>
                                 <Col xs={6} sm={3}>
                                     <Tooltip title="Ask the store for">

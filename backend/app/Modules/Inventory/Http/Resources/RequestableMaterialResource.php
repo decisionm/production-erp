@@ -50,6 +50,12 @@ class RequestableMaterialResource extends JsonResource
             // second case, so the screen can say the quantity is there and
             // still not net it.
             'available_in_production' => $this->availableInProduction ?? '0.0000',
+            // WHAT IS ACTUALLY STANDING THERE, netted or not — negative
+            // included. A negative balance and a unit the master no longer
+            // agrees with are both excluded from the netting and both stay
+            // VISIBLE (DEC-20260831-005): publishing only the usable figure
+            // shows 0 for each, which reads as an empty floor.
+            'standing_in_production' => $this->standingInProduction ?? '0.0000',
             'production_unit_matches' => $this->productionUnitMatches ?? true,
         ];
     }
