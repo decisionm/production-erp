@@ -2305,7 +2305,7 @@ consumption history.
 **Still open, and untouched by this:** whether anything should CHASE an
 overdue return, and against what clock. The Q69 block raised it; no ruling has
 been given.
-## Q82 · When Tally holds both an agreed rate and a billed one, which should lead the suggestion?
+## Q84 · When Tally holds both an agreed rate and a billed one, which should lead the suggestion?
 
 The purchase-order form now shows what this vendor last charged for this item:
 the latest Tally **Purchase Order** rate (what was AGREED) and the latest Tally
@@ -2328,7 +2328,7 @@ afterwards — so a wrong default here costs a click, not a wrong order.
 **Blocks:** nothing. The change is one comparison in `PurchaseRateLookup`.
 *Open since 2026-08-31.*
 
-## Q83 · Twenty-three GSTINs sit on more than one Tally ledger — which of those pairs are one supplier?
+## Q85 · Twenty-three GSTINs sit on more than one Tally ledger — which of those pairs are one supplier?
 
 Measured on the live company's own "All Masters" export (1742 ledgers): 665
 carry a GSTIN, and 23 of those GSTINs appear on MORE THAN ONE ledger. Some
@@ -2352,7 +2352,7 @@ be produced from the review screen itself.
 matches on its exact Tally identity or its unique GSTIN as normal.
 *Open since 2026-08-31.*
 
-## Q84 · Should supplier email and phone be maintained in Tally, or in the ERP?
+## Q86 · Should supplier email and phone be maintained in Tally, or in the ERP?
 
 The vendor import now brings a party's email and phone across where Tally has
 them. Measured on the same 1742-ledger export, it almost never does: **4**

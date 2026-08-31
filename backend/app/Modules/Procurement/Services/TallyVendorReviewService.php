@@ -131,6 +131,11 @@ class TallyVendorReviewService
         $byGuid = $vendors->whereNotNull('tally_ledger_guid')->keyBy('tally_ledger_guid');
         $byGstin = $vendors->filter(fn (Vendor $v) => VendorFromLedger::clean($v->gstin) !== null)
             ->groupBy(fn (Vendor $v) => strtoupper(trim((string) $v->gstin)));
+        // Keyed from the collection already in memory rather than queried per
+        // row: a freshly-named group is 620 unlinked ledgers on this
+        // factory's books, and a query each to ask "is this name taken" is 620
+        // round trips on shared hosting for an answer we are already holding.
+        $byName = $vendors->keyBy(fn (Vendor $v) => self::nameKey((string) $v->name));
 
         $ledgerCountsByGstin = $this->ledgers->ledgerCountsByGstin(
             $ledgers->pluck('gstin')->filter()->unique()->values()->all()
@@ -139,7 +144,7 @@ class TallyVendorReviewService
         $rows = [];
 
         foreach ($ledgers as $ledger) {
-            $row = $this->rowFor($ledger, $byGuid, $byGstin, $ledgerCountsByGstin, $dismissals->get($ledger->tally_guid) ?? collect());
+            $row = $this->rowFor($ledger, $byGuid, $byGstin, $byName, $ledgerCountsByGstin, $dismissals->get($ledger->tally_guid) ?? collect());
 
             if ($row !== null) {
                 $rows[] = $row;
@@ -162,6 +167,7 @@ class TallyVendorReviewService
      *
      * @param  Collection<string, Vendor>  $byGuid
      * @param  Collection<string, Collection<int, Vendor>>  $byGstin
+     * @param  Collection<string, Vendor>  $byName
      * @param  Collection<string, int>  $ledgerCountsByGstin
      * @param  Collection<int, TallyVendorReviewDismissal>  $dismissals
      * @return array<string, mixed>|null
@@ -170,6 +176,7 @@ class TallyVendorReviewService
         Ledger $ledger,
         Collection $byGuid,
         Collection $byGstin,
+        Collection $byName,
         Collection $ledgerCountsByGstin,
         Collection $dismissals,
     ): ?array {
@@ -229,7 +236,7 @@ class TallyVendorReviewService
 
             // A vendor of the same name from another source is NOT the same
             // row and is NOT merged silently — the person is told, and decides.
-            $nameClash = Vendor::withTrashed()->where('name', $proposed['name'])->first();
+            $nameClash = $proposed['name'] !== null ? $byName->get(self::nameKey($proposed['name'])) : null;
 
             return [
                 ...$base,
@@ -379,6 +386,30 @@ class TallyVendorReviewService
                     throw new RuntimeException(sprintf('Tally no longer carries a %s for %s. Reload the review before confirming.', str_replace('_', ' ', $field), $ledger->name));
                 }
 
+                // THE NAME IS THE ONE FIELD THAT CAN CREATE A DUPLICATE, and
+                // the create path already refuses to. Without the same check
+                // here the two halves of this screen disagree about the same
+                // act: Tally renames a party onto a name the ERP already uses
+                // — the live books hold exactly that shape, "Accurate
+                // Industries" beside "Accurate Industries -Purchase" — and
+                // confirming the rename would quietly make the second row for
+                // one supplier that confirmNew() exists to prevent.
+                // `vendors.name` is not unique, so nothing below would stop it.
+                if ($field === 'name') {
+                    $clash = Vendor::withTrashed()
+                        ->whereRaw('LOWER(TRIM(name)) = ?', [self::nameKey($value)])
+                        ->where('id', '!=', $vendor->id)
+                        ->first();
+
+                    if ($clash !== null) {
+                        throw new RuntimeException(sprintf(
+                            'Tally now calls this party "%s", which is already vendor %s. Resolve that first — two rows for one supplier is worse than a delay.',
+                            $value,
+                            $clash->code,
+                        ));
+                    }
+                }
+
                 $updates[$field] = $value;
             }
 
@@ -414,6 +445,19 @@ class TallyVendorReviewService
             ['tally_ledger_guid' => $ledger->tally_guid, 'field' => $field],
             ['dismissed_value' => $value, 'dismissed_by' => $actor->id, 'dismissed_at' => Carbon::now()],
         );
+    }
+
+    /**
+     * What counts as the same vendor name — trimmed and case-folded.
+     *
+     * Spelled once because two places ask it: the queue, which warns that a
+     * name is taken, and confirmFields(), which refuses to take it. A queue
+     * that warned on a stricter rule than the writer enforced would show a
+     * clash the confirm then allowed, or worse, the other way round.
+     */
+    private static function nameKey(string $name): string
+    {
+        return mb_strtolower(trim($name));
     }
 
     private function ledgerOrFail(string $guid): Ledger

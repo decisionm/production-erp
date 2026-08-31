@@ -252,6 +252,57 @@ class TallyVendorReviewTest extends TestCase
         $this->assertSame('0499999999', $vendor->phone);
     }
 
+    public function test_confirming_a_rename_onto_another_vendors_name_is_refused_like_a_new_one_is(): void
+    {
+        // THE SHAPE IS IN THE LIVE BOOKS: "Accurate Industries" beside
+        // "Accurate Industries -Purchase", two Sundry Creditors sharing a
+        // GSTIN. If Tally drops the suffix, confirming the rename would make
+        // the second row for one supplier that the create path already
+        // refuses to make. `vendors.name` is not unique, so only this check
+        // stops it.
+        $this->actAsAccounts();
+        $ledger = $this->ledger('Synthetic Supplies', ['tally_guid' => 'led-purchase-twin']);
+        $vendor = Vendor::create([
+            'code' => 'V-0002', 'name' => 'Synthetic Supplies -Purchase',
+            'tally_ledger_name' => 'Synthetic Supplies', 'is_active' => true,
+        ]);
+        $vendor->forceFill(['tally_ledger_guid' => 'led-purchase-twin'])->save();
+        Vendor::create(['code' => 'V-0001', 'name' => 'Synthetic Supplies', 'is_active' => true]);
+        $this->selectGroup();
+
+        // It IS raised as a difference — the person must see it.
+        $this->assertSame(['name'], array_column($this->queue()['rows'][0]['differences'], 'field'));
+
+        $this->postJson('/api/v1/procurement/tally/vendor-review/confirm-fields', [
+            'tally_ledger_guid' => 'led-purchase-twin',
+            'vendor_id' => $vendor->id,
+            'fields' => ['name'],
+        ])->assertStatus(422);
+
+        $this->assertSame('Synthetic Supplies -Purchase', $vendor->refresh()->name);
+    }
+
+    public function test_a_rename_to_a_name_nobody_else_holds_is_applied_normally(): void
+    {
+        // The guard above must refuse a COLLISION, not renaming as such.
+        $this->actAsAccounts();
+        $ledger = $this->ledger('Synthetic Supplies Ltd');
+        $vendor = Vendor::create([
+            'code' => 'V-0001', 'name' => 'Synthetic Supplies',
+            'tally_ledger_name' => 'Synthetic Supplies Ltd', 'is_active' => true,
+        ]);
+        $vendor->forceFill(['tally_ledger_guid' => $ledger->tally_guid])->save();
+        $this->selectGroup();
+
+        $this->postJson('/api/v1/procurement/tally/vendor-review/confirm-fields', [
+            'tally_ledger_guid' => $ledger->tally_guid,
+            'vendor_id' => $vendor->id,
+            'fields' => ['name'],
+        ])->assertOk();
+
+        $this->assertSame('Synthetic Supplies Ltd', $vendor->refresh()->name);
+    }
+
     public function test_tally_silence_never_clears_a_value_the_erp_holds(): void
     {
         $this->actAsAccounts();

@@ -115,12 +115,12 @@ Matching, in order:
 2. **GSTIN, only when it is unambiguous.** Measured on the live All Masters
    export, **23 GSTINs appear on more than one ledger**, two Sundry Creditors
    among them sharing one. An ambiguous GSTIN produces a row that says so and
-   offers nothing to apply (Q83).
+   offers nothing to apply (Q85).
 3. Otherwise the party is proposed as a **new** vendor — and only inside the
    ledger groups the owner has named, which default to none (a creditors group
    is not a list of suppliers).
 
 **Tally silence never clears anything.** A difference is raised only where
 Tally holds a value. Contacts are nearly absent from these books — 4 emails and
-78 phones across 1742 ledgers (Q84) — and letting that absence overwrite a
+78 phones across 1742 ledgers (Q86) — and letting that absence overwrite a
 number somebody typed would be data loss dressed up as a sync.
