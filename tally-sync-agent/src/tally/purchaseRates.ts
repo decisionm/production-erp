@@ -83,8 +83,56 @@ const VOUCHER_TYPES: Record<string, PurchaseRateLine['voucher_type']> = {
 const parser = new XMLParser({ ignoreAttributes: false, parseTagValue: false, trimValues: true });
 
 /** Strip Tally's control-char language markers and trim — as masters.ts does. */
+/**
+ * Decode Tally's numeric character references. Same reasoning, and the same
+ * incident, as masters.ts: fast-xml-parser with `parseTagValue: false` leaves
+ * `&#13;&#10;` and `&#4;` as literal printable text that a control-character
+ * strip cannot see.
+ */
+function decodeEntities(raw: string): string {
+    return raw.replace(/&#(x[0-9a-f]{1,6}|\d{1,7});/gi, (_match, code: string) => {
+        const point = code.toLowerCase().startsWith('x') ? parseInt(code.slice(1), 16) : parseInt(code, 10);
+
+        return Number.isFinite(point) && point > 0 && point <= 0x10ffff ? String.fromCodePoint(point) : '';
+    });
+}
+
+/**
+ * NEVER `String(anObject)`, and this cost a whole round trip to learn.
+ *
+ * fast-xml-parser runs with `ignoreAttributes: false`, so an element carrying
+ * an attribute parses to an OBJECT — `<PARTYLEDGERNAME TYPE="String">Acme
+ * </PARTYLEDGERNAME>` becomes `{ '@_TYPE': 'String', '#text': 'Acme' }` — while
+ * a bare element is a plain string. WHICH ONE YOU GET DEPENDS ON THE REQUEST:
+ * the Day Book report answered with bare strings, and the Collection export
+ * answers with typed ones.
+ *
+ * So `String(value)` produced the literal text `[object Object]`, and on
+ * 31-Aug-2026 all 458 imported rows landed with that as their supplier name.
+ * The read looked like a total success — 458 lines, every unit, every GST rate,
+ * every item matched to an ERP item — and could answer nothing at all, because
+ * no vendor matches a party called `[object Object]`.
+ *
+ * Handled HERE rather than at the ten call sites on purpose: a per-site fix is
+ * one that the next field added can be written without, and the failure it
+ * produces is plausible-looking data rather than a crash.
+ */
 function clean(value: unknown): string {
-    const raw = String(value ?? '');
+    if (value == null) return '';
+
+    // An attributed element keeps its content under '#text'. One with
+    // attributes and no text has no content, which is '' — never the object's
+    // stringification.
+    const scalar = typeof value === 'object'
+        ? (value as Record<string, unknown>)['#text'] ?? ''
+        : value;
+
+    // Still not a primitive (repeated tags parse to an array, a nested list to
+    // an object): there is no single text value, and refusing to invent one is
+    // the point.
+    if (typeof scalar === 'object') return '';
+
+    const raw = decodeEntities(String(scalar));
     let out = '';
     for (const ch of raw) {
         if (ch.charCodeAt(0) >= 0x20) out += ch;
@@ -92,9 +140,12 @@ function clean(value: unknown): string {
     return out.trim();
 }
 
+/**
+ * Kept as the name that reads best at the call sites. clean() now handles both
+ * shapes, so the two are deliberately one function — a caller can no longer
+ * pick the wrong one.
+ */
 function textOf(field: unknown): string {
-    if (field == null) return '';
-    if (typeof field === 'object') return clean((field as Record<string, unknown>)['#text']);
     return clean(field);
 }
 

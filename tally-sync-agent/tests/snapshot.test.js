@@ -374,7 +374,7 @@ test('agentVersion() reads package.json and is the strict semver the release gat
     assert.match(agentVersion(), /^\d+\.\d+\.\d+$/);
 });
 
-test('this candidate is 0.4.3 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9, the purchase-rate read since 0.4.0', () => {
+test('this candidate is 0.4.4 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9, the purchase-rate read since 0.4.0', () => {
     // The drawer's "agent ≥ 0.3.8" line depends on 0.3.8 being the snapshot
     // FLOOR, which does not move; the candidate itself advances. 0.3.9 added
     // purchaseOrder.ts (Phase 6, staged, flag off); 0.4.0 adds the Day Book
@@ -398,5 +398,9 @@ test('this candidate is 0.4.3 — snapshots since 0.3.8, the Purchase Order buil
     // Day Book report and REPORTING WHICH ONE ANSWERED. The reporting is the
     // point: three pulls on 31-Aug returned zero and the cloud could not tell
     // "bought nothing" from "request refused" from "answer not understood".
-    assert.equal(agentVersion(), '0.4.3');
+    // 0.4.4 stops an ATTRIBUTED element being stringified into the literal
+    // "[object Object]". 0.4.3's Collection read worked and imported 458 rows
+    // whose supplier name was exactly that — a total success that could answer
+    // nothing.
+    assert.equal(agentVersion(), '0.4.4');
 });
