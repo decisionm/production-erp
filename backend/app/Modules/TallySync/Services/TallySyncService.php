@@ -527,29 +527,77 @@ class TallySyncService
     }
 
     /**
-     * Finished goods dispatched to a customer → Tally Delivery Note (reduces FG
-     * stock). No pricing — a Delivery Note is a stock movement, not a bill.
+     * Finished goods dispatched to a customer → Tally 'Delivery Note'.
+     *
+     * ON by owner decision (DEC-20260831-007) and FAIL-CLOSED, the same posture
+     * the Sales voucher takes: a named refusal rather than a guessed voucher,
+     * and a refusal NEVER blocks the dispatch. The goods have physically gone;
+     * Tally is bookkeeping that follows, and bookkeeping does not get a veto
+     * over what already happened on the loading bay.
+     *
+     * The party is named by its TALLY ledger, never by customers.name — the
+     * ERP's own label matches Tally only by luck, and a Delivery Note addressed
+     * to a ledger Tally does not have is a voucher that fails on arrival.
      */
-    public function enqueueDelivery(Delivery $delivery): TallySyncEntry
+    public function enqueueDelivery(Delivery $delivery): ?TallySyncEntry
     {
         $delivery->loadMissing(['lines.item', 'warehouse', 'salesOrder.customer']);
 
+        $reasons = [];
+
+        $allowedCompany = config('tally-sync.sales_invoices_allowed_company');
+        $allowedCompany = is_string($allowedCompany) && trim($allowedCompany) !== '' ? trim($allowedCompany) : null;
+        if ($allowedCompany === null) {
+            $reasons[] = [
+                'code' => 'allowed_company_unconfigured',
+                'detail' => 'tally-sync.sales_invoices_allowed_company is blank — there is no allowed Tally company to check '
+                    .'the agent against, and the destination is never assumed.',
+            ];
+        }
+
+        $partyLedger = $delivery->salesOrder?->customer?->tally_ledger_name;
+        if (blank($partyLedger)) {
+            $reasons[] = [
+                'code' => 'customer_ledger_unmapped',
+                'detail' => 'The customer has no tally_ledger_name — run sales:import-customers-from-ledgers. '
+                    .'Posting against the ERP label would name a ledger Tally may not have.',
+            ];
+        }
+
+        $godown = $this->godowns->resolveName($delivery->warehouse);
+        if (blank($godown)) {
+            $reasons[] = [
+                'code' => 'godown_unresolved',
+                'detail' => 'The dispatching warehouse does not resolve to a Tally godown, and a stock line must name one.',
+            ];
+        }
+
+        if ($reasons !== []) {
+            Log::warning('Delivery dispatched; Tally Delivery Note staging refused — the voucher could not be assembled correctly.', [
+                'delivery_id' => $delivery->id,
+                'reasons' => $reasons,
+            ]);
+
+            return null;
+        }
+
         $lines = $delivery->lines->map(fn ($line) => [
             // The exact Tally stock-item name (items are pulled from Tally, so
-            // item->name IS the Tally name) — this is what a voucher's
-            // <STOCKITEMNAME> must match. Never "sku - name".
+            // item->name IS the Tally name). Never "sku - name".
             'item' => $line->item->name,
-            'quantity' => $line->quantity,
+            'quantity' => (string) $line->quantity,
+            'uom' => $line->item->uom,
         ])->all();
 
         return $this->enqueue($delivery, 'Delivery Note', [
             'voucher_type' => 'Delivery Note',
             'voucher_date' => $delivery->delivered_date?->toDateString(),
             'voucher_number' => "DN-{$delivery->id}",
-            'party_ledger' => $delivery->salesOrder?->customer?->name,
+            'party_ledger' => $partyLedger,
             'party_gstin' => $delivery->salesOrder?->customer?->gstin,
-            'godown' => $this->godowns->resolveName($delivery->warehouse),
+            'godown' => $godown,
             'narration' => $delivery->notes,
+            'allowed_company' => $allowedCompany,
             'lines' => $lines,
         ]);
     }

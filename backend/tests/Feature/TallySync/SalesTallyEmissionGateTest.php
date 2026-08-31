@@ -17,33 +17,21 @@ use Tests\TestCase;
 
 /**
  * tally-sync.delivery_notes_enabled and tally-sync.sales_invoices_enabled —
- * both FAIL-CLOSED, and both OFF as the application default.
+ * both ON by owner decision (DEC-20260831-007), and both FAIL-CLOSED.
  *
- * This is NOT a decision. It is the fail-closed reading of two open
- * owner/Accounts questions, held the same way Receipt Notes were held while
- * Q63 was open (ReceiptNoteFeatureFlagTest is the sibling of this file):
+ * THEY WERE OFF, and this file used to lock that. The owner has since decided
+ * that the ERP originates the sale and posts BOTH vouchers, superseding
+ * DEC-20260809-003 — so the default flipped, and these tests flipped with it
+ * rather than being deleted: a default is worth pinning in whichever direction
+ * it points, because it is what a fresh deployment gets.
  *
- *   DELIVERY NOTE — the factory's own July-2026 Tally export contains ZERO
- *   Delivery Note vouchers (195 Payments, 177 Sales, 134 Receipts, 126 Sales
- *   Orders, 82 Journals, 64 Purchases, 38 Stock Journals, 15 Purchase
- *   Orders, 15 Contras, 1 Debit Note — and none of the 177 Sales vouchers
- *   references a delivery note). The ERP must not invent a voucher type the
- *   factory's books have never held.
- *
- *   SALES — DEC-20260809-003 records that all real sales are invoiced
- *   DIRECTLY in Tally, so posting here risks booking the sale twice; and
- *   independently, the agent's Sales builder declares itself unvalidated and
- *   emits no GST ledgers and no Rounding Off, so a posted voucher would
- *   carry ZERO TAX. The second reason holds under any answer to the first.
- *
- * WHAT THE GATE DOES NOT TOUCH, and these tests pin it: the ERP's own
- * delivery, its stock movement, its invoice and its numbering are unchanged.
- * The gate governs ONLY what is staged for Tally.
- *
- * The suite pins both flags ON in phpunit.xml so the rest of the TallySync
- * suite — written against the pre-existing always-on contract, and using
- * these two vouchers as its fixture vehicle — keeps passing unmodified.
- * This file never relies on that pin: every test sets the flag explicitly.
+ * WHAT DID NOT CHANGE, and is the more important half: ON does not mean
+ * unconditional. Staging still refuses by name when the master data is
+ * incomplete, and a refusal NEVER blocks the factory's own act — the invoice
+ * still issues, the delivery still stands. That is the decision's own wording,
+ * and `test_the_gate_withholds_the_voucher_and_nothing_else` and
+ * `test_the_flag_alone_does_not_stage_a_voucher_without_the_master_data` are
+ * where it is held.
  */
 class SalesTallyEmissionGateTest extends TestCase
 {
@@ -54,7 +42,7 @@ class SalesTallyEmissionGateTest extends TestCase
      * reads config/tally-sync.php FRESH with the env var cleared — the same
      * default a server with no such line in its .env would get.
      */
-    private function assertFreshDefaultIsOff(string $env, string $key): void
+    private function assertFreshDefaultIsOn(string $env, string $key): void
     {
         $original = ['putenv' => getenv($env), 'env' => $_ENV[$env] ?? null, 'server' => $_SERVER[$env] ?? null];
 
@@ -63,7 +51,7 @@ class SalesTallyEmissionGateTest extends TestCase
 
         try {
             $fresh = require config_path('tally-sync.php');
-            $this->assertFalse($fresh[$key], "a fresh deployment with no {$env} line at all must default OFF");
+            $this->assertTrue($fresh[$key], "a fresh deployment with no {$env} line at all must default ON");
         } finally {
             if ($original['putenv'] !== false) {
                 putenv("{$env}={$original['putenv']}");
@@ -77,14 +65,14 @@ class SalesTallyEmissionGateTest extends TestCase
         }
     }
 
-    public function test_the_delivery_note_config_default_is_off_when_no_env_is_set(): void
+    public function test_the_delivery_note_config_default_is_on_when_no_env_is_set(): void
     {
-        $this->assertFreshDefaultIsOff('TALLY_SYNC_DELIVERY_NOTES_ENABLED', 'delivery_notes_enabled');
+        $this->assertFreshDefaultIsOn('TALLY_SYNC_DELIVERY_NOTES_ENABLED', 'delivery_notes_enabled');
     }
 
-    public function test_the_sales_invoice_config_default_is_off_when_no_env_is_set(): void
+    public function test_the_sales_invoice_config_default_is_on_when_no_env_is_set(): void
     {
-        $this->assertFreshDefaultIsOff('TALLY_SYNC_SALES_INVOICES_ENABLED', 'sales_invoices_enabled');
+        $this->assertFreshDefaultIsOn('TALLY_SYNC_SALES_INVOICES_ENABLED', 'sales_invoices_enabled');
     }
 
     public function test_with_the_flag_off_a_dispatch_stages_no_delivery_note(): void
@@ -167,6 +155,27 @@ class SalesTallyEmissionGateTest extends TestCase
         );
     }
 
+    /**
+     * THE FAIL-CLOSED HALF, in the owner's own terms: "missing customer ledger
+     * ... must record a clear refusal and must never block invoice issuance".
+     *
+     * The delivery's customer has no Tally ledger name. Nothing is staged, and
+     * the DELIVERY ITSELF STILL STANDS — the goods physically went, and Tally
+     * is bookkeeping that follows rather than a veto over what already happened.
+     */
+    public function test_a_delivery_whose_customer_has_no_tally_ledger_stages_nothing_and_still_stands(): void
+    {
+        config(['tally-sync.delivery_notes_enabled' => true]);
+
+        $delivery = $this->delivery();
+        $delivery->salesOrder->customer->forceFill(['tally_ledger_name' => null]);
+
+        event(new DeliveryDispatched($delivery));
+
+        $this->assertSame(0, TallySyncEntry::query()->count(), 'an unmapped customer ledger refuses rather than guessing');
+        $this->assertTrue($delivery->exists, 'the dispatch is untouched by a Tally refusal');
+    }
+
     // ---- fixtures ---------------------------------------------------------
 
     /**
@@ -175,7 +184,10 @@ class SalesTallyEmissionGateTest extends TestCase
      */
     private function delivery(): Delivery
     {
+        // The Tally ledger name is what the voucher posts against — never the
+        // ERP's own label — so a fixture without one is refused by design.
         $customer = new Customer(['name' => 'Sri Aurobindo Beverages', 'gstin' => '34AABCA1122G1Z4']);
+        $customer->forceFill(['tally_ledger_name' => 'Sri Aurobindo Beverages']);
         $order = new SalesOrder;
         $order->setRelation('customer', $customer);
 

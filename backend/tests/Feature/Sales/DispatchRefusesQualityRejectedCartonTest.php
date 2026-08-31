@@ -25,6 +25,7 @@ use App\Modules\TallySync\Models\TallySyncEntry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -48,10 +49,17 @@ use Tests\TestCase;
  *   - OverDeliveryException (audit §4.6, untested until now) refuses more
  *     than the order's remaining quantity, on the typed path and the scan
  *     path alike, and leaves nothing behind.
+ *
+ * TWO PRECONDITIONS THIS FILE ASSUMES RATHER THAN TESTS, both seeded in
+ * confirmedOrder(): Quality's sign-off on the order line (DEC-20260831-006 —
+ * DispatchQualityGateTest is that gate's subject), and the Tally master data a
+ * Delivery Note is staged against (DEC-20260831-007). Neither is this file's
+ * subject; the carton's own quality truth is.
  */
 class DispatchRefusesQualityRejectedCartonTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     private Item $bottle;
 
@@ -119,6 +127,21 @@ class DispatchRefusesQualityRejectedCartonTest extends TestCase
             'item_id' => $this->bottle->id, 'quantity' => $ordered,
             'unit_price' => '4.50', 'quantity_delivered' => 0,
         ]);
+
+        // DEC-20260831-006: dispatch is gated on Quality's sign-off, so every
+        // order this file dispatches from is signed for its WHOLE ordered
+        // quantity. That caps nothing any test here leans on — the
+        // over-delivery guard is judged first and against the same figure, and
+        // a quality-REJECTED carton is refused earlier still, in
+        // linesFromCartons — so the sign-off is a precondition, not a subject.
+        $this->approveQualityForOrder($order->id);
+
+        // DEC-20260831-007: the Delivery Note is fail-closed and stages nothing
+        // unless the customer carries a tally_ledger_name. Called HERE, after
+        // the customer row exists, because the trait completes database rows.
+        // It adds no second Tally-linked warehouse — setUp() already made one,
+        // and two would leave the godown ambiguous.
+        $this->seedSalesTallyMasterData();
 
         return $order;
     }
@@ -270,7 +293,22 @@ class DispatchRefusesQualityRejectedCartonTest extends TestCase
         $this->assertSame('Aqua Traders', $entry->payload['party_ledger']);
         $this->assertSame('33AAACA1111A1Z5', $entry->payload['party_gstin']);
         $this->assertSame('FG Store', $entry->payload['godown']);
-        $this->assertSame([['item' => '500ml PET Bottle', 'quantity' => '1200.0000']], $entry->payload['lines']);
+        // The Delivery Note line carries its UNIT now (DEC-20260831-007): the
+        // voucher prints "1200.0000 Nos.", and a quantity without its unit is
+        // the shape of the tape defect FC-03 records — 229 metres filed as 229
+        // Nos is a different number about a different thing.
+        // ORDER-INDEPENDENT, DELIBERATELY. MySQL's native JSON column type
+        // NORMALISES object key order (shortest key first), while SQLite stores
+        // the text verbatim — so the decoded payload reads
+        // ['uom','item','quantity'] on CI and ['item','quantity','uom'] locally,
+        // and an order-sensitive assertSame passes on one engine and fails on
+        // the other. Sorting both sides keeps the WHOLE-ARRAY match that forbids
+        // a rate or an amount creeping in beside them, without pinning an order
+        // neither engine promises.
+        $line = $entry->payload['lines'][0];
+        ksort($line);
+        $this->assertCount(1, $entry->payload['lines']);
+        $this->assertSame(['item' => '500ml PET Bottle', 'quantity' => '1200.0000', 'uom' => 'Nos'], $line);
         $this->assertArrayNotHasKey('total_amount', $entry->payload);
 
         // And the same box cannot leave twice.

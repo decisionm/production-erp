@@ -68,7 +68,18 @@ interface NavLeaf {
      * unadopted (DEC-20260812-001) and must not become visible through a
      * child entry.
      */
-    permissionModule?: string;
+    /**
+     * The child's OWN permission gate, independent of the group's module.
+     *
+     * A LIST means ANY of them is enough. The Sales Fulfilment Control board is
+     * why: it is one board four teams share, it sits under Sales in the menu,
+     * and its route accepts sales OR inventory OR production OR quality — so a
+     * storekeeper who may open it was being shown no path to it, because the
+     * Sales GROUP was rejected before its children were looked at. The same
+     * shape a single string already fixed for Supplier Bills, widened to the
+     * OR the route itself uses.
+     */
+    permissionModule?: string | string[];
 }
 
 interface NavGroup {
@@ -309,7 +320,14 @@ export const allNavItems: readonly NavGroup[] = [
             { key: '/sales/sales-orders', label: 'Sales Orders' },
             { key: '/sales/deliveries', label: 'Deliveries' },
             { key: '/sales/invoices', label: 'Invoices' },
-            { key: '/sales/fulfilment-control', label: 'Fulfilment Control' },
+            {
+                key: '/sales/fulfilment-control',
+                label: 'Fulfilment Control',
+                // Shown to whoever the ROUTE lets in — Sales, Store, Production
+                // or Quality. It is the one board they share, and a Quality user
+                // who must sign a line off has to be able to find it.
+                permissionModule: ['sales', 'inventory', 'production', 'quality'],
+            },
         ],
     },
     {
@@ -460,8 +478,13 @@ export function buildNavItems(user: User | null) {
                 const children = item.children.filter((child) => {
                     if (child.permissionModule) {
                         // Its own permission is the whole gate — deliberately
-                        // NOT conditioned on reachesGroup.
-                        return hasModuleAccess(user, child.permissionModule);
+                        // NOT conditioned on reachesGroup. A list is an OR, and
+                        // it must match the OR the ROUTE grants, or the menu
+                        // and the server disagree about who may look.
+                        const modules = Array.isArray(child.permissionModule)
+                            ? child.permissionModule
+                            : [child.permissionModule];
+                        return modules.some((module) => hasModuleAccess(user, module));
                     }
                     if (!reachesGroup) return false;
                     return !child.module || (ADOPTED_MODULES.has(child.module) && hasModuleAccess(user, child.module));

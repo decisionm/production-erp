@@ -39,14 +39,11 @@ class TallySyncEventServiceProvider extends ServiceProvider
 {
     public function boot(): void
     {
-        // An issued ERP invoice → Tally 'Sales' voucher, FAIL-CLOSED behind
-        // tally-sync.sales_invoices_enabled (OFF by default). Two reasons,
-        // either sufficient: DEC-20260809-003 records that all real sales are
-        // invoiced DIRECTLY in Tally, so posting here would book the sale
-        // twice; and the agent's Sales builder is self-declared unvalidated
-        // and emits no GST ledgers and no Rounding Off, so a posted voucher
-        // would carry ZERO TAX. The ERP invoice, its numbering and its trace
-        // are untouched — this gate governs ONLY what reaches Tally.
+        // An issued ERP invoice → Tally 'Sales' voucher, ON by owner decision
+        // (DEC-20260831-007, superseding DEC-20260809-003: the ERP now
+        // ORIGINATES the sale) behind tally-sync.sales_invoices_enabled, and
+        // fail-closed — SalesVoucherPayload names its refusals and stages
+        // nothing rather than posting a voucher it cannot build correctly.
         Invoice::updated(function (Invoice $invoice) {
             if ($invoice->wasChanged('status') && $invoice->status === InvoiceStatus::Issued) {
                 if (! config('tally-sync.sales_invoices_enabled')) {
@@ -57,7 +54,21 @@ class TallySyncEventServiceProvider extends ServiceProvider
                     return;
                 }
 
-                $this->app->make(TallySyncService::class)->enqueueSalesInvoice($invoice);
+                // NEVER LET STAGING BREAK THE SALE — DEC-20260831-007 in as many
+                // words: "a refusal must never block the factory's own act".
+                // SalesVoucherPayload turns every KNOWN gap into a recorded
+                // reason, but this closure runs inside the invoice's own save,
+                // so an UNFORESEEN throw here would roll back the issuance
+                // itself. Issuing is the factory's business; posting to Tally
+                // follows it and does not get a veto.
+                try {
+                    $this->app->make(TallySyncService::class)->enqueueSalesInvoice($invoice);
+                } catch (Throwable $e) {
+                    Log::error('Invoice issued; Tally Sales staging threw and was swallowed so the invoice still stands.', [
+                        'invoice_id' => $invoice->id,
+                        'exception' => $e->getMessage(),
+                    ]);
+                }
             }
         });
 
@@ -86,13 +97,10 @@ class TallySyncEventServiceProvider extends ServiceProvider
             $this->stageGoodsReceiptNote($event->note);
         });
 
-        // A dispatch → Tally 'Delivery Note', FAIL-CLOSED behind
-        // tally-sync.delivery_notes_enabled (OFF by default). The factory's
-        // own July-2026 export holds ZERO Delivery Notes, and none of its 177
-        // real Sales vouchers references one — the sales-side shape of
-        // DEC-20260830-001. Until the owner and Accounts rule, the ERP does
-        // not invent a voucher type the books have never held. The delivery
-        // itself, its stock movement and its trace are untouched.
+        // A dispatch → Tally 'Delivery Note', ON by owner decision
+        // (DEC-20260831-007) behind tally-sync.delivery_notes_enabled, and
+        // fail-closed: enqueueDelivery names its refusals and returns null
+        // rather than staging a guessed voucher.
         Event::listen(DeliveryDispatched::class, function (DeliveryDispatched $event) {
             if (! config('tally-sync.delivery_notes_enabled')) {
                 Log::debug('Delivery dispatched; Tally Delivery Note staging disabled (tally-sync.delivery_notes_enabled = false — the factory has never used Tally Delivery Notes; owner question open).', [
@@ -102,7 +110,16 @@ class TallySyncEventServiceProvider extends ServiceProvider
                 return;
             }
 
-            $this->app->make(TallySyncService::class)->enqueueDelivery($event->delivery);
+            // Same rule on the way out: the goods have physically gone, and no
+            // Tally failure may undo a dispatch that already happened.
+            try {
+                $this->app->make(TallySyncService::class)->enqueueDelivery($event->delivery);
+            } catch (Throwable $e) {
+                Log::error('Delivery dispatched; Tally Delivery Note staging threw and was swallowed so the dispatch still stands.', [
+                    'delivery_id' => $event->delivery->id,
+                    'exception' => $e->getMessage(),
+                ]);
+            }
         });
 
         // A purchase order sent to its vendor → Tally Purchase Order voucher,

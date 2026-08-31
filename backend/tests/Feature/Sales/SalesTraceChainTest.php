@@ -170,6 +170,12 @@ class SalesTraceChainTest extends TestCase
 
         $this->postJson("/api/v1/sales/sales-orders/{$id}/confirm")->assertSuccessful()->assertJsonPath('data.status', 'confirmed');
 
+        // Dispatch is gated on Quality's internal sign-off (DEC-20260831-006),
+        // and this chain's subject is the trace, not the gate: Quality is
+        // assumed to have signed the whole ordered quantity off, so every
+        // dispatch below leaves the gate the way it always did.
+        $this->approveQualityForOrder($id);
+
         return SalesOrder::query()->with('lines')->findOrFail($id);
     }
 
@@ -372,7 +378,7 @@ class SalesTraceChainTest extends TestCase
         $this->assertSame('1800.0000', (string) $invoiceRow['lines'][0]['quantity']);
         $this->assertSame('4.5000', (string) $invoiceRow['lines'][0]['unit_price']);
         $this->assertTallyLink($invoiceRow['tally'], $sales, 'pending');
-        $this->assertUnvalidatedBuilderFlag($invoiceRow['tally'], 'DEC-20260809-003');
+        $this->assertUnvalidatedBuilderFlag($invoiceRow['tally'], 'DEC-20260831-007');
 
         // 5. The REAL agent: polls (all three handed out), acks the scanned
         //    Delivery Note, and reports Tally's rejection of the typed one.
@@ -429,7 +435,7 @@ class SalesTraceChainTest extends TestCase
         $invoiceTrace = $this->traceOf($invoiceShow);
         $this->assertSame("SO-{$order->id}", $invoiceTrace['sales_order']['document_number']);
         $this->assertTallyLink($invoiceTrace['tally'], $sales->fresh(), 'pending');
-        $this->assertUnvalidatedBuilderFlag($invoiceTrace['tally'], 'DEC-20260809-003');
+        $this->assertUnvalidatedBuilderFlag($invoiceTrace['tally'], 'DEC-20260831-007');
 
         // 8. Nothing on any of the three pages names a purchase rate or a
         //    supplier (FC-06) — a sales trace carries customers and selling

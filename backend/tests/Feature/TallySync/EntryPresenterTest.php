@@ -329,9 +329,14 @@ class EntryPresenterTest extends TestCase
         // still named.
         $sales = $presenter->flags($this->enqueueSalesInvoice())['unvalidated_builder'];
         $this->assertStringContainsString(
-            'NOT YET POSTED TO A REAL TALLY',
+            'NOT YET LIVE-POSTED TO A REAL TALLY',
             $sales['note'],
             'the Sales builder must still say plainly that it has never posted to a real Tally',
+        );
+        $this->assertStringContainsString(
+            'VALIDATED AGAINST 55 REAL SALES VOUCHER EXPORTS',
+            $sales['note'],
+            'and it must say what it WAS checked against — the correction the owner asked for',
         );
         $this->assertStringNotContainsString(
             $unvalidated,
@@ -343,9 +348,11 @@ class EntryPresenterTest extends TestCase
             $sales['note'],
             'the builder DOES emit GST now — repeating the old gap would be a false warning',
         );
-        $this->assertStringContainsString('DEC-20260809-003', $sales['note']);
+        // The decision in force. DEC-20260831-007 supersedes DEC-20260809-003:
+        // the ERP now ORIGINATES the sale rather than mirroring Tally's.
+        $this->assertStringContainsString('DEC-20260831-007', $sales['note']);
         $this->assertSame('tally-sync-agent/src/tally/voucherBuilders/salesInvoice.ts', $sales['builder']);
-        $this->assertSame('DEC-20260809-003', $sales['decision']);
+        $this->assertSame('DEC-20260831-007', $sales['decision']);
 
         // Receipt Note (receiptNote.ts:17), Delivery Note (deliveryNote.ts:16)
         // and Journal (journalEntry.ts:13) carry the SAME line — each flag
@@ -358,11 +365,19 @@ class EntryPresenterTest extends TestCase
         $this->assertArrayNotHasKey('decision', $receipt);
         $this->assertStringNotContainsString('GST', $receipt['note']);
 
+        // THE DELIVERY NOTE NO LONGER SHARES THE LINE EITHER, and for a reason
+        // worth stating rather than hiding: it CANNOT be validated against a
+        // real export, because the factory's Tally contains none of these
+        // vouchers at all. The ERP introduces the practice by owner decision
+        // (DEC-20260831-007), so the flag says "never used, cannot be
+        // validated" instead of "not yet validated" — the first is true, the
+        // second implies an export exists to check against.
         $delivery = $presenter->flags($this->enqueueDelivery())['unvalidated_builder'];
-        $this->assertStringContainsString($unvalidated, $delivery['note']);
-        $this->assertStringContainsString('Validate the tag structure against a real export', $delivery['note']);
+        $this->assertStringNotContainsString($unvalidated, $delivery['note']);
+        $this->assertStringContainsString('A VOUCHER TYPE THIS FACTORY HAS NEVER USED', $delivery['note']);
+        $this->assertStringContainsString('first live post is the check', $delivery['note']);
         $this->assertSame('tally-sync-agent/src/tally/voucherBuilders/deliveryNote.ts', $delivery['builder']);
-        $this->assertArrayNotHasKey('decision', $delivery);
+        $this->assertSame('DEC-20260831-007', $delivery['decision']);
 
         $journal = $presenter->flags(app(TallySyncService::class)->enqueueJournalEntry($this->journal()))['unvalidated_builder'];
         $this->assertStringContainsString($unvalidated, $journal['note']);
@@ -632,7 +647,11 @@ class EntryPresenterTest extends TestCase
     private function enqueueDelivery(): TallySyncEntry
     {
         $so = new SalesOrder;
-        $so->setRelation('customer', new Customer(['name' => 'Sri Aurobindo Beverages']));
+        // The Delivery Note posts against the customer's TALLY ledger, and
+        // refuses without one (DEC-20260831-007's fail-closed half).
+        $customer = new Customer(['name' => 'Sri Aurobindo Beverages']);
+        $customer->forceFill(['tally_ledger_name' => 'Sri Aurobindo Beverages']);
+        $so->setRelation('customer', $customer);
 
         $bottle = new DeliveryLine(['quantity' => '2000.0000']);
         $bottle->setRelation('item', new Item(['sku' => 'BTL-500', 'name' => '500ml PET Bottle']));

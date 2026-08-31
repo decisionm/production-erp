@@ -42,7 +42,11 @@ use Illuminate\Support\Collection;
  *   production.completed  no FK joins a production request to a shift
  *                       production entry; "produced" is inferred from line
  *                       coverage, so completed-against-this-line is unknown.
- *   qa / customer_approval  neither gate exists anywhere in this build.
+ * WHAT IS NOW REAL. Internal quality approval IS recorded (DEC-20260831-006)
+ * and gates dispatch, so `quality` carries a true state rather than a
+ * confession. There is NO customer-approval step — the owner settled that it
+ * does not exist and is not to be built, so the column is gone rather than
+ * shown as unknown: a gate nobody performs must not appear on a screen at all.
  *
  * A blank column would read as "nothing to worry about" on a factory floor.
  * That is the one thing this view must never say by accident.
@@ -72,6 +76,7 @@ class FulfilmentControlService
                 'item:id,sku,name,display_name,uom',
                 'salesOrder:id,status,customer_id,order_date,expected_date',
                 'salesOrder.customer:id,name',
+                'qualityApprovedBy:id,name',
             ])
             ->whereHas('salesOrder', fn ($order) => $order->whereIn('status', [
                 SalesOrderStatus::Confirmed,
@@ -140,13 +145,29 @@ class FulfilmentControlService
         $free = $availability['free'] ?? '0.0000';
         $overReserved = $availability['over_reserved'] ?? '0.0000';
 
-        // WHAT COULD PHYSICALLY GO TODAY — held stock, capped at what the
-        // line still owes. It is NOT a statement that it MAY go: the two
-        // approval gates below are not recorded anywhere in this build, and
-        // the blocker says so in words.
-        $dispatchReady = bccomp($reserved, $outstanding, 4) === 1 ? $outstanding : $reserved;
+        // TWO DIFFERENT FACTS, KEPT APART — the misleading column the owner
+        // called out.
+        //
+        //   stock_held      what the store is holding for this line, capped at
+        //                   what it still owes. Stock set aside. Nothing more.
+        //   dispatch_ready  what may ACTUALLY GO: zero until Quality signs the
+        //                   line off, then the approved quantity less what has
+        //                   already gone.
+        //
+        // Before DEC-20260831-006 a single "dispatch ready" figure showed held
+        // stock and read as permission to ship it. On a factory floor that is
+        // the difference between "we have it" and "you may send it".
+        $stockHeld = bccomp($reserved, $outstanding, 4) === 1 ? $outstanding : $reserved;
 
-        $blocker = $this->blocker($outstanding, $reserved, $shortfall, $free, $overReserved, $request, $invoiced, $delivered);
+        $qualityApproved = $line->isQualityApproved();
+        $dispatchReady = '0.0000';
+        if ($qualityApproved) {
+            $approvedRemaining = bcsub($line->qualityApprovedQuantity(), $delivered, 4);
+            $approvedRemaining = bccomp($approvedRemaining, '0', 4) === 1 ? $approvedRemaining : '0.0000';
+            $dispatchReady = bccomp($approvedRemaining, $stockHeld, 4) === 1 ? $stockHeld : $approvedRemaining;
+        }
+
+        $blocker = $this->blocker($outstanding, $reserved, $shortfall, $free, $overReserved, $request, $invoiced, $delivered, $qualityApproved);
 
         return [
             'line_id' => (int) $line->id,
@@ -172,6 +193,7 @@ class FulfilmentControlService
             'held' => $reserved,
             'over_reserved' => $overReserved,
             'shortfall' => $shortfall,
+            'stock_held' => $stockHeld,
             'dispatch_ready' => $dispatchReady,
 
             // ---- the store's decision. "Approved" is what it actually holds.
@@ -200,17 +222,19 @@ class FulfilmentControlService
                     .'so completed-against-this-line is not stored.',
             ],
 
-            // ---- the two gates the owner asked to be separate and visible.
-            // They are separate here, and both say plainly that they do not exist.
+            // ---- THE ONE GATE (DEC-20260831-006). Internal quality approval is
+            // recorded and caps the dispatch. There is deliberately no
+            // customer-approval sibling: the owner settled that no such step
+            // exists, so none is shown.
             'quality' => [
-                'state' => self::NOT_RECORDED,
-                'detail' => 'Internal QA approval is not recorded against a sales order line. '
-                    .'Today only an already quality-rejected carton is refused at dispatch.',
-            ],
-            'customer_approval' => [
-                'state' => self::NOT_RECORDED,
-                'detail' => 'Customer approval for a customer+product combination is not built — '
-                    .'no table, no status, no gate.',
+                'state' => $qualityApproved ? 'approved' : 'pending',
+                'approved_at' => $line->quality_approved_at?->toDateString(),
+                'approved_by' => $line->qualityApprovedBy?->name,
+                'approved_quantity' => $qualityApproved ? $line->qualityApprovedQuantity() : null,
+                'note' => $line->quality_approval_note,
+                'detail' => $qualityApproved
+                    ? 'Quality signed this line off; dispatch is capped at the quantity they approved.'
+                    : 'Quality has not signed this line off, so none of it may be dispatched yet.',
             ],
 
             'expected_date' => $line->salesOrder?->expected_date?->toDateString(),
@@ -235,6 +259,7 @@ class FulfilmentControlService
         ?ProductionRequest $request,
         string $invoiced,
         string $delivered,
+        bool $qualityApproved,
     ): array {
         // Promised twice — the one state that needs a decision even though
         // nothing is short. Asked first, exactly as the store's queue does.
@@ -304,15 +329,22 @@ class FulfilmentControlService
                 ];
         }
 
-        // Covered by holds. The stock exists and is spoken for — but whether it
-        // MAY leave depends on two gates this build does not record, and saying
-        // "ready to dispatch" without them is the false green this view exists
-        // to avoid.
+        // Covered by holds. Whether it MAY leave is now a recorded fact rather
+        // than an unknown: Quality signs the line off, and only then is it
+        // Sales' to dispatch. DEC-20260831-006.
+        if (! $qualityApproved) {
+            return [
+                'code' => 'awaiting_quality_approval',
+                'summary' => 'Held in full and waiting on internal Quality to sign it off. Nothing may be dispatched until they do.',
+                'team' => 'Quality',
+                'severity' => 3,
+            ];
+        }
+
         return [
-            'code' => 'held_awaiting_dispatch',
-            'summary' => 'Held in full and waiting to be dispatched. '
-                .'Internal QA approval and customer approval are not recorded in the ERP — confirm both off-system before releasing.',
-            'team' => 'Store',
+            'code' => 'ready_to_dispatch',
+            'summary' => 'Held in full and approved by Quality — Sales may dispatch it.',
+            'team' => 'Sales',
             'severity' => 1,
         ];
     }

@@ -312,3 +312,63 @@ describe('the Supplier Bills entry (permissionModule)', () => {
         ]);
     });
 });
+
+/**
+ * THE FULFILMENT CONTROL BOARD — one screen, four teams, and a `permissionModule`
+ * that is a LIST rather than a single string.
+ *
+ * The board's route accepts sales OR inventory OR production OR quality, because
+ * it is the one place those four agree on what is true about an order line. But
+ * it lives under Sales in the menu, and a GROUP is rejected before its children
+ * are looked at — so a storekeeper, a supervisor or a quality user who was
+ * perfectly entitled to open it was shown no path to it at all.
+ *
+ * That went from untidy to load-bearing with DEC-20260831-006: Quality now has
+ * to sign a line off before anything can be dispatched, and a gate nobody can
+ * navigate to is a gate that gets worked around.
+ *
+ * This is the Supplier Bills mechanism above, widened from one module to an OR —
+ * and the OR has to be the same one the ROUTE grants, or the menu and the server
+ * disagree about who may look.
+ */
+describe('the Fulfilment Control entry (permissionModule as a list)', () => {
+    const BOARD = '/sales/fulfilment-control';
+
+    function userWith(permissions: string[]): User {
+        return { id: 9, name: 'Test', email: 't@example.test', is_active: true, permissions };
+    }
+
+    function sees(user: User | null, path: string): boolean {
+        return buildNavItems(user).some((group) => group.children?.some((child) => child.key === path));
+    }
+
+    it.each([
+        ['a sales desk', 'sales.view'],
+        ['a storekeeper', 'inventory.view'],
+        ['a supervisor', 'production.view'],
+        ['a quality user', 'quality.view'],
+    ])('is reachable by %s holding only %s', (_who, permission) => {
+        expect(sees(userWith([permission]), BOARD)).toBe(true);
+    });
+
+    it('is reachable on a manage permission too, not only view', () => {
+        expect(sees(userWith(['quality.manage']), BOARD)).toBe(true);
+    });
+
+    it('is hidden from a login holding none of the four', () => {
+        expect(sees(userWith(['hrms.view', 'payroll.view']), BOARD)).toBe(false);
+        expect(sees(userWith([]), BOARD)).toBe(false);
+        expect(sees(null, BOARD)).toBe(false);
+    });
+
+    /**
+     * Widening ONE child must not smuggle the rest of the Sales menu in with
+     * it: a storekeeper still has no business on the customer, order or invoice
+     * screens, and the server would refuse them anyway.
+     */
+    it('is the only Sales child a store login gains', () => {
+        const sales = buildNavItems(userWith(['inventory.view'])).find((group) => group.key === 'sales');
+
+        expect(sales?.children?.map((child) => child.key)).toEqual([BOARD]);
+    });
+});

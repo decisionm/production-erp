@@ -3,6 +3,7 @@
 namespace Tests\Feature\TallySync\PerType;
 
 use App\Models\User;
+use App\Modules\Sales\Models\SalesOrderLine;
 use App\Modules\TallySync\Models\Enums\TallyTransactionCategory;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\AgentTokenService;
@@ -175,6 +176,28 @@ abstract class PerTypeLifecycleTestCase extends TestCase
         }
     }
 
+    // ---- preconditions the domain act now has ------------------------------
+
+    /**
+     * QUALITY SIGNS A LINE OFF BEFORE ANYTHING LEAVES THE STORE
+     * (DEC-20260831-006), so the one type whose domain act is a DISPATCH —
+     * the Delivery Note — is refused with a 422 unless its sales order lines
+     * carry that sign-off. This suite's subject is the QUEUE, not that gate
+     * (DispatchQualityGateTest owns the gate itself and walks its real
+     * preconditions), so every line the concrete class has already made is
+     * stamped here through the trait — the same "assume the masters are in
+     * place" move as seedSalesTallyMasterData() above, and for the same
+     * reason. It sits beside those calls rather than in setUp() because a
+     * concrete class makes its order and lines AFTER parent::setUp(); the
+     * five types that make no sales order line see a no-op.
+     */
+    protected function approveQualityOnEveryFixtureLine(): void
+    {
+        foreach (SalesOrderLine::query()->get() as $line) {
+            $this->approveQualityForDispatch($line);
+        }
+    }
+
     // ---- the contract ------------------------------------------------------
 
     public function test_the_lifecycle_walks_the_real_endpoints_in_order(): void
@@ -188,6 +211,10 @@ abstract class PerTypeLifecycleTestCase extends TestCase
         // only what it finds blank and adds a Tally-linked warehouse only where
         // the type made none (two would make the godown ambiguous).
         $this->seedSalesTallyMasterData();
+
+        // And Quality's dispatch sign-off, which DEC-20260831-006 makes a
+        // precondition of the dispatch that stages a Delivery Note.
+        $this->approveQualityOnEveryFixtureLine();
 
         $entry = $this->enqueueViaDomain();
         $id = $entry->id;
@@ -313,8 +340,10 @@ abstract class PerTypeLifecycleTestCase extends TestCase
 
     public function test_a_failed_voucher_can_be_dismissed_and_a_dismissed_one_never_retried(): void
     {
-        // Masters before the domain act, as in the lifecycle test above.
+        // Masters and Quality's dispatch sign-off (DEC-20260831-006) before the
+        // domain act, as in the lifecycle test above.
         $this->seedSalesTallyMasterData();
+        $this->approveQualityOnEveryFixtureLine();
 
         $entry = $this->enqueueViaDomain();
         $id = $entry->id;
@@ -371,8 +400,10 @@ abstract class PerTypeLifecycleTestCase extends TestCase
 
     public function test_a_user_without_tally_sync_view_is_refused_on_list_show_and_summary(): void
     {
-        // Masters before the domain act, as in the lifecycle test above.
+        // Masters and Quality's dispatch sign-off (DEC-20260831-006) before the
+        // domain act, as in the lifecycle test above.
         $this->seedSalesTallyMasterData();
+        $this->approveQualityOnEveryFixtureLine();
 
         $entry = $this->enqueueViaDomain();
 
@@ -395,8 +426,10 @@ abstract class PerTypeLifecycleTestCase extends TestCase
 
     public function test_enqueueing_the_same_source_twice_leaves_exactly_one_row(): void
     {
-        // Masters before the domain act, as in the lifecycle test above.
+        // Masters and Quality's dispatch sign-off (DEC-20260831-006) before the
+        // domain act, as in the lifecycle test above.
         $this->seedSalesTallyMasterData();
+        $this->approveQualityOnEveryFixtureLine();
 
         $entry = $this->enqueueViaDomain();
 

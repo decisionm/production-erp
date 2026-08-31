@@ -24,6 +24,7 @@ use Database\Seeders\CanonicalMachineSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -48,6 +49,7 @@ use Tests\TestCase;
 class StockLedgerInvariantTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     private Item $resin;
 
@@ -188,6 +190,12 @@ class StockLedgerInvariantTest extends TestCase
         ])->assertSuccessful()->json('data.id');
         $this->postJson("/api/v1/sales/sales-orders/{$orderId}/confirm")->assertSuccessful();
         $order = SalesOrder::query()->with('lines')->findOrFail($orderId);
+
+        // Dispatch is gated on Quality's internal sign-off (DEC-20260831-006).
+        // This file's subject is the ledger invariant, not the gate, so Quality
+        // is assumed to have signed the whole ordered quantity off — the gate
+        // itself is DispatchQualityGateTest's subject.
+        $this->approveQualityForOrder($order->id);
 
         $this->postJson('/api/v1/sales/deliveries', [
             'sales_order_id' => $order->id,

@@ -150,7 +150,7 @@ class SalesDocumentShowTest extends TestCase
         $this->assertSame('2026-08-11', $invoices[0]['invoice_date']);
         $this->assertSame([['item' => ['id' => $this->bottle->id, 'name' => '500ml PET Bottle'], 'quantity' => '500.0000', 'unit_price' => '4.5000']], $invoices[0]['lines']);
         $this->assertTallyLink($invoices[0]['tally'], 'Sales', "INV-{$issued['id']}", 'pending');
-        $this->assertSame('DEC-20260809-003', $invoices[0]['tally']['flags']['unvalidated_builder']['decision']);
+        $this->assertSame('DEC-20260831-007', $invoices[0]['tally']['flags']['unvalidated_builder']['decision']);
         $this->assertSame('draft', $invoices[1]['status']);
         $this->assertNull($invoices[1]['tally']);
 
@@ -283,7 +283,7 @@ class SalesDocumentShowTest extends TestCase
 
         $shown = $this->getJson("/api/v1/sales/invoices/{$invoice['id']}")->assertOk()->json('data');
         $this->assertTallyLink($shown['tally'], 'Sales', "INV-{$invoice['id']}", 'pending');
-        $this->assertSame('DEC-20260809-003', $shown['tally']['flags']['unvalidated_builder']['decision']);
+        $this->assertSame('DEC-20260831-007', $shown['tally']['flags']['unvalidated_builder']['decision']);
         $this->assertSame($shown['tally'], $shown['trace']['tally']);
 
         $row = collect($this->getJson('/api/v1/sales/invoices')->assertOk()->json('data'))->firstWhere('id', $invoice['id']);
@@ -354,15 +354,19 @@ class SalesDocumentShowTest extends TestCase
         $statement = $this->getJson('/api/v1/sales/tally-mirror')->assertOk()->json();
 
         $this->assertFalse($statement['mirrored']);
-        $this->assertSame('DEC-20260809-003', $statement['decision']);
-        $this->assertSame('Real sales are invoiced in Tally', $statement['headline']);
+        $this->assertSame('DEC-20260831-007', $statement['decision']);
+        $this->assertSame('Sales raised here post to Tally; Tally is not read back', $statement['headline']);
         $this->assertSame(
-            'Tally-side Sales and Sales Order vouchers are not mirrored into this ERP. The documents on these pages are the ERP-originated subset only. Reads from Tally are deliberate and human-triggered; none is scheduled.',
+            'Tally-side Sales and Sales Order vouchers are not mirrored into this ERP. The documents on these pages are the ERP-originated subset only, and a sale keyed straight into Tally will not appear here. Reads from Tally are deliberate and human-triggered; none is scheduled.',
             $statement['body'],
         );
         $this->assertSame([
-            'validated' => false,
-            'note' => 'The ERP\'s Sales voucher XML is not yet validated against real Tally and carries no GST — do not post real invoices from here while DEC-20260809-003 stands.',
+            // VALIDATED, NOT LIVE-POSTED. The old statement claimed the builder
+            // was unvalidated and carried no GST; both became false when it was
+            // rebuilt against the factory's own 55 real vouchers, and a false
+            // honesty statement is worse than none.
+            'validated' => true,
+            'note' => 'The ERP\'s Sales voucher was checked field by field against 55 real Sales vouchers exported from this factory\'s Tally and emits CGST/SGST or IGST, Rounding Off and a per-line ledger. It has not yet been posted to a live Tally, and it refuses to stage at all when the customer ledger, HSN, rate, godown or allowed company is missing — a refusal never blocks the invoice.',
         ], $statement['erp_invoice_builder']);
         $this->assertFalse($statement['payments_recorded_here']);
         $this->assertSame('An invoice is never marked paid by this ERP — receipts live in Tally.', $statement['payments_note']);
@@ -466,6 +470,14 @@ class SalesDocumentShowTest extends TestCase
             'item_id' => $this->bottle->id, 'quantity' => $ordered,
             'unit_price' => '4.50', 'quantity_delivered' => 0,
         ]);
+
+        // Dispatch is gated on internal quality approval (DEC-20260831-006).
+        // This file's subject is the SHOW endpoints, not the gate, so the line
+        // is signed off for its whole ordered quantity here — once, before any
+        // delivery is posted against it. Only orders built HERE are signed off:
+        // the hand-built order test_can_cancel cancels is left unapproved on
+        // purpose, so its refused dispatch keeps proving the status guard.
+        $this->approveQualityForOrder($order->id);
 
         return $order;
     }
