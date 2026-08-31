@@ -30,9 +30,14 @@ use Tests\TestCase;
  * caught a chain that works only when one Administrator does everything,
  * which is how the live instance is configured today.
  *
- * It also pins the two things the shipped Control view says at each step:
- * WHO must act next, and that a fully held line is never called simply
- * "ready" while the QA and customer-approval gates are unrecorded.
+ * It also pins what the shipped Control view says at each step: WHO must act
+ * next, and that a fully held line is not called "ready" until Quality has
+ * signed it off. There is no customer-approval gate and there must never be
+ * one — DEC-20260831-006 settled that the factory performs no such step.
+ *
+ * The chain now CLOSES, in the second half of the file: Tally raises the sales
+ * invoice, the ERP imports that voucher and matches it to the order
+ * (DEC-20260831-008), and nothing travels the other way.
  */
 class SalesFulfilmentRehearsalTest extends TestCase
 {
@@ -164,6 +169,14 @@ class SalesFulfilmentRehearsalTest extends TestCase
      */
     public function test_on_the_shipped_defaults_the_chain_stages_nothing_for_tally(): void
     {
+        // These two lines RESTORE THE SHIPPED DEFAULT; they do not override it.
+        // Under DEC-20260831-008 the ERP sends no Sales Order, no Delivery Note
+        // and no Sales Invoice to Tally, and config/tally-sync.php ships both
+        // flags OFF. phpunit.xml pins them ON for the suite because staged
+        // Sales and Delivery Note vouchers are the fixture vehicle for most of
+        // TallySync's tests — so a deployment-shaped test has to say so out
+        // loud. SalesTallyEmissionGateTest is where the shipped default itself
+        // is asserted, by reading config/tally-sync.php with the env cleared.
         config([
             'tally-sync.delivery_notes_enabled' => false,
             'tally-sync.sales_invoices_enabled' => false,
@@ -219,6 +232,72 @@ class SalesFulfilmentRehearsalTest extends TestCase
             0,
             TallySyncEntry::query()->count(),
             'on the shipped defaults nothing at all is staged for Tally — no Delivery Note, no Sales voucher',
+        );
+    }
+
+    /**
+     * THE OTHER HALF OF THE SAME DECISION — and the half that is easy to
+     * forget, because "we post nothing to Tally" sounds complete on its own.
+     *
+     * It is not. DEC-20260831-008 does not merely switch the outbound path
+     * off; it names the surviving direction. Tally raises the Sales Invoice,
+     * the e-invoice and the e-way details, and the ERP READS that voucher back
+     * and matches it to the order it belongs to. A build that stopped at
+     * "stages nothing" would leave the sales order never learning it had been
+     * invoiced at all.
+     *
+     * So this walks the closing move on REAL TALLY BYTES — the same UTF-16LE
+     * fixture cut from the factory's own 31-Aug export — and asserts the
+     * order can read back the voucher that closed it.
+     */
+    public function test_tallys_own_invoice_comes_back_in_and_lands_on_the_order_that_earned_it(): void
+    {
+        $customer = Customer::create(['code' => 'CUST-3', 'name' => 'Revive Formulations']);
+        $customer->forceFill(['tally_ledger_name' => 'Revive Formulations India Pvt Ltd'])->save();
+
+        $bottle = Item::create(['sku' => 'BTL-500', 'name' => '500ml PET Bottle', 'uom' => 'Nos']);
+
+        $this->actingWith(['sales.view', 'sales.manage']);
+
+        // The customer quotes THEIR purchase order number — "480". That string,
+        // and not any voucher number, is what the two books have in common:
+        // Tally owns a contiguous NNN/26-27 series and the ERP mints INV-{id}.
+        $orderId = $this->postJson('/api/v1/sales/sales-orders', [
+            'customer_id' => $customer->id,
+            'order_date' => '2026-07-28',
+            'customer_po_reference' => '480',
+            'lines' => [['item_id' => $bottle->id, 'quantity' => '100', 'unit_price' => '4.50']],
+        ])->assertSuccessful()->json('data.id');
+
+        $this->getJson("/api/v1/sales/sales-orders/{$orderId}")
+            ->assertOk()
+            ->assertJsonPath('data.tally_invoice.invoiced_in_tally', false);
+
+        // Accounts raise the invoice in Tally and export it. Dry run first,
+        // exactly as a person would run it (AGENTS.md).
+        $fixture = base_path('tests/fixtures/tally/sales-invoices.xml');
+
+        $this->artisan('tally:import-sales-invoices', ['path' => $fixture])->assertSuccessful();
+
+        $this->getJson("/api/v1/sales/sales-orders/{$orderId}")
+            ->assertOk()
+            ->assertJsonPath('data.tally_invoice.invoiced_in_tally', false);
+
+        $this->artisan('tally:import-sales-invoices', ['path' => $fixture, '--write' => true])->assertSuccessful();
+
+        $this->getJson("/api/v1/sales/sales-orders/{$orderId}")
+            ->assertOk()
+            ->assertJsonPath('data.tally_invoice.invoiced_in_tally', true)
+            ->assertJsonPath('data.tally_invoice.vouchers.0.voucher_number', '699/26-27')
+            ->assertJsonPath('data.tally_invoice.vouchers.0.voucher_date', '2026-08-01')
+            // The order's OWN lifecycle is untouched. Being invoiced in another
+            // book is not a delivery, and nothing here pretends it is.
+            ->assertJsonPath('data.status', 'draft');
+
+        $this->assertSame(
+            0,
+            TallySyncEntry::query()->count(),
+            'importing from Tally must never stage anything back towards it',
         );
     }
 

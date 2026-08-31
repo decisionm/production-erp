@@ -36,10 +36,22 @@ class SalesOrderResource extends JsonResource
             'customer' => CustomerResource::make($this->whenLoaded('customer')),
             'order_date' => $this->order_date?->toDateString(),
             'expected_date' => $this->expected_date?->toDateString(),
-            // The CUSTOMER's own purchase-order number — the string that
-            // matches this order to their paperwork and to a Tally invoice.
-            // Recorded and displayed only; no voucher is emitted from it.
+            // The CUSTOMER's own purchase-order number. No longer display-only:
+            // under DEC-20260831-008 this string is the MATCH KEY the Tally
+            // Sales-invoice importer joins on, so an order without one can
+            // never be matched to the invoice Tally raises for it. Still no
+            // voucher is emitted from it — the ERP posts nothing to Tally.
             'customer_po_reference' => $this->customer_po_reference,
+            // What TALLY says about this order, imported — never posted.
+            // Tally creates the Sales Invoice, the e-invoice and the e-way
+            // details (DEC-20260831-008); this is the ERP reading that back.
+            //
+            // It is deliberately BESIDE `status` and not folded into it: the
+            // order's own lifecycle is driven by what the factory did
+            // (delivery), and being invoiced in another book is a different
+            // fact. Whether a Tally invoice should also close an order is a
+            // business rule nobody has stated, so nothing here asserts it.
+            'tally_invoice' => $this->tallyInvoiceBlock($order),
             'notes' => $this->notes,
             'lines' => SalesOrderLineResource::collection($this->whenLoaded('lines')),
             // Decimal strings, 4dp — the same precision the lines carry.
@@ -86,6 +98,30 @@ class SalesOrderResource extends JsonResource
             'id' => $order->id,
             'document_number' => $order->documentNumber(),
             'status' => $order->status->value,
+        ];
+    }
+
+    /**
+     * The Tally Sales voucher(s) matched to this order, or a plain "not yet".
+     *
+     * FC-06 is respected by omission as much as by content: this carries the
+     * voucher number, its date and its state — not a rate and not a cost.
+     *
+     * @return array<string, mixed>
+     */
+    private function tallyInvoiceBlock(SalesOrder $order): array
+    {
+        $matched = $order->tallyInvoices
+            ->filter(fn ($i) => $i->match_state->isMatched())
+            ->values();
+
+        return [
+            'invoiced_in_tally' => $matched->isNotEmpty(),
+            'vouchers' => $matched->map(fn ($i) => [
+                'voucher_number' => $i->voucher_number,
+                'voucher_date' => $i->voucher_date?->toDateString(),
+                'amount' => $i->amount,
+            ])->all(),
         ];
     }
 }

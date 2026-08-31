@@ -202,7 +202,7 @@ export const allNavItems: readonly NavGroup[] = [
             // moved straight back when review found that (Cursor, ac56e12).
             // Neither screen moves stock and neither gates dispatch (Q27).
             { key: '/inventory/fulfilment', label: 'Store Fulfilment' },
-            { key: '/inventory/planning', label: 'Fulfilment Planning' },
+            { key: '/inventory/planning', label: 'Production Planning' },
             // Batches and Serial Numbers are NOT children here any more, and
             // they are not withdrawn either: both routes stay mounted and both
             // pages still work. They are per-item identity registers opened

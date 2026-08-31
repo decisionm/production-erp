@@ -4,6 +4,8 @@ namespace App\Modules\Sales\Models;
 
 use App\Models\User;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
+use App\Modules\TallySync\Models\Enums\TallyInvoiceMatchState;
+use App\Modules\TallySync\Models\TallySalesInvoice;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -76,6 +78,41 @@ class SalesOrder extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /**
+     * The Tally Sales vouchers IMPORTED against this order.
+     *
+     * The ERP raises no Tally invoice — Tally creates it, along with the
+     * e-invoice and e-way details, and the ERP imports and matches it
+     * (DEC-20260831-008). So this is a record of what the other book says, and
+     * it is a hasMany rather than a hasOne on purpose: a single order can be
+     * invoiced across several Tally vouchers, and the arithmetic of whether
+     * that adds up to the order is not something this relation asserts.
+     */
+    public function tallyInvoices(): HasMany
+    {
+        return $this->hasMany(TallySalesInvoice::class);
+    }
+
+    /**
+     * Whether Tally has invoiced this order — DERIVED, never stored.
+     *
+     * Deliberately not a column. A denormalised flag would drift the moment a
+     * voucher were re-imported, re-matched or matched late, and the honest
+     * answer is simply whether a matched Tally voucher exists right now.
+     *
+     * It does not touch `status`. The order's own lifecycle
+     * (draft/confirmed/partially_delivered/completed/cancelled) is driven by
+     * what the FACTORY did — delivery — and Tally invoicing is a separate
+     * book's event. Whether a Tally invoice should also CLOSE an order is a
+     * business rule nobody has stated, so it is not invented here.
+     */
+    public function isInvoicedInTally(): bool
+    {
+        return $this->tallyInvoices()
+            ->where('match_state', TallyInvoiceMatchState::Matched)
+            ->exists();
     }
 
     public function createdBy(): BelongsTo

@@ -37,7 +37,7 @@ export default function PlanningDashboardPage() {
 
     return (
         <>
-            <Typography.Title level={3} style={{ marginTop: 0 }}>Fulfilment Planning</Typography.Title>
+            <Typography.Title level={3} style={{ marginTop: 0 }}>Production Planning</Typography.Title>
 
             {/* TODAY'S WORK is a priority read, not a capacity claim: a job
                 whose first shift falls inside today's shifts is on the list

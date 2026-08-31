@@ -17,21 +17,27 @@ use Tests\TestCase;
 
 /**
  * tally-sync.delivery_notes_enabled and tally-sync.sales_invoices_enabled —
- * both ON by owner decision (DEC-20260831-007), and both FAIL-CLOSED.
+ * both OFF, and that is the DECIDED state, not a holding position.
  *
- * THEY WERE OFF, and this file used to lock that. The owner has since decided
- * that the ERP originates the sale and posts BOTH vouchers, superseding
- * DEC-20260809-003 — so the default flipped, and these tests flipped with it
- * rather than being deleted: a default is worth pinning in whichever direction
- * it points, because it is what a fresh deployment gets.
+ * THE DEFAULT HAS NOW POINTED BOTH WAYS, and this file has followed it both
+ * times rather than being deleted, because a default is worth pinning in
+ * whichever direction it points: it is what a fresh deployment gets.
+ *   · OFF originally — real sales were invoiced directly in Tally.
+ *   · ON under DEC-20260831-007 — the ERP was to originate the sale.
+ *   · OFF again under DEC-20260831-008, which supersedes it the same day:
+ *     the ERP sends NO Sales Order, NO Delivery Note and NO Sales Invoice to
+ *     Tally. Tally creates the Sales Invoice, the e-invoice and the e-way
+ *     details, and the ERP IMPORTS that voucher instead
+ *     (TallySalesInvoiceImporter, and TallySalesInvoiceImportTest beside it).
  *
- * WHAT DID NOT CHANGE, and is the more important half: ON does not mean
- * unconditional. Staging still refuses by name when the master data is
- * incomplete, and a refusal NEVER blocks the factory's own act — the invoice
- * still issues, the delivery still stands. That is the decision's own wording,
- * and `test_the_gate_withholds_the_voucher_and_nothing_else` and
- * `test_the_flag_alone_does_not_stage_a_voucher_without_the_master_data` are
- * where it is held.
+ * WHY THE ON-PATH TESTS SURVIVE. The builder and both listeners are left in
+ * the tree, dormant behind the flags. A superseded decision's code is history,
+ * not litter, and the direction has already reversed twice — so the mechanism
+ * stays pinned, and what changed is only which way the shipped default points.
+ *
+ * WHAT NEVER CHANGED, across all three positions: staging refuses by name when
+ * the master data is incomplete, and a refusal NEVER blocks the factory's own
+ * act — the invoice still issues, the delivery still stands.
  */
 class SalesTallyEmissionGateTest extends TestCase
 {
@@ -42,7 +48,7 @@ class SalesTallyEmissionGateTest extends TestCase
      * reads config/tally-sync.php FRESH with the env var cleared — the same
      * default a server with no such line in its .env would get.
      */
-    private function assertFreshDefaultIsOn(string $env, string $key): void
+    private function assertFreshDefaultIsOff(string $env, string $key): void
     {
         $original = ['putenv' => getenv($env), 'env' => $_ENV[$env] ?? null, 'server' => $_SERVER[$env] ?? null];
 
@@ -51,7 +57,7 @@ class SalesTallyEmissionGateTest extends TestCase
 
         try {
             $fresh = require config_path('tally-sync.php');
-            $this->assertTrue($fresh[$key], "a fresh deployment with no {$env} line at all must default ON");
+            $this->assertFalse($fresh[$key], "a fresh deployment with no {$env} line at all must default OFF — DEC-20260831-008, the ERP posts no sales document to Tally");
         } finally {
             if ($original['putenv'] !== false) {
                 putenv("{$env}={$original['putenv']}");
@@ -65,14 +71,14 @@ class SalesTallyEmissionGateTest extends TestCase
         }
     }
 
-    public function test_the_delivery_note_config_default_is_on_when_no_env_is_set(): void
+    public function test_the_delivery_note_config_default_is_off_when_no_env_is_set(): void
     {
-        $this->assertFreshDefaultIsOn('TALLY_SYNC_DELIVERY_NOTES_ENABLED', 'delivery_notes_enabled');
+        $this->assertFreshDefaultIsOff('TALLY_SYNC_DELIVERY_NOTES_ENABLED', 'delivery_notes_enabled');
     }
 
-    public function test_the_sales_invoice_config_default_is_on_when_no_env_is_set(): void
+    public function test_the_sales_invoice_config_default_is_off_when_no_env_is_set(): void
     {
-        $this->assertFreshDefaultIsOn('TALLY_SYNC_SALES_INVOICES_ENABLED', 'sales_invoices_enabled');
+        $this->assertFreshDefaultIsOff('TALLY_SYNC_SALES_INVOICES_ENABLED', 'sales_invoices_enabled');
     }
 
     public function test_with_the_flag_off_a_dispatch_stages_no_delivery_note(): void
