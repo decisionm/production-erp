@@ -101,7 +101,22 @@ function decodeEntities(raw: string): string {
 }
 
 function clean(value: unknown): string {
-    const raw = decodeEntities(String(value ?? ''));
+    if (value == null) return '';
+
+    // An attributed element parses to an OBJECT under `ignoreAttributes:
+    // false` -- {'@_TYPE': 'String', '#text': 'Acme'} -- and String() on one
+    // yields the literal "[object Object]". That reached live data through the
+    // purchase-rate read on 31-Aug-2026: 458 rows landed with "[object Object]"
+    // as the supplier name. This reader's element values go through textOf()
+    // and are not known to be hit, so the guard is here to stop the next field
+    // added reintroducing it.
+    const scalar = typeof value === 'object'
+        ? (value as Record<string, unknown>)['#text'] ?? ''
+        : value;
+
+    if (typeof scalar === 'object') return '';
+
+    const raw = decodeEntities(String(scalar));
     let out = '';
     for (const ch of raw) {
         if (ch.charCodeAt(0) >= 0x20) out += ch;

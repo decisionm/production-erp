@@ -369,3 +369,99 @@ test('every shape failing yields no lines rather than throwing into the loop', a
         assert.deepEqual(lines, []);
     });
 });
+
+/* ── Attributed elements: the shape a COLLECTION export actually returns ── */
+
+/**
+ * Tally attributes its fields when answering a Collection request —
+ * `<PARTYLEDGERNAME TYPE="String">Acme</PARTYLEDGERNAME>` — and with
+ * `ignoreAttributes: false` those parse to objects, not strings. The Day Book
+ * report returned bare strings, so every fixture above uses bare elements and
+ * every one of them PASSED while live data was importing `[object Object]` as
+ * the supplier name on all 458 rows.
+ *
+ * These fixtures are the other shape. They are the tests that would have
+ * caught it.
+ */
+function attributedVoucher() {
+    return (
+        '<VOUCHER VCHTYPE="Purchase Order" ACTION="Create">' +
+        '<GUID TYPE="String">guid-attr</GUID>' +
+        '<DATE TYPE="Date">20260701</DATE>' +
+        '<VOUCHERTYPENAME TYPE="String">Purchase Order</VOUCHERTYPENAME>' +
+        '<VOUCHERNUMBER TYPE="String">77</VOUCHERNUMBER>' +
+        '<REFERENCE TYPE="String">REF-77</REFERENCE>' +
+        '<PARTYLEDGERNAME TYPE="String">SYNTHETIC SUPPLIES</PARTYLEDGERNAME>' +
+        '<PARTYGSTIN TYPE="String">33AAAAA0000A1ZA</PARTYGSTIN>' +
+        '<ISCANCELLED TYPE="Logical">No</ISCANCELLED>' +
+        '<ALLINVENTORYENTRIES.LIST>' +
+        '<STOCKITEMNAME TYPE="String">ITEM_A</STOCKITEMNAME>' +
+        '<GSTHSNNAME TYPE="String">39076190</GSTHSNNAME>' +
+        '<RATE TYPE="Rate">674.000/Kgs.</RATE>' +
+        '<AMOUNT TYPE="Amount">-32352.000</AMOUNT>' +
+        '<BILLEDQTY TYPE="Quantity"> 48.000 Kgs.</BILLEDQTY>' +
+        '<ACCOUNTINGALLOCATIONS.LIST><LEDGERNAME TYPE="String">Interstate Purchase Taxable</LEDGERNAME></ACCOUNTINGALLOCATIONS.LIST>' +
+        '<RATEDETAILS.LIST><GSTRATEDUTYHEAD TYPE="String">IGST</GSTRATEDUTYHEAD><GSTRATE TYPE="Number"> 18</GSTRATE></RATEDETAILS.LIST>' +
+        '</ALLINVENTORYENTRIES.LIST>' +
+        '</VOUCHER>'
+    );
+}
+
+test('an attributed PARTYLEDGERNAME reads as the party, never "[object Object]"', () => {
+    const [line] = parseDayBook(dayBook([attributedVoucher()], 'EXPORTDATA'));
+
+    // The exact production defect: 458 rows imported with this as the supplier.
+    assert.notEqual(line.party_ledger_name, '[object Object]');
+    assert.equal(line.party_ledger_name, 'SYNTHETIC SUPPLIES');
+});
+
+test('every field of an attributed voucher survives the parse', () => {
+    const [line] = parseDayBook(dayBook([attributedVoucher()], 'EXPORTDATA'));
+
+    assert.equal(line.voucher_guid, 'guid-attr');
+    assert.equal(line.voucher_date, '2026-07-01');
+    assert.equal(line.voucher_type, 'purchase_order');
+    assert.equal(line.voucher_number, '77');
+    assert.equal(line.voucher_reference, 'REF-77');
+    assert.equal(line.party_gstin, '33AAAAA0000A1ZA');
+    assert.equal(line.stock_item_name, 'ITEM_A');
+    assert.equal(line.rate_value, 674);
+    assert.equal(line.rate_unit, 'Kgs.');
+    assert.equal(line.quantity, 48);
+    assert.equal(line.igst_rate, 18);
+    assert.equal(line.hsn_code, '39076190');
+    assert.equal(line.purchase_ledger_name, 'Interstate Purchase Taxable');
+});
+
+test('NOTHING a voucher yields can ever be the string "[object Object]"', () => {
+    // A blanket assertion rather than a per-field one: the defect class is
+    // "some field is an object and got stringified", and the next field added
+    // must be covered without anybody remembering to extend this test.
+    const [line] = parseDayBook(dayBook([attributedVoucher()], 'EXPORTDATA'));
+
+    for (const [key, value] of Object.entries(line)) {
+        assert.ok(
+            typeof value !== 'string' || !value.includes('[object'),
+            `${key} was stringified from an object: ${value}`,
+        );
+    }
+});
+
+test('an attributed logical flag still cancels the voucher', () => {
+    const cancelled = attributedVoucher().replace(
+        '<ISCANCELLED TYPE="Logical">No</ISCANCELLED>',
+        '<ISCANCELLED TYPE="Logical">Yes</ISCANCELLED>',
+    );
+
+    assert.deepEqual(parseDayBook(dayBook([cancelled], 'EXPORTDATA')), []);
+});
+
+test('an element carrying attributes but no text reads as absent, not as an object', () => {
+    const noText = attributedVoucher().replace(
+        '<REFERENCE TYPE="String">REF-77</REFERENCE>',
+        '<REFERENCE TYPE="String"/>',
+    );
+    const [line] = parseDayBook(dayBook([noText], 'EXPORTDATA'));
+
+    assert.equal(line.voucher_reference, null);
+});
