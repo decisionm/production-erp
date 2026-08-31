@@ -132,7 +132,18 @@ class DeliveryNoteLifecycleTest extends PerTypeLifecycleTestCase
         // names, and STILL nothing else: the whole-array match is what forbids
         // a rate or an amount creeping in beside them. The uom is the shape
         // DEC-20260831-007's rewrite of enqueueDelivery() now stages.
-        $this->assertSame([['item' => '500ml PET Bottle', 'quantity' => '2000.0000', 'uom' => 'Nos']], $entry->payload['lines']);
+        // ORDER-INDEPENDENT, DELIBERATELY. MySQL's native JSON column type
+        // NORMALISES object key order (shortest key first), while SQLite stores
+        // the text verbatim — so the decoded payload reads
+        // ['uom','item','quantity'] on CI and ['item','quantity','uom'] locally,
+        // and an order-sensitive assertSame passes on one engine and fails on
+        // the other. Sorting both sides keeps the WHOLE-ARRAY match that forbids
+        // a rate or an amount creeping in beside them, without pinning an order
+        // neither engine promises.
+        $line = $entry->payload['lines'][0];
+        ksort($line);
+        $this->assertCount(1, $entry->payload['lines']);
+        $this->assertSame(['item' => '500ml PET Bottle', 'quantity' => '2000.0000', 'uom' => 'Nos'], $line);
         $this->assertArrayNotHasKey('total_amount', $entry->payload);
 
         // Nothing to gate: the viewer and the agent see the same lines.
