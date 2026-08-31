@@ -41,7 +41,11 @@ estimation version). Q53 is the Phase 7.6 configuration-lifecycle branch's
 fulfilment branch (may the ERP emit a Tally Sales Order voucher; the
 contested-stock hold rule). Q63-Q66 are claimed by the product-identity
 branch (Tally GRN usage; purchases without POs; sync cadence; the Tally Sync
-sidebar position). New questions continue from Q67.
+sidebar position). Q69-Q70 were claimed by the PR→PO quantity-tracking
+branch and are RESOLVED below (DEC-20260831-003 / -004) — the unmerged
+sales-order fulfilment branch claims Q69-Q72 for its own four, so whichever
+merges second re-mints, and a resolved entry re-mints exactly as an open one
+does. New questions continue from Q71.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -2102,3 +2106,120 @@ headline figure net customer holds or not?
 
 **Blocks:** shipping the stock-state decomposition to the Stock page. The
 underlying figures are unaffected. *Open since 2026-08-30.*
+
+<!--
+  MERGE NOTE, 31-Aug-2026. The two procurement questions below arrived on the
+  purchase-requisition-coverage branch numbered Q69 and Q70, and both numbers
+  were already taken on main by unrelated questions merged while that branch
+  was open. Re-minted here to Q80 and Q81, which is what this file has always
+  said it does — "this file re-mints question numbers at merge", and why the
+  code refers to a question BY NAME and never by number.
+
+  Their decision records were re-minted for the same reason: DEC-20260831-001
+  and -002 were taken on main by two inventory decisions, so the procurement
+  pair are DEC-20260831-003 and -004. Records are immutable, so the ones
+  already merged keep their ids and the unmerged pair moved.
+-->
+
+## Q80 · Does a DRAFT purchase order already reserve quantity against its requisition? — RESOLVED
+
+**Resolved 2026-08-31 by DEC-20260831-003: NO — a draft reserves nothing.**
+Nothing is held until the order goes to the vendor, and a draft may be typed
+for any quantity. The owner chose this over the shipped default, accepting
+the named cost: the refusal now arrives at Send rather than at typing, so two
+drafts may each be raised for the whole requisition and the second is refused
+after the vendor and the rates were typed. The combined-quantity rule
+therefore lives in `PurchaseOrderService::send()`; a guard on create or amend
+would be unreachable. The wording below is the question as it was asked.
+
+The 30-Aug build gives every purchase-requisition line the four figures a
+buyer needs before raising an order — what was requested, what has already
+been ordered against it, what is still to order, and whether the line is Not
+Ordered / Partially Ordered / Fully Ordered — and refuses, in the backend, a
+purchase order whose lines would push the combined ordered quantity for an
+item past what that requisition asked for.
+
+"Combined ordered quantity" has to name a set of order states, and this
+question is one half of what that set is. A purchase order is born a DRAFT
+and is not sent to the vendor until somebody sends it. Two readings, both
+defensible in a factory:
+
+- **Draft reserves** (the build's current default). A buyer who has typed
+  a draft for 500 of 800 cannot type a second draft for 500 as well; the
+  requisition's Balance to Order falls the moment the draft exists. The
+  cost is that an abandoned draft holds quantity until it is cancelled.
+- **Draft does not reserve.** Only what the vendor actually holds counts,
+  so nothing is reserved until Send. The cost is that two buyers, or one
+  buyer twice, can raise drafts that together over-order, and the refusal
+  arrives only at Send — after the rates and the vendor were typed.
+
+What is known: nothing in the factory record answers this. DEC-20260812-002
+puts the purchase order in the ERP and names "the ERP's remaining-quantity
+tracking" as the thing that keeps the two books agreeing, but it does not
+say which order states count towards it. The ERP's own lifecycle is
+Draft → Sent → PartiallyReceived → Closed, with Cancelled beside it.
+
+The build ships with **Draft reserves**, because of the two answers it is
+the one that cannot let combined orders exceed the requisition — the exact
+failure the refusal exists to prevent. Read that claim narrowly: it is about
+THIS question only. The pair of defaults the build ships (draft reserves,
+cancelled releases) is not "the conservative pair" — the next question's
+default is the PERMISSIVE half of its own choice, and is a judgement rather
+than a safety property. Neither default should be read as an
+already-half-made decision.
+
+It is a DEFAULT, not a decision: the states live in one named constant in
+`RequisitionCoverageService`, the constant's comment names this question in
+words, and a test varies only the order's status across that boundary, so
+the other answer is a one-line change with a red test to apply it
+deliberately.
+
+**Blocks:** nothing on the screen. The four figures, the status words, the
+UoM-wise display and the refusal itself all work under either answer — only
+which orders are counted changes. *Open since 2026-08-30.*
+
+## Q81 · When a purchase order is CANCELLED, does its quantity return to the requisition's balance? — RESOLVED
+
+**Resolved 2026-08-31 by DEC-20260831-004: NO — a cancelled order keeps its
+allowance, provided it was SENT.** A requisition is asked for once and
+answered once; wanting the material again means a new requisition, which is a
+fresh approval. The owner chose this over the shipped default.
+
+Answering it needed a THIRD answer that was never filed as its own question,
+and which the same decision records: **a cancelled order counts only if it was
+ever sent.** Q69 and Q70 alone contradict — a draft holds nothing, yet a
+cancelled order counts — so cancelling an abandoned draft would have consumed
+a requisition the draft never held, and a typo could have eaten a requisition
+permanently. The ERP now records `purchase_orders.sent_at` to tell the two
+apart. The wording below is the question as it was asked.
+
+The other half of Q69's set, and a separate factory judgement rather than
+the same one restated. Cancel is available on a Draft or a Sent order with
+zero receipts; it writes a reason, an actor and an instant, and — once the
+PO→Tally gate is open — withdraws or dismisses the staged voucher.
+
+- **Cancelled releases** (the build's current default). The quantity goes
+  back to Balance to Order and the requisition can be ordered again. Cancel
+  is the release valve that makes "Draft reserves" safe.
+- **Cancelled still counts.** A requisition is asked for once and answered
+  once; a cancelled order has spent the requisition's allowance, and
+  wanting the material again means a new requisition, which is a fresh
+  approval by whoever approves them.
+
+What is known: nothing in the factory record answers this either. The
+second reading is not a strawman — it is how an approval-controlled
+requisition behaves in some factories, and it makes the requisition, not
+the order, the unit of authorisation. The first is how most buyers expect a
+cancel to behave, and the ERP already treats Cancelled as terminal
+everywhere else (no receipt may be booked against it).
+
+Shipped as **cancelled releases**, in the same constant, under the same
+one-line-change rule as Q80 — but note plainly that this default is the
+PERMISSIVE of its two answers, not the safe one. Releasing lets the
+requisition be ordered again without a fresh approval; the stricter answer
+("cancelled still counts") is the one that cannot be reached by accident.
+It is shipped this way because it is how most buyers expect a cancel to
+behave, not because arithmetic forces it. The two answers are independent:
+the owner may answer either without the other.
+
+**Blocks:** nothing on the screen — same as Q80. *Open since 2026-08-30.*

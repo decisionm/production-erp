@@ -15,6 +15,7 @@ import {
     poNumber,
     rateCell,
     reconcileReceipts,
+    uomPhrase,
     revisionLines,
     statusTag,
 } from '@/features/procurement/purchaseOrders';
@@ -201,8 +202,13 @@ export default function PurchaseOrderDetailDrawer({ orderId, listRow, onClose, o
                         </Descriptions.Item>
                         <Descriptions.Item label="Received">
                             <Space direction="vertical" size={2}>
+                                {/* Unit-wise, never one total: this line used
+                                    to add kilograms to pieces on any order
+                                    carrying two units. The LINE COUNT beside
+                                    it is unitless and adds up honestly. */}
                                 <span style={numeric}>
-                                    {reconciled.summary.received} of {reconciled.summary.ordered} · {reconciled.summary.complete}/{reconciled.summary.lines} line
+                                    {uomPhrase(reconciled.summary.by_uom, 'received')} of{' '}
+                                    {uomPhrase(reconciled.summary.by_uom, 'ordered')} · {reconciled.summary.complete}/{reconciled.summary.lines} line
                                     {reconciled.summary.lines === 1 ? '' : 's'} complete
                                     {order.receipts_count !== undefined ? ` · ${order.receipts_count} receipt${order.receipts_count === 1 ? '' : 's'}` : ''}
                                 </span>

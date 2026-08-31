@@ -35,11 +35,38 @@ export interface Vendor {
 
 export type PurchaseRequisitionStatus = 'draft' | 'approved' | 'rejected';
 
+/**
+ * How much of a requisition line has been ordered, in one word — the
+ * server's own vocabulary (RequisitionCoverageService). Words for it live in
+ * requisitionCoverage.ts.
+ */
+export type CoverageStatus = 'not_ordered' | 'partially_ordered' | 'fully_ordered';
+
 export interface PurchaseRequisitionLine {
     id: number;
     item: Item;
     quantity: string;
     notes: string | null;
+    /**
+     * HOW MUCH OF THIS LINE HAS BEEN ORDERED — the server's arithmetic
+     * (RequisitionCoverageService), grouped by ITEM across every purchase
+     * order raised from the requisition, and the same sum the backend refuses
+     * an over-order on.
+     *
+     * All four are OPTIONAL because the server OMITS them — never nulls them —
+     * on a line it did not decorate, and an older backend sends none of them.
+     * Absent means "not computed", which is not the same fact as zero; read
+     * them through requisitionCoverage.ts, which words that difference.
+     *
+     * `requested_quantity` is `quantity` under the name it earns standing
+     * beside the other three; `quantity` is unchanged and remains what every
+     * existing reader asks for.
+     */
+    requested_quantity?: string;
+    ordered_quantity?: string;
+    /** Still to order. Never below zero. */
+    balance_quantity?: string;
+    order_status?: CoverageStatus;
 }
 
 export interface PurchaseRequisition {
@@ -56,8 +83,22 @@ export interface PurchaseRequisition {
     needed_by_date: string | null;
     notes: string | null;
     lines: PurchaseRequisitionLine[];
-    /** The orders raised FROM this requisition — id + status only. */
-    purchase_orders?: { id: number; status: PurchaseOrderStatus }[];
+    /**
+     * The orders raised FROM this requisition — identity and status only, no
+     * lines and no rate. `reserves_quantity` is the server's answer to
+     * whether THIS order is one of those holding quantity against the
+     * requisition; the status set behind it turns on two questions the owner
+     * has not yet answered, so the screen is told the answer rather than the
+     * rule.
+     */
+    purchase_orders?: { id: number; status: PurchaseOrderStatus; document_number?: string; reserves_quantity?: boolean }[];
+    /**
+     * The requisition in one word — the roll-up of its lines' statuses.
+     * Deliberately a word and never a quantity: a requisition's lines may be
+     * in Kgs and Nos at once, so it has no total. Absent when the lines were
+     * not decorated.
+     */
+    order_status?: CoverageStatus;
     created_at: string;
 }
 

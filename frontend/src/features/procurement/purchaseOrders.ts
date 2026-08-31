@@ -3,6 +3,7 @@ import { statusColor as tallyStatusColor, statusLabel as tallyStatusLabel } from
 import type { Item } from '@/features/inventory/types';
 import type { TallyLink } from '@/features/sales/types';
 import { itemLabel } from '@/lib/itemLabel';
+import { fromScaled, toScaled, trimQuantity } from '@/lib/scaledDecimal';
 import type {
     PurchaseOrder,
     PurchaseOrderCan,
@@ -394,8 +395,36 @@ export interface ReceiptLineRow {
     state: ReceiptLineState;
 }
 
+/**
+ * ONE UNIT'S WORTH of an order — every line whose item is measured in it,
+ * added together. Lines in Kgs are added to lines in Kgs and to nothing else.
+ *
+ * `uom` is the item's unit exactly as the catalogue spells it, and '' when an
+ * item carries none (Tally's `base_unit` is free text and some rows are
+ * blank). Unspelled is its OWN group, never folded into a neighbour: two
+ * quantities whose unit nobody recorded are not thereby the same unit.
+ */
+export interface UomQuantities {
+    uom: string;
+    ordered: string;
+    received: string;
+    remaining: string;
+}
+
 export type ReceiptReconciliation = ReceiptLineRow[] & {
-    summary: { lines: number; complete: number; ordered: string; received: string };
+    /**
+     * NO CROSS-ITEM TOTAL LIVES HERE.
+     *
+     * This summary used to carry a single `ordered` and `received` pair — the
+     * sum of every line on the order. On an order for 500 Kgs of resin and 40
+     * Nos of caps, the PO list printed "0 / 540" and the drawer said the same:
+     * a number in no unit at all, from adding kilograms to pieces. It read as
+     * a fact and was arithmetic nobody could act on.
+     *
+     * `by_uom` replaces it, one entry per unit, and the two count fields stay
+     * — a LINE COUNT is unitless and adds up honestly.
+     */
+    summary: { lines: number; complete: number; by_uom: UomQuantities[] };
 };
 
 /**
@@ -408,8 +437,6 @@ export type ReceiptReconciliation = ReceiptLineRow[] & {
  */
 export function reconcileReceipts(lines: readonly PurchaseOrderLine[]): ReceiptReconciliation {
     let completeCount = 0;
-    let orderedTotal = 0n;
-    let receivedTotal = 0n;
 
     const rows = lines.map((line): ReceiptLineRow => {
         const ordered = toScaled(line.quantity);
@@ -417,9 +444,6 @@ export function reconcileReceipts(lines: readonly PurchaseOrderLine[]): ReceiptR
         if (ordered === null || received === null) {
             return { line_id: line.id, item: itemLabel(line.item), ordered: line.quantity, received: line.quantity_received, remaining: '—', state: 'unknown' };
         }
-        orderedTotal += ordered;
-        receivedTotal += received;
-
         const remaining = ordered > received ? ordered - received : 0n;
         const state: ReceiptLineState =
             received === 0n ? 'open' : received < ordered ? 'partial' : received === ordered ? 'complete' : 'over';
@@ -435,34 +459,149 @@ export function reconcileReceipts(lines: readonly PurchaseOrderLine[]): ReceiptR
         };
     }) as ReceiptReconciliation;
 
-    rows.summary = { lines: lines.length, complete: completeCount, ordered: fromScaled(orderedTotal), received: fromScaled(receivedTotal) };
+    rows.summary = { lines: lines.length, complete: completeCount, by_uom: quantitiesByUom(lines) };
 
     return rows;
 }
 
-const SCALE = 4;
+// ------------------------------------------------------ quantities by unit --
 
-/** A decimal string → integer ten-thousandths (bigint), or null when it is not a number. */
-function toScaled(value: string | number | null | undefined): bigint | null {
-    if (value === null || value === undefined) return null;
-    const text = String(value).trim();
-    const match = /^(-?)(\d+)(?:\.(\d+))?$/.exec(text);
-    if (!match) return null;
-    const [, sign, whole, fraction = ''] = match;
-    const scaledFraction = (fraction + '0'.repeat(SCALE)).slice(0, SCALE);
-    const scaled = BigInt(whole) * 10n ** BigInt(SCALE) + BigInt(scaledFraction);
+/**
+ * AN ORDER'S QUANTITIES, GROUPED BY UNIT — never one number across items.
+ *
+ * `items.uom` is Tally's raw free-text base unit: this catalogue holds Kgs,
+ * Nos, Litres and blanks side by side, so a purchase order's lines routinely
+ * carry two units at once. Adding them produces a figure in no unit, which is
+ * why every surface that wants "how much" asks for this instead of a total.
+ *
+ * Groups keep the order their first line appeared in, so the same order always
+ * words its quantities the same way. A line whose numbers cannot be read is
+ * counted in NEITHER total — reconcileReceipts already marks that row
+ * `unknown`, and quietly treating an unreadable quantity as zero would make a
+ * short order look complete.
+ */
+export function quantitiesByUom(lines: readonly PurchaseOrderLine[]): UomQuantities[] {
+    const groups = new Map<string, { ordered: bigint; received: bigint }>();
 
-    return sign === '-' ? -scaled : scaled;
+    for (const line of lines) {
+        const ordered = toScaled(line.quantity);
+        const received = toScaled(line.quantity_received);
+        if (ordered === null || received === null) continue;
+
+        const uom = (line.item?.uom ?? '').trim();
+        const group = groups.get(uom) ?? { ordered: 0n, received: 0n };
+        group.ordered += ordered;
+        group.received += received;
+        groups.set(uom, group);
+    }
+
+    return [...groups].map(([uom, { ordered, received }]) => ({
+        uom,
+        ordered: fromScaled(ordered),
+        received: fromScaled(received),
+        remaining: fromScaled(ordered > received ? ordered - received : 0n),
+    }));
 }
 
-function fromScaled(value: bigint): string {
-    const negative = value < 0n;
-    const abs = negative ? -value : value;
-    const whole = abs / 10n ** BigInt(SCALE);
-    const fraction = (abs % 10n ** BigInt(SCALE)).toString().padStart(SCALE, '0');
+/**
+ * One unit's worth of quantities as words — "500 Kgs", and "500 Kgs + 40 Nos"
+ * when the order spans two. The `+` is deliberate and is NOT an addition: it
+ * separates figures that may not be added, and reads as the list it is.
+ *
+ * Trailing zeros are trimmed HERE and only here. The wire carries four places
+ * (`500.0000`) and every TABLE prints them as sent — a quantity column is read
+ * for precision. This builds a one-line label for a dropdown, where four zeros
+ * per figure on three figures is noise that pushes the due date off the end.
+ *
+ * An empty list is '—': an order with no readable line has no quantity to
+ * report, and a bare '0' would claim one.
+ */
+export function uomPhrase(totals: readonly UomQuantities[], field: 'ordered' | 'received' | 'remaining'): string {
+    if (totals.length === 0) return '—';
 
-    return `${negative ? '-' : ''}${whole}.${fraction}`;
+    return totals
+        .map((total) => {
+            const figure = trimQuantity(total[field]);
+
+            return total.uom === '' ? figure : `${figure} ${total.uom}`;
+        })
+        .join(' + ');
 }
+
+/**
+ * WHEN THE NEXT DELIVERY IS DUE against an order — the earliest due date of a
+ * delivery window that still expects something, across every line.
+ *
+ * The order's own `expected_date` is the fallback and not the first choice:
+ * schedules are the item/due-date windows mirrored from the Tally order and
+ * are what a receipt is actually allocated against (oldest due first), so on
+ * an order that has them, `expected_date` is a header-level guess about a
+ * thing the lines already answer precisely. A window that has fully arrived is
+ * skipped — its date is history, and showing it would send a clerk looking for
+ * material that is already in the store.
+ *
+ * Null when the order carries neither: honest silence, not today's date.
+ */
+export function nextDueDate(order: { expected_date?: string | null; lines?: readonly PurchaseOrderLine[] }): string | null {
+    const open: string[] = [];
+
+    for (const line of order.lines ?? []) {
+        for (const schedule of line.schedules ?? []) {
+            const remaining = toScaled(schedule.remaining);
+            if (remaining !== null && remaining > 0n) open.push(schedule.due_date);
+        }
+    }
+
+    if (open.length > 0) return open.slice().sort()[0];
+
+    return order.expected_date ?? null;
+}
+
+/**
+ * ONE RECEIVABLE ORDER AS THE GOODS-RECEIPT PICKER NAMES IT.
+ *
+ * The picker used to offer "PO #12 — Vendor Alpha" and nothing else, so a
+ * clerk with a pallet in front of them chose between orders by number,
+ * discovered what was still expected only AFTER selecting one, and went back
+ * if they had guessed wrong. Everything below is already on the row the page
+ * has (the list eager-loads `lines.item` and `lines.schedules`) — it was just
+ * never spelled.
+ *
+ *   PO-12 — Vendor Alpha · ordered 500 Kgs + 40 Nos · received 200 Kgs ·
+ *   remaining 300 Kgs + 40 Nos · next due 2026-09-12
+ *
+ * Quantities are UNIT-WISE, never one total: an order for resin and caps has
+ * no single "how much" (quantitiesByUom). The due date is the earliest window
+ * still expecting something (nextDueDate), and reads "no due date" rather than
+ * inventing one.
+ *
+ * Returned as a plain string because antd's Select filters on `label` — the
+ * clerk can type a vendor, a number, or a unit and narrow the list by it.
+ * A CLOSED order never reaches here: the picker asks the server for the
+ * receivable statuses (RECEIVABLE_PO_FILTERS) and filters again with
+ * isReceivableOrder, so a fully received order leaves the list by both routes.
+ */
+export function receivableOrderLabel(order: {
+    id: number;
+    document_number?: string;
+    vendor?: { name?: string | null } | null;
+    expected_date?: string | null;
+    lines?: readonly PurchaseOrderLine[];
+}): string {
+    const totals = quantitiesByUom(order.lines ?? []);
+    const due = nextDueDate(order);
+    const vendor = (order.vendor?.name ?? '').trim();
+
+    return [
+        `${poNumber(order)}${vendor === '' ? '' : ` — ${vendor}`}`,
+        `ordered ${uomPhrase(totals, 'ordered')}`,
+        `received ${uomPhrase(totals, 'received')}`,
+        `remaining ${uomPhrase(totals, 'remaining')}`,
+        due === null ? 'no due date' : `next due ${due}`,
+    ].join(' · ');
+}
+
+
 
 // ------------------------------------------------------------- FC-06 cells --
 
@@ -974,3 +1113,6 @@ function firstText(...values: (string | null | undefined)[]): string | null {
 
     return null;
 }
+
+/** Re-exported so the procurement screens have ONE import for label arithmetic. */
+export { trimQuantity };
