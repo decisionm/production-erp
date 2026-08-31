@@ -13,6 +13,39 @@
 <IfModule mod_headers.c>
     <Files "sw.js">
         Header set Service-Worker-Allowed "/"
+
+        # AND IT MUST NEVER BE SERVED STALE. Until this line the worker went
+        # out with no Cache-Control at all — only Last-Modified and an ETag —
+        # which leaves every cache between the factory and the server free to
+        # apply HEURISTIC freshness (commonly a tenth of the file's age) and
+        # hand back yesterday's worker when the app asks whether a new one
+        # exists.
+        #
+        # WHY THAT IS THE WHOLE BUG. The app already does its part: the worker
+        # is registered with autoUpdate, main.tsx polls
+        # `registration.update()` every 60 seconds precisely so a tab left
+        # open across a shift picks up a mid-shift deploy, and skipWaiting +
+        # clientsClaim hand control over as soon as a new worker installs.
+        # Every one of those depends on the update check actually FETCHING a
+        # fresh sw.js. Serve that check from a cache and the whole chain
+        # silently does nothing: the browser is told the worker it already has
+        # is current, so none installs, no reload fires, and the storekeeper
+        # goes on running the bundle they loaded days ago while the server has
+        # been serving a newer one all along.
+        #
+        # Observed on live 31-Aug-2026, right after the Inventory readiness
+        # deploy: index.html referenced index-BoQcZv0S.js while the open tab
+        # was still running index-D7O5AoZp.js, and clearing the caches was not
+        # enough — only unregistering the worker by hand fixed it.
+        #
+        # `no-cache`, NOT `no-store`: revalidate every time, but allow a 304,
+        # so the ordinary case costs one conditional request instead of
+        # re-downloading the worker. A modern browser already does this for
+        # the worker script itself (updateViaCache defaults to "imports"); it
+        # is stated here so the guarantee also holds for everything between us
+        # and that browser — a proxy, a corporate cache, an older client —
+        # none of which honour that default.
+        Header set Cache-Control "no-cache"
     </Files>
 </IfModule>
 
