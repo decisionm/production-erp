@@ -75,15 +75,23 @@ export const ADOPTED_MODULES = new Set([
     // and preserves every existing link from real production records.
     'hrms',
     'payroll',
-    // CRM — adopted for DEMONSTRATION at the owner's request, and the one
-    // entry on this list not justified by a row count: Leads, Opportunities
-    // and Quotations hold nothing until the factory records its first real
-    // enquiry (Q37). Its enums are already the standard sales pipeline, so
-    // nothing needed seeding. NOTE: DEC-20260812-001 as recorded says CRM
-    // stays hidden — this line is the owner's later instruction of the same
-    // day and supersedes that clause in practice; the record needs a
-    // superseding DEC to say so on paper.
-    'crm',
+    // CRM IS RETIRED (owner instruction, 31-Aug-2026) and its line is gone
+    // from this list.
+    //
+    // It was adopted for DEMONSTRATION on 12-Aug at the owner's request, and
+    // was the one entry here never justified by a row count: Leads,
+    // Opportunities and Quotations have held nothing since, and the factory
+    // has recorded no enquiry (Q37 stands unanswered). Retiring it returns the
+    // list to the rule it is built on — a module appears when it is in use —
+    // and restores DEC-20260812-001's original clause, which said CRM stays
+    // hidden and which that day's later instruction had superseded in
+    // practice. It is worth a superseding DEC recording the round trip.
+    //
+    // RETIRED MEANS HIDDEN, NOT DELETED — the distinction this whole file
+    // rests on. Every CRM screen, route, endpoint and test is untouched and
+    // still works for anything that calls it; only the menu entry and the
+    // dashboard's CRM cell go. The day the factory records a real enquiry,
+    // one line brings it all back.
     // FINANCE — adopted because Client Outstanding gives it its first screen
     // with real content in it: what every client owes and how late it is, read
     // from the position the agent mirrors out of Tally, which is where this

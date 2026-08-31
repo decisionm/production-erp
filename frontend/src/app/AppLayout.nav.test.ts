@@ -105,6 +105,30 @@ describe('the sidebar', () => {
     });
 });
 
+describe('the retired CRM menu', () => {
+    /**
+     * CRM IS RETIRED (owner instruction, 31-Aug-2026) — hidden, not deleted.
+     *
+     * Both halves are asserted, because only the pair says what "retired"
+     * means here. The group must still be CONFIGURED, in its pinned place, so
+     * the day the factory records a real enquiry one line in adoptedModules
+     * brings it back; and it must NOT RENDER, or it has not been retired at
+     * all. Asserting either alone passes for a deletion, or for a no-op.
+     */
+    it('is still configured, so one line can bring it back', () => {
+        expect(allNavItems.find((item) => item.key === 'crm')).toBeDefined();
+        expect(CONFIGURED_ORDER).toContain('CRM');
+    });
+
+    it('renders for nobody, not even a login holding every permission', () => {
+        expect(buildNavItems(administrator()).map((item) => item?.label)).not.toContain('CRM');
+    });
+
+    it('is off the adoption list', () => {
+        expect(ADOPTED_MODULES.has('crm')).toBe(false);
+    });
+});
+
 describe('the Finance menu', () => {
     /**
      * THE REGRESSION THIS PINS, which cost a round trip to spot.
