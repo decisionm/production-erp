@@ -2077,7 +2077,7 @@ average?
 **Blocks:** any recovery, including the DOCUMENTED rows Q74 covers. *Open
 since 2026-08-30.*
 
-## Q77 · Which materials must a goods receipt record lots and bags for?
+## Q77 · Which materials must a goods receipt record lots and bags for? — RESOLVED (DEC-20260831-010), with a limit — see Q87
 
 Lot and bag traceability is switched on and has never produced a row: the
 lots block is optional on a goods receipt, so omitting it creates no lot and
@@ -2096,8 +2096,15 @@ arrival line must wait for QA before the store may issue it or only named
 materials", and "what carries the barcode for counted packaging". This
 question is the third of that set and they are best answered together.
 
-**Blocks:** making the traceability workflow operational for future
-receipts. *Open since 2026-08-30.*
+**ANSWERED 31-Aug-2026: every purchased material.** Implemented for WEIGHED
+materials, which is narrower than the answer and not by choice — see
+DEC-20260831-010 and Q87 below. The coupled QA clause was answered at the
+same time (every arrival waits for QA, DEC-20260831-011) and needed no new
+gate: bags are already born waiting_qc and held material may not leave a
+store by any door. It had simply never fired, because no arrival ever created
+a bag.
+
+*Was open 2026-08-30 → 2026-08-31.*
 
 ## Q78 · Is there a store-acceptance step for finished goods, and may the Storekeeper approve dispatch?
 
@@ -2371,3 +2378,34 @@ gets recorded as answered.
 
 **Blocks:** nothing. Both answers are the shipped behaviour; what changes is
 where the office does the typing. *Open since 2026-08-31.*
+
+## Q87 · How should a COUNTED material record what physically arrived?
+
+Raised by answering Q77, not instead of it. The owner's answer there was
+"every purchased material must record its lots and bags", and that is now
+live for weighed materials. It cannot be applied to counted ones as the
+system stands.
+
+**Why it stops.** `GoodsReceiptService` refuses a lots block outright for any
+item not measured in kg — "Bag lots are only supported for items measured in
+kg" — and the arithmetic beneath it is in kilograms: a nominal or per-bag
+weight is mandatory, and `bag_weight_kg × bag_count` must equal the received
+line quantity. Required on one side and refused on the other, a counted
+arrival could not be booked at all; the only way to satisfy both rules would
+be to invent a kilogram weight for a carton, which puts a fiction into the
+stock ledger and into Tally.
+
+**What is asked**, and none of it is a technical detail:
+
+  · What is ONE unit of a counted arrival — a carton, a shrink-wrapped
+    bundle, a pallet? 12,000 cartons as 12,000 rows is not the same
+    proposition as 24 pallets.
+  · Does a counted arrival wait for QA the way a weighed one now does? Today
+    it creates no bags, so nothing holds it. That follows from the limit
+    above rather than from any ruling, and it may not be what you want.
+  · What carries the barcode — this is the clause DEC-20260825-001 already
+    left open, and answering it here would close it.
+
+**Blocks:** extending the arrival rule past weighed materials. Nothing that
+works today is waiting on it — resin and masterbatch are counted at the gate
+now, and packaging arrives exactly as it did. *Open since 2026-08-31.*
