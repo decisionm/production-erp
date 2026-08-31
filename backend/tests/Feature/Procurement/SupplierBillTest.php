@@ -443,70 +443,87 @@ class SupplierBillTest extends TestCase
         $this->assertSame([$recorded], $byNumber->all());
     }
 
-    // ---- what Quality accepted is what may be billed (DEC-20260831-008) ----
+    // -- capture as a draft, commit only up to what Quality passed (-011) --
 
-    public function test_a_bill_for_more_than_quality_accepted_is_refused_and_names_both_figures(): void
+    public function test_accounts_may_draft_the_vendors_paper_the_moment_it_arrives_uninspected(): void
+    {
+        // The ordinary case: the invoice arrives with the lorry, before
+        // Quality has looked at anything. The ERP does not stand between
+        // Accounts and the paper on the desk.
+        $grnLineId = $this->receiveLine();           // 100 arrived, uninspected
+
+        $this->actAsAccounts();
+        $bill = $this->postJson('/api/v1/procurement/supplier-bills', $this->payload([
+            'lines' => [$this->matchedLine($grnLineId, '100.0000')],
+        ]))->assertSuccessful()->json('data');
+
+        $this->assertSame('draft', $bill['status']);
+    }
+
+    public function test_recording_is_refused_while_the_receipt_is_uninspected_and_the_bill_stays_a_draft(): void
+    {
+        $grnLineId = $this->receiveLine();
+        $this->actAsAccounts();
+        $bill = $this->postJson('/api/v1/procurement/supplier-bills', $this->payload([
+            'lines' => [$this->matchedLine($grnLineId, '100.0000')],
+        ]))->assertSuccessful()->json('data');
+
+        // Uninspected contributes ZERO to the recordable amount.
+        $response = $this->postJson("/api/v1/procurement/supplier-bills/{$bill['id']}/record");
+        $response->assertStatus(422);
+        $this->assertStringContainsString('not inspected', $this->validationMessage($response, 'lines.0.quantity'));
+
+        $this->assertSame('draft', SupplierBill::query()->findOrFail($bill['id'])->status->value);
+    }
+
+    public function test_rejected_quantity_contributes_zero_so_only_the_accepted_amount_records(): void
     {
         $grnLineId = $this->receiveLine();           // 100 arrived
-        $this->inspect($grnLineId, accepted: '90.0000');
+        $this->inspect($grnLineId, accepted: '90.0000');   // 10 rejected
 
         $this->actAsAccounts();
-        $response = $this->postJson('/api/v1/procurement/supplier-bills', $this->payload([
-            'lines' => [[
-                'item_id' => $this->resin->id,
-                'goods_receipt_note_line_id' => $grnLineId,
-                'quantity' => '100.0000',            // the whole arrival — 10 of it rejected
-                'rate' => '10.0000',
-                'amount' => '1000.0000',
-            ]],
-        ]));
+        $over = $this->postJson('/api/v1/procurement/supplier-bills', $this->payload([
+            'lines' => [$this->matchedLine($grnLineId, '100.0000')],
+        ]))->assertSuccessful()->json('data');
+
+        $response = $this->postJson("/api/v1/procurement/supplier-bills/{$over['id']}/record");
         $response->assertStatus(422);
-
-        // The error key is the literal string "lines.0.quantity" — dots in
-        // the KEY, not a nested path — so it is read from the array rather
-        // than through assertJsonPath, which would split it.
         $message = $this->validationMessage($response, 'lines.0.quantity');
-        $this->assertStringContainsString('90.0000', $message, 'the message must name what Quality accepted');
-        $this->assertStringContainsString('100', $message, 'and what arrived');
-
-        $this->assertSame(0, SupplierBill::query()->count(), 'nothing is recorded when the quantity is refused');
+        $this->assertStringContainsString('90.0000', $message);
+        $this->assertStringContainsString('100', $message);
+        $this->assertSame('draft', SupplierBill::query()->findOrFail($over['id'])->status->value);
     }
 
-    public function test_a_bill_for_exactly_the_accepted_quantity_is_allowed(): void
+    public function test_a_bill_within_the_accepted_quantity_records(): void
     {
         $grnLineId = $this->receiveLine();
         $this->inspect($grnLineId, accepted: '90.0000');
 
         $this->actAsAccounts();
-        $this->postJson('/api/v1/procurement/supplier-bills', $this->payload([
+        $bill = $this->postJson('/api/v1/procurement/supplier-bills', $this->payload([
             'subtotal' => '900.0000', 'igst' => '162.0000', 'total' => '1062.0000',
-            'lines' => [[
-                'item_id' => $this->resin->id,
-                'goods_receipt_note_line_id' => $grnLineId,
-                'quantity' => '90.0000',
-                'rate' => '10.0000',
-                'amount' => '900.0000',
-            ]],
-        ]))->assertSuccessful();
+            'lines' => [$this->matchedLine($grnLineId, '90.0000', '900.0000')],
+        ]))->assertSuccessful()->json('data');
+
+        $this->postJson("/api/v1/procurement/supplier-bills/{$bill['id']}/record")->assertSuccessful();
+        $this->assertSame('recorded', SupplierBill::query()->findOrFail($bill['id'])->status->value);
     }
 
-    public function test_an_uninspected_receipt_is_billable_in_full_rather_than_blocking_accounts(): void
+    public function test_acceptance_is_cumulative_across_re_inspections(): void
     {
-        // Quality has not looked at it yet — the ordinary case when the
-        // invoice arrives with the lorry. The material is in the store, so
-        // the bill is recordable; blocking it would be the worse failure.
         $grnLineId = $this->receiveLine();
+        // Quality passes 60, then a re-inspection after rework passes 30 more.
+        $this->inspect($grnLineId, accepted: '60.0000');
+        $this->inspect($grnLineId, accepted: '30.0000');
 
         $this->actAsAccounts();
-        $this->postJson('/api/v1/procurement/supplier-bills', $this->payload([
-            'lines' => [[
-                'item_id' => $this->resin->id,
-                'goods_receipt_note_line_id' => $grnLineId,
-                'quantity' => '100.0000',
-                'rate' => '10.0000',
-                'amount' => '1000.0000',
-            ]],
-        ]))->assertSuccessful();
+        $bill = $this->postJson('/api/v1/procurement/supplier-bills', $this->payload([
+            'subtotal' => '900.0000', 'igst' => '162.0000', 'total' => '1062.0000',
+            'lines' => [$this->matchedLine($grnLineId, '90.0000', '900.0000')],
+        ]))->assertSuccessful()->json('data');
+
+        // 60 + 30 = 90 recordable; a single inspection reading would refuse this.
+        $this->postJson("/api/v1/procurement/supplier-bills/{$bill['id']}/record")->assertSuccessful();
     }
 
     public function test_the_same_receipt_line_cannot_be_billed_twice(): void
@@ -514,30 +531,35 @@ class SupplierBillTest extends TestCase
         $grnLineId = $this->receiveLine();
 
         $this->actAsAccounts();
-        $line = [[
-            'item_id' => $this->resin->id,
-            'goods_receipt_note_line_id' => $grnLineId,
-            'quantity' => '100.0000',
-            'rate' => '10.0000',
-            'amount' => '1000.0000',
-        ]];
+        $line = [$this->matchedLine($grnLineId, '100.0000')];
 
         $this->postJson('/api/v1/procurement/supplier-bills', $this->payload(['lines' => $line]))->assertSuccessful();
 
         // A SECOND bill against the same arrival — paying the vendor twice
-        // for one delivery is exactly what the matching column exists to stop.
+        // for one delivery is exactly what the matching column exists to
+        // stop, and it is caught at the DRAFT, while it is cheap to fix.
         $second = $this->postJson('/api/v1/procurement/supplier-bills', $this->payload([
             'bill_number' => 'INV/2026/078',
             'lines' => $line,
         ]));
         $second->assertStatus(422);
-
         $this->assertStringContainsString(
             'already been billed',
             $this->validationMessage($second, 'lines.0.goods_receipt_note_line_id'),
         );
 
         $this->assertSame(1, SupplierBill::query()->count());
+    }
+
+    public function test_an_unmatched_bill_records_freely_because_there_is_no_acceptance_to_measure(): void
+    {
+        // A bill for something never on a purchase order stays recordable —
+        // Q64 territory, deliberately untouched by the cap.
+        $this->actAsAccounts();
+        $bill = $this->postJson('/api/v1/procurement/supplier-bills', $this->payload())
+            ->assertSuccessful()->json('data');
+
+        $this->postJson("/api/v1/procurement/supplier-bills/{$bill['id']}/record")->assertSuccessful();
     }
 
     // ---- fixtures -----------------------------------------------------------
@@ -594,6 +616,18 @@ class SupplierBillTest extends TestCase
         return (string) ($errors[$key][0] ?? '');
     }
 
+    /** One bill line matched to a receipt line. */
+    private function matchedLine(int $grnLineId, string $quantity, string $amount = '1000.0000'): array
+    {
+        return [
+            'item_id' => $this->resin->id,
+            'goods_receipt_note_line_id' => $grnLineId,
+            'quantity' => $quantity,
+            'rate' => '10.0000',
+            'amount' => $amount,
+        ];
+    }
+
     /** Quality's verdict on a receipt line — accepted, and the rest rejected. */
     private function inspect(int $grnLineId, string $accepted): void
     {
@@ -602,10 +636,10 @@ class SupplierBillTest extends TestCase
         IncomingInspection::create([
             'goods_receipt_note_line_id' => $grnLine->id,
             'item_id' => $grnLine->item_id,
-            'inspected_quantity' => $grnLine->quantity,
+            'inspected_quantity' => $accepted,
             'accepted_quantity' => $accepted,
-            'rejected_quantity' => bcsub((string) $grnLine->quantity, $accepted, 4),
-            'result' => bccomp($accepted, (string) $grnLine->quantity, 4) === 0 ? 'pass' : 'partial',
+            'rejected_quantity' => '0',
+            'result' => 'pass',
             'inspection_date' => '2026-08-28',
         ]);
     }

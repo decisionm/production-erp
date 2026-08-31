@@ -192,6 +192,12 @@ class SupplierBillService
             $locked = SupplierBill::query()->lockForUpdate()->findOrFail($bill->id);
             $this->guardStatus($locked, SupplierBillStatus::Draft, 'record');
 
+            // The moment the paper becomes an obligation — and therefore the
+            // moment Quality's verdict binds it (DEC-20260831-011). Inside
+            // the lock, so an inspection recorded concurrently cannot let two
+            // readings of "accepted" disagree.
+            $this->guardRecordable($locked);
+
             $locked->forceFill([
                 'status' => SupplierBillStatus::Recorded,
                 'recorded_by' => $recordedBy,
@@ -345,8 +351,17 @@ class SupplierBillService
                 ]);
             }
 
+            // ONE arrival, ONE bill — checked as early as the draft, so a
+            // duplicate is caught while it is still cheap to fix.
             $this->guardBilledOnce($grnLine, $index, $data['id'] ?? null);
-            $this->guardWithinAccepted($grnLine, (string) $line['quantity'], $index);
+
+            // The QUANTITY cap deliberately does NOT run here. Accounts may
+            // save the vendor's paper as a draft the moment it arrives,
+            // exactly as printed — the invoice usually arrives with the
+            // lorry, before Quality has looked at anything, and the ERP does
+            // not stand between Accounts and the paper on the desk. The cap
+            // belongs at the moment of COMMITMENT: see guardRecordable(),
+            // called by record() (DEC-20260831-011).
         }
     }
 
@@ -385,37 +400,59 @@ class SupplierBillService
     }
 
     /**
-     * A BILL MAY CHARGE ONLY FOR WHAT QUALITY ACCEPTED (DEC-20260831-008).
+     * WHAT MAY BE RECORDED IS WHAT QUALITY HAS ACCEPTED (DEC-20260831-011).
      *
-     * The billable quantity of a receipt line is its QC-ACCEPTED quantity,
-     * not what physically arrived — material rejected at incoming inspection
-     * is never paid for. Before this, item, vendor and purchase order were
-     * all checked and the QUANTITY was not, so a bill for 600 against 500
-     * received recorded cleanly.
+     * A draft may say anything the vendor's paper says. Recording it is the
+     * factory committing to the number — and from a recorded bill flows the
+     * payment and, once that is built, the Tally Purchase Invoice. So the
+     * cap lives here, at the one transition that turns paper into an
+     * obligation.
      *
-     * A receipt line Quality has not inspected yet is billable in full, the
-     * same reading RequisitionCoverageService takes of uninspected stock: the
-     * material is in the store and on the books. Blocking the invoice until
-     * QC has run would stop Accounts recording a bill that has genuinely
-     * arrived, which is a worse failure than the one this prevents — and the
-     * rejected quantity, when it comes, has its own remedy (a debit note).
+     * The recordable quantity of a matched line is the CUMULATIVE quantity
+     * Incoming Quality has ACCEPTED for that receipt line. Two quantities
+     * contribute ZERO, and both are deliberate:
+     *
+     *   REJECTED    — material Quality turned down is not material the
+     *                 factory owes for. Its remedy is a replacement or a
+     *                 debit note, never a payment.
+     *   UNINSPECTED — nobody has passed it yet. An earlier reading of this
+     *                 rule (DEC-20260831-008, now superseded) treated an
+     *                 uninspected receipt as billable in full so as not to
+     *                 hold Accounts up; that let a bill be recorded — and
+     *                 would have let it reach Tally — for material Quality
+     *                 had never seen. Waiting for the inspection is the
+     *                 correct behaviour, and the draft is where the bill
+     *                 waits.
+     *
+     * A line matched to no receipt is not capped: an unmatched bill is
+     * legitimate (a bill for something never on a purchase order) and there
+     * is no acceptance to measure it against.
      */
-    private function guardWithinAccepted(GoodsReceiptNoteLine $grnLine, string $billed, int|string $index): void
+    private function guardRecordable(SupplierBill $bill): void
     {
-        $inspections = $grnLine->incomingInspections()->get();
+        $bill->loadMissing('lines.goodsReceiptNoteLine.incomingInspections');
 
-        $billable = $inspections->isEmpty()
-            ? (string) $grnLine->quantity
-            : $inspections->reduce(fn (string $sum, $i) => bcadd($sum, (string) $i->accepted_quantity, 4), '0');
+        foreach ($bill->lines as $index => $line) {
+            $grnLine = $line->goodsReceiptNoteLine;
 
-        if (bccomp($billed, $billable, 4) > 0) {
-            $note = $inspections->isEmpty()
-                ? "that receipt line received {$billable}"
-                : "Quality accepted {$billable} of the {$grnLine->quantity} received";
+            if ($grnLine === null) {
+                continue;
+            }
 
-            throw ValidationException::withMessages([
-                "lines.{$index}.quantity" => "This line bills {$billed}, but {$note}. A bill may charge only for the quantity Quality accepted.",
-            ]);
+            $accepted = $grnLine->incomingInspections->reduce(
+                fn (string $sum, $inspection) => bcadd($sum, (string) $inspection->accepted_quantity, 4),
+                '0',
+            );
+
+            if (bccomp((string) $line->quantity, $accepted, 4) > 0) {
+                $why = $grnLine->incomingInspections->isEmpty()
+                    ? 'Incoming Quality has not inspected that receipt line yet, so nothing on it is recordable'
+                    : "Incoming Quality has accepted {$accepted} of the {$grnLine->quantity} received";
+
+                throw ValidationException::withMessages([
+                    "lines.{$index}.quantity" => "This line bills {$line->quantity}, but {$why}. The bill stays a draft until Quality passes the quantity.",
+                ]);
+            }
         }
     }
 
