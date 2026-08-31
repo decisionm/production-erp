@@ -87,6 +87,7 @@ class EveryListFilterRefusesAnArrayTest extends TestCase
             'warehouses search' => ['/api/v1/inventory/warehouses', 'search'],
             'stock movements item_id' => ['/api/v1/inventory/stock-movements', 'item_id'],
             'stock movements warehouse_id' => ['/api/v1/inventory/stock-movements', 'warehouse_id'],
+            'stock movements purpose' => ['/api/v1/inventory/stock-movements', 'purpose'],
         ];
     }
 
