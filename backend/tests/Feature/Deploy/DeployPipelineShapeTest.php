@@ -340,4 +340,46 @@ class DeployPipelineShapeTest extends TestCase
             'the recovery text must name where the pre-migration dump actually is.',
         );
     }
+
+    /**
+     * THE SERVICE WORKER MUST NOT BE CACHEABLE.
+     *
+     * Everything the app does to keep itself current — autoUpdate
+     * registration, the 60-second `registration.update()` poll in main.tsx,
+     * skipWaiting and clientsClaim — rests on that update check fetching a
+     * FRESH sw.js. Serve it from a cache and the whole chain silently does
+     * nothing: no new worker installs, no reload fires, and the floor keeps
+     * running a bundle from days ago while the server has been serving a
+     * newer one all along. That is not hypothetical; it happened on live on
+     * 31-Aug-2026, and only unregistering the worker by hand cleared it.
+     *
+     * A header is exactly the kind of thing a later edit drops without
+     * noticing, and nothing else in the suite would go red if it did, so it
+     * is pinned here beside the rest of the deploy contract.
+     */
+    public function test_the_service_worker_is_served_uncacheable(): void
+    {
+        $htaccess = self::read('backend/public/.htaccess');
+
+        $start = strpos($htaccess, '<Files "sw.js">');
+        $this->assertNotFalse($start, 'backend/public/.htaccess no longer has a <Files "sw.js"> block — the worker needs both its scope header and its no-cache header.');
+
+        $end = strpos($htaccess, '</Files>', $start);
+        $this->assertNotFalse($end);
+        $block = substr($htaccess, $start, $end - $start);
+
+        $this->assertMatchesRegularExpression(
+            '/Header\s+set\s+Cache-Control\s+"no-cache"/i',
+            $block,
+            'sw.js is served without an explicit Cache-Control. With only Last-Modified and an ETag, any cache '
+            .'between the factory and the server may apply heuristic freshness and answer the update check with '
+            .'yesterday\'s worker — which stops the app updating at all.',
+        );
+
+        $this->assertMatchesRegularExpression(
+            '/Header\s+set\s+Service-Worker-Allowed\s+"\/"/i',
+            $block,
+            'sw.js lost its Service-Worker-Allowed header; the worker ships under /build/ and cannot claim the app scope without it.',
+        );
+    }
 }
