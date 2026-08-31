@@ -374,7 +374,7 @@ test('agentVersion() reads package.json and is the strict semver the release gat
     assert.match(agentVersion(), /^\d+\.\d+\.\d+$/);
 });
 
-test('this candidate is 0.4.2 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9, the purchase-rate read since 0.4.0', () => {
+test('this candidate is 0.4.3 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9, the purchase-rate read since 0.4.0, the receivables read since 0.4.3', () => {
     // The drawer's "agent ≥ 0.3.8" line depends on 0.3.8 being the snapshot
     // FLOOR, which does not move; the candidate itself advances. 0.3.9 added
     // purchaseOrder.ts (Phase 6, staged, flag off); 0.4.0 adds the Day Book
@@ -393,5 +393,17 @@ test('this candidate is 0.4.2 — snapshots since 0.3.8, the Purchase Order buil
     // a company with hundreds of purchase orders. THIS build is required for
     // the rate lookup to carry anything; unlike 0.4.1, the cloud cannot
     // compensate for it, because the parsing happens here.
-    assert.equal(agentVersion(), '0.4.2');
+    // 0.4.3 adds the RECEIVABLES READ — tally/receivables.ts and the tray item
+    // that runs it: Bills Receivable and Sales Order Outstanding, feeding the
+    // CRM's client-outstanding page. Read-only, on no timer, and it posts
+    // nothing to Tally, like every other pull here. Its parsers walk the
+    // document for their nodes rather than following a path, which is 0.4.2's
+    // lesson applied before it could be paid for a second time.
+    //
+    // THE TAG NAMES IN IT ARE TALLY'S STANDARD ONES AND ARE UNMEASURED against
+    // this factory's own exports — no receivables export has been taken from
+    // it yet. The readers are written to fail visibly (an empty pull, logged
+    // with the node names the document DID hold) rather than to guess, so the
+    // first real pull is what corrects them.
+    assert.equal(agentVersion(), '0.4.3');
 });

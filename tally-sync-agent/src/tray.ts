@@ -3,6 +3,7 @@ import path from 'path';
 import { getStatus, runSyncCycle, setPaused } from './sync';
 import { runMastersSync } from './mastersSync';
 import { runPurchaseRatesSync } from './purchaseRatesSync';
+import { runReceivablesSync } from './receivablesSync';
 import { getStockReadStatus } from './stockSummarySync';
 import { getConfig } from './config';
 import { logFilePath } from './logger';
@@ -49,6 +50,16 @@ function buildMenu(onOpenSettings: () => void): Menu {
             label: 'Pull Purchase Rates from Tally',
             enabled: isConfigured(),
             click: () => void runPurchaseRatesSync().then(refresh).catch(refresh),
+        },
+        {
+            // A READ, and an operator's deliberate one — same standing as the
+            // two pulls above and for the same reason (no automatic reads from
+            // Tally since v0.3.4). It exports Bills Receivable and Sales Order
+            // Outstanding and posts what it finds to the ERP, where the CRM's
+            // client-outstanding page reads it; it writes nothing to Tally.
+            label: 'Pull Outstandings from Tally',
+            enabled: isConfigured(),
+            click: () => void runReceivablesSync().then(refresh).catch(refresh),
         },
         {
             label: status.paused ? 'Resume' : 'Pause',

@@ -3,6 +3,7 @@ import { getConfig } from './config';
 import type { SnapshotBody } from './snapshot';
 import type { MastersPayload } from './tally/masters';
 import type { PurchaseRateLine } from './tally/purchaseRates';
+import type { PendingSalesOrder, ReceivableBill } from './tally/receivables';
 import type { StockSummaryPayload } from './tally/stockSummary';
 
 /**
@@ -114,6 +115,37 @@ export interface PurchaseRatesSyncSummary {
  */
 export async function syncPurchaseRates(lines: PurchaseRateLine[], company: string): Promise<PurchaseRatesSyncSummary> {
     const { data } = await client().post<{ data: PurchaseRatesSyncSummary }>('/purchase-rates', { lines, company });
+    return data.data;
+}
+
+export interface ReceivablesSyncSummary {
+    bills: number;
+    orders: number;
+    parties: number;
+    as_of: string;
+    /** True when Tally answered with nothing and the ERP kept what it had. */
+    skipped_empty: boolean;
+}
+
+/**
+ * Send the outstanding position — what clients owe, and what is still to ship
+ * them — to the cloud.
+ *
+ * Inbound only. It writes two tables nothing posts from: no voucher, no stock,
+ * no master, and no customer is created.
+ */
+export async function syncReceivables(
+    bills: ReceivableBill[],
+    orders: PendingSalesOrder[],
+    asOf: string,
+    company: string,
+): Promise<ReceivablesSyncSummary> {
+    const { data } = await client().post<{ data: ReceivablesSyncSummary }>('/receivables', {
+        bills,
+        orders,
+        as_of: asOf,
+        company,
+    });
     return data.data;
 }
 
