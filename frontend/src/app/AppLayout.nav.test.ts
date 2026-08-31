@@ -210,6 +210,22 @@ describe('the Inventory menu', () => {
         expect(salesKeys).not.toContain('/inventory/fulfilment');
         expect(salesKeys).not.toContain('/inventory/planning');
     });
+
+    /**
+     * The screen is called PRODUCTION Planning, and this is where that is
+     * pinned. It used to read "Fulfilment Planning", which named the wrong
+     * half of what it does: the service behind it walks production requests
+     * and quotes completion dates from shift clocks and capacity.
+     *
+     * The route key stays `/inventory/planning` deliberately — renaming a
+     * live route would break every bookmark the floor has, and the screen's
+     * address is not what anyone reads.
+     */
+    it('calls the planning screen Production Planning', () => {
+        const planning = inventory?.children?.find((child) => child.key === '/inventory/planning');
+
+        expect(planning?.label).toBe('Production Planning');
+    });
 });
 
 describe('the Production menu', () => {
