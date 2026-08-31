@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { XMLParser } from 'fast-xml-parser';
+import logger from '../logger';
 import { withTallyGate } from './gate';
 import { escapeXml } from './voucherBuilders/xmlHelpers';
 
@@ -271,12 +272,73 @@ export function linesOfVoucher(voucher: any): PurchaseRateLine[] {
     return lines;
 }
 
+/**
+ * Every VOUCHER node anywhere in a parsed export, found by walking the tree
+ * rather than by following a path.
+ *
+ * THE PATH WAS THE BUG. The first version of this read
+ * `ENVELOPE.BODY.IMPORTDATA.REQUESTDATA.TALLYMESSAGE`, taken from the
+ * factory's own export FILES — and those files are `IMPORTDATA` because they
+ * are what Tally's UI *saves*, an import-shaped document. A live export over
+ * the HTTP gateway answers `EXPORTDATA`. The shape of the artifact on disk is
+ * not the shape on the wire, and matching the artifact produced a parser that
+ * read every evidence file perfectly and returned ZERO against the real Tally
+ * (31-Aug-2026, `purchase-rates.received total: 0`).
+ *
+ * So no path is assumed. A voucher is found wherever it sits, which is correct
+ * for IMPORTDATA, EXPORTDATA, a bare `BODY.DATA`, and whatever a different
+ * Tally build answers — the one thing every shape agrees on is that the
+ * voucher is called VOUCHER.
+ *
+ * Depth is bounded so a pathological document cannot spin, and arrays are
+ * walked because sibling vouchers arrive as one.
+ */
+function findVouchers(node: unknown, depth = 0): any[] {
+    if (node == null || typeof node !== 'object' || depth > 12) return [];
+
+    if (Array.isArray(node)) return node.flatMap((child) => findVouchers(child, depth + 1));
+
+    const found: any[] = [];
+
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+        if (key === 'VOUCHER') {
+            found.push(...listOf(value));
+
+            continue;
+        }
+
+        // A voucher never nests inside another voucher, so nothing is missed
+        // by not descending into the ones already collected.
+        found.push(...findVouchers(value, depth + 1));
+    }
+
+    return found;
+}
+
 /** Every quotable purchase line in a Day Book export's XML. */
 export function parseDayBook(xml: string): PurchaseRateLine[] {
-    const parsed = parser.parse(xml);
-    const messages = listOf(parsed?.ENVELOPE?.BODY?.IMPORTDATA?.REQUESTDATA?.TALLYMESSAGE);
+    return findVouchers(parser.parse(xml)).flatMap(linesOfVoucher);
+}
 
-    return messages.flatMap((message) => listOf(message?.VOUCHER).flatMap(linesOfVoucher));
+/**
+ * What the export actually contained, for the log when it yields nothing.
+ *
+ * A pull that reports zero is either "the factory bought nothing in this
+ * window" or "this parser did not understand the answer", and on 31-Aug those
+ * two were indistinguishable from the cloud side. Counting the vouchers seen
+ * and the types among them separates them in one line, without putting a rate,
+ * a party or an item name into a log file (FC-06).
+ */
+export function describeDayBook(xml: string): { vouchers: number; types: Record<string, number> } {
+    const vouchers = findVouchers(parser.parse(xml));
+    const types: Record<string, number> = {};
+
+    for (const voucher of vouchers) {
+        const type = clean(voucher?.['@_VCHTYPE']) || textOf(voucher?.VOUCHERTYPENAME) || '(untyped)';
+        types[type] = (types[type] ?? 0) + 1;
+    }
+
+    return { vouchers: vouchers.length, types };
 }
 
 /** Tally wants `20260701`; this takes `2026-07-01`. */
@@ -315,5 +377,22 @@ export async function exportPurchaseRates(target: TallyTarget, from: string, to:
         }),
     );
 
-    return parseDayBook(data);
+    const lines = parseDayBook(data);
+
+    // A zero read is reported with what WAS in the document, so "the factory
+    // bought nothing" and "this parser did not understand the answer" are
+    // never again the same observation. Counts and voucher-type names only —
+    // no rate, party or item reaches the log (FC-06).
+    if (lines.length === 0) {
+        const seen = describeDayBook(data);
+        logger.warn('Purchase-rate read found no quotable lines', {
+            bytes: typeof data === 'string' ? data.length : 0,
+            vouchersInDocument: seen.vouchers,
+            voucherTypes: seen.types,
+            from,
+            to,
+        });
+    }
+
+    return lines;
 }
