@@ -533,9 +533,11 @@ export interface ItemAvailability {
  * THE SALES FULFILMENT CONTROL VIEW — one row per sales order line, shared by
  * Sales, Store, Production, Quality and Accounts.
  *
- * `NotRecorded` is the load-bearing type here. Five fields can carry the
+ * `NotRecorded` is the load-bearing type here. THREE fields can carry the
  * literal string 'not_recorded' INSTEAD of a figure, because this build has no
- * source for them. Each is paired with a `_detail` sentence explaining why.
+ * source for them — the store's rejected quantity and planned/completed
+ * production. Quality is NOT one of them any more, and customer approval is
+ * gone entirely. Each is paired with a `_detail` sentence explaining why.
  * A client must render the words — never coerce them to 0, and never leave the
  * cell blank, because on a factory floor a blank reads as "nothing to worry
  * about".
@@ -566,6 +568,9 @@ export interface FulfilmentControlRow {
     held: string;
     over_reserved: string;
     shortfall: string;
+    /** What the store has set aside. Stock, not permission. */
+    stock_held: string;
+    /** What may ACTUALLY go — 0 until Quality signs the line off. */
     dispatch_ready: string;
 
     store: {
@@ -584,8 +589,19 @@ export interface FulfilmentControlRow {
         completed: NotRecorded;
         completed_detail: string;
     };
-    quality: { state: NotRecorded; detail: string };
-    customer_approval: { state: NotRecorded; detail: string };
+    /**
+     * THE ONE DISPATCH GATE (DEC-20260831-003). Internal quality approval is
+     * recorded, so this is a real state — never 'not_recorded'. There is no
+     * customer-approval sibling: the owner settled that no such step exists.
+     */
+    quality: {
+        state: 'approved' | 'pending';
+        approved_at: string | null;
+        approved_by: string | null;
+        approved_quantity: string | null;
+        note: string | null;
+        detail: string;
+    };
 
     expected_date: string | null;
     blocker: FulfilmentBlocker;

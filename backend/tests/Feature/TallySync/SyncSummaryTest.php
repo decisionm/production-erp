@@ -451,8 +451,15 @@ class SyncSummaryTest extends TestCase
 
     private function delivery(int $id, string $date, string $customer): Delivery
     {
+        // The Delivery Note posts against the customer's TALLY ledger and stages
+        // nothing without one (DEC-20260831-004's fail-closed half). This party
+        // is in-memory, so the seeding — which completes DB rows — cannot reach
+        // it; forceFill because tally_ledger_name is not fillable.
+        $party = new Customer(['name' => $customer]);
+        $party->forceFill(['tally_ledger_name' => $customer]);
+
         $so = new SalesOrder;
-        $so->setRelation('customer', new Customer(['name' => $customer]));
+        $so->setRelation('customer', $party);
 
         $line = new DeliveryLine(['quantity' => '2000.0000']);
         $line->setRelation('item', new Item(['sku' => 'BTL-500', 'name' => '500ml PET Bottle']));

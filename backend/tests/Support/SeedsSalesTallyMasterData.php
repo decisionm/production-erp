@@ -8,6 +8,7 @@ use App\Modules\Compliance\Services\GstStateCodes;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Sales\Models\Customer;
+use App\Modules\Sales\Models\SalesOrderLine;
 use App\Modules\TallySync\Models\Enums\TallyLedgerRole;
 use App\Modules\TallySync\Services\TallyLedgerMappingService;
 
@@ -87,6 +88,49 @@ trait SeedsSalesTallyMasterData
      * Give every item an HSN with a rate behind it, and every customer a state
      * and a Tally ledger name — but only where the test left them blank.
      */
+    /**
+     * STAMP QUALITY'S DISPATCH SIGN-OFF ON A LINE, for tests whose subject is
+     * something OTHER than the quality gate.
+     *
+     * Dispatch is gated on internal quality approval (DEC-20260831-003), so a
+     * great many fixtures that dispatch stock in order to test something else —
+     * the stock ledger, a Tally voucher, a carton's trace — would otherwise all
+     * fail with the same 422. This says "assume Quality signed this off", which
+     * is exactly what those tests were always assuming.
+     *
+     * It writes the stamp DIRECTLY rather than calling
+     * DispatchQualityApprovalService, deliberately: the real service requires
+     * the line to be fully HELD first, and most of these fixtures dispatch
+     * without ever taking a hold. Tests whose subject IS the gate must use the
+     * service (or the endpoint) so the preconditions are exercised —
+     * DispatchQualityGateTest does.
+     *
+     * @param  string|null  $quantity  what Quality signed for; defaults to the whole ordered quantity
+     */
+    protected function approveQualityForDispatch(int|SalesOrderLine $line, ?string $quantity = null): SalesOrderLine
+    {
+        $row = $line instanceof SalesOrderLine
+            ? SalesOrderLine::query()->findOrFail($line->getKey())
+            : SalesOrderLine::query()->findOrFail($line);
+
+        $row->forceFill([
+            'quality_approved_at' => now(),
+            'quality_approved_by' => null,
+            'quality_approved_quantity' => $quantity ?? (string) $row->quantity,
+            'quality_approval_note' => 'Seeded for a test whose subject is not the quality gate.',
+        ])->save();
+
+        return $row->fresh();
+    }
+
+    /** Every live line of an order, signed off — the common case in a fixture. */
+    protected function approveQualityForOrder(int $salesOrderId): void
+    {
+        foreach (SalesOrderLine::query()->where('sales_order_id', $salesOrderId)->get() as $line) {
+            $this->approveQualityForDispatch($line);
+        }
+    }
+
     protected function completeSalesTallyMastersOnExistingRows(): void
     {
         Item::query()->whereNull('hsn_sac_code')->update(['hsn_sac_code' => '39233090']);

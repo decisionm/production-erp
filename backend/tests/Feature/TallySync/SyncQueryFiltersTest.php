@@ -497,7 +497,15 @@ class SyncQueryFiltersTest extends TestCase
     private function delivery(int $id, string $date, string $customer): Delivery
     {
         $so = new SalesOrder;
-        $so->setRelation('customer', new Customer(['name' => $customer]));
+        // The Delivery Note is fail-closed too now (DEC-20260831-004): it names
+        // the customer's TALLY ledger and stages NOTHING without one. This
+        // customer stays in-memory — the masters seeding completes rows, not
+        // objects — so the ledger is stamped here, and forceFill because
+        // tally_ledger_name is not fillable. The same string as the name, so
+        // the party this file searches on (q=aurobindo) is unchanged.
+        $party = new Customer(['name' => $customer]);
+        $party->forceFill(['tally_ledger_name' => $customer]);
+        $so->setRelation('customer', $party);
 
         $line = new DeliveryLine(['quantity' => '2000.0000']);
         $line->setRelation('item', new Item(['sku' => 'BTL-500', 'name' => '500ml PET Bottle']));

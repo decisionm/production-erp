@@ -220,82 +220,65 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Delivery Note → Tally (dispatch) — OFF by default, FAIL-CLOSED
+    | Delivery Note → Tally (dispatch) — ON, and fail-closed
     |--------------------------------------------------------------------------
     |
-    | Whether a dispatch (DeliveryDispatched) stages a Tally 'Delivery Note'
-    | voucher at all. OFF is a FAIL-CLOSED READING OF AN OPEN QUESTION, not
-    | a decision — the owner has not ruled, and the evidence says the
-    | factory has never used this voucher:
+    | Whether a dispatch stages a Tally 'Delivery Note' voucher.
     |
-    |   Transactions.xml (the factory's own July-2026 export) holds 195
-    |   Payments, 177 Sales, 134 Receipts, 126 Sales Orders, 82 Journals,
-    |   64 Purchases, 38 Stock Journals, 15 Purchase Orders, 15 Contras and
-    |   1 Debit Note — and ZERO Delivery Notes. Of the 177 real Sales
-    |   vouchers, NONE reference a delivery note (INVOICEDELNOTES.LIST is
-    |   empty in all 177) while 163 reference a Sales Order directly.
+    | ON BY OWNER DECISION, DEC-20260831-004: the ERP posts both Delivery Notes
+    | and Sales Invoices to Tally. This was OFF while Q70 was open, on the
+    | evidence that the factory's own Tally held ZERO Delivery Note vouchers and
+    | none of its 177 real Sales vouchers referenced one. That evidence still
+    | stands — the ERP is INTRODUCING the practice rather than mirroring an old
+    | one, which is the owner's to introduce and not an agent's.
     |
-    | That is the exact sales-side shape of DEC-20260830-001 on the purchase
-    | side (the factory does not use Tally Receipt Notes). Until the owner
-    | and Accounts rule, the ERP must not invent a voucher type the
-    | factory's books have never contained. Turning this ON needs an owner
-    | record, never an env edit alone.
-    |
-    | OFF means the listener no-ops (logs and returns) rather than calling
-    | TallySyncService::enqueueDelivery() — no queue row is created. The
-    | ERP's own delivery, its stock movement and its trace are untouched:
-    | this gate governs ONLY what is sent to Tally.
+    | ON DOES NOT MEAN UNCONDITIONAL. Staging still refuses, by name and in
+    | writing, when the customer's Tally ledger or the godown cannot be
+    | resolved, or when the allowed company below is unset. A refusal NEVER
+    | blocks the dispatch: the goods have gone, and Tally is bookkeeping that
+    | follows.
     |
     */
 
-    'delivery_notes_enabled' => (bool) env('TALLY_SYNC_DELIVERY_NOTES_ENABLED', false),
+    'delivery_notes_enabled' => (bool) env('TALLY_SYNC_DELIVERY_NOTES_ENABLED', true),
 
     /*
     |--------------------------------------------------------------------------
-    | Sales Invoice → Tally — OFF by default, FAIL-CLOSED
+    | Sales Invoice → Tally — ON, and fail-closed
     |--------------------------------------------------------------------------
     |
-    | Whether issuing an ERP invoice stages a Tally 'Sales' voucher. OFF is
-    | fail-closed for TWO independent reasons, either of which is enough:
+    | ON BY OWNER DECISION, DEC-20260831-004: the ERP originates the sale, which
+    | reverses DEC-20260809-003 (now superseded) and resolves Q71.
     |
-    | (1) DOUBLE POSTING. DEC-20260809-003 records that ALL real sales are
-    |     invoiced DIRECTLY IN TALLY and that the ERP Sales module is
-    |     demo-scale. If Accounts keys the invoice and the ERP also posts
-    |     one, the sale is booked twice. Which book originates a sale is an
-    |     open Accounts question.
+    | The fail-closed half is part of the decision, not a caveat. Staging
+    | refuses with a NAMED reason when the customer's Tally ledger, an item's
+    | HSN or its rate, the sales or tax ledger mapping, the godown, or the
+    | allowed company is missing — and the invoice STILL ISSUES. Issuing is the
+    | factory's act; posting to Tally follows it and may never veto it.
     |
-    | (2) THE VOUCHER IS MALFORMED. Independently of (1), the builder
-    |     (tally-sync-agent salesInvoice.ts) says of itself "BEST-EFFORT
-    |     TEMPLATE - NOT YET VALIDATED AGAINST A REAL TALLY INSTANCE", and
-    |     against the factory's own export it emits NO GST ledger entries,
-    |     NO 'Rounding Off', a single sales ledger where Tally uses
-    |     per-line ACCOUNTINGALLOCATIONS, and nests ALLINVENTORYENTRIES
-    |     inside ALLLEDGERENTRIES where Tally has them at voucher level. A
-    |     posted voucher would carry ZERO TAX. That is wrong under ANY
-    |     answer to (1), which is why this gate is not a business choice.
-    |
-    | Turning this on requires BOTH an owner/Accounts answer and a builder
-    | validated against a real export.
+    | Still open and deliberately not settled here: which numbering series a
+    | Tally-bound ERP invoice carries. Tally owns a contiguous NNN/26-27
+    | 'Auto Renumber' series that the factory's receipts knock off against, and
+    | the ERP mints INV-{id}.
     |
     */
 
-    'sales_invoices_enabled' => (bool) env('TALLY_SYNC_SALES_INVOICES_ENABLED', false),
+    'sales_invoices_enabled' => (bool) env('TALLY_SYNC_SALES_INVOICES_ENABLED', true),
 
     /*
     |--------------------------------------------------------------------------
-    | Sales Invoice → Tally: the allowed Tally company (fail-closed)
+    | Sales / Delivery Note → Tally: the allowed Tally company (fail-closed)
     |--------------------------------------------------------------------------
     |
     | The same rule as the Purchase Order and Receipt Note company gates, and on
-    | this voucher it is the one that matters most. The factory's own Sales
+    | these vouchers it is the one that matters most. The factory's own Sales
     | export was taken from a company literally named
     | "SWAASHPET POLYMERS PVT LTD Testing", and the same file carries two other
-    | company strings ("... 26-27" as the remote company name, and the bare
-    | "SWAASHPET POLYMERS PVT LTD" as the godown). They are NOT interchangeable,
-    | and an agent that guessed would post real sales into a test ledger.
+    | company strings. They are NOT interchangeable, and an agent that guessed
+    | would post real sales into a test ledger.
     |
-    | Blank-after-trim or unset REFUSES staging even while sales_invoices_enabled
-    | is true. The trimmed value rides the payload as `allowed_company` and the
+    | Blank-after-trim or unset REFUSES staging even while the flags above are
+    | on. The trimmed value rides the payload as `allowed_company` and the
     | desktop agent compares it BYTE-FOR-BYTE against its own configured company
     | before it builds anything.
     |

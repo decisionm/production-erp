@@ -24,15 +24,16 @@ use Tests\TestCase;
  * THE HONESTY ENDPOINT — GET /sales/tally-mirror (Phase 3.5).
  *
  * "ALL real sales are invoiced directly in Tally — the ERP Sales module is
- * demo-scale" (DEC-20260809-003). The Sales pages therefore show the
+ * demo-scale" — SUPERSEDED by DEC-20260831-004, under which the ERP
+ * ORIGINATES the sale. The Sales pages therefore show the
  * ERP-originated subset only, and rather than let an empty or short table
  * pass for the truth, the page asks the server what it is looking at. The
  * server's answer is a fixed set of facts, and it must stay fixed no
  * matter what ERP-side data exists:
  *
  *   mirrored: false            — Tally-side Sales / Sales Order vouchers are NOT here
- *   decision: DEC-20260809-003 — the owner decision behind that
- *   erp_invoice_builder.validated: false — the Sales voucher XML is unvalidated, no GST
+ *   decision: DEC-20260831-004 — the owner decision behind that
+ *   erp_invoice_builder.validated: true — checked against 55 real exports, never live-posted
  *   payments_recorded_here: false — an invoice is never marked paid by this ERP
  *
  * The frontend renders the server's sentences (never its own), so the
@@ -93,21 +94,25 @@ class TallyMirrorHonestyTest extends TestCase
         // The two keys the pages branch on, pinned exactly.
         $this->assertArrayHasKey('mirrored', $body);
         $this->assertFalse($body['mirrored'], 'mirrored must be boolean false — not null, not "false", not missing');
-        $this->assertSame('DEC-20260809-003', $body['decision']);
+        $this->assertSame('DEC-20260831-004', $body['decision']);
 
         // The sentences the panel renders — the server's words, per contract.
-        $this->assertSame('Real sales are invoiced in Tally', $body['headline']);
+        $this->assertSame('Sales raised here post to Tally; Tally is not read back', $body['headline']);
         $this->assertSame(
             'Tally-side Sales and Sales Order vouchers are not mirrored into this ERP. The documents on these pages are the '
-            .'ERP-originated subset only. Reads from Tally are deliberate and human-triggered; none is scheduled.',
+            .'ERP-originated subset only, and a sale keyed straight into Tally will not appear here. '
+            .'Reads from Tally are deliberate and human-triggered; none is scheduled.',
             $body['body'],
         );
 
-        // The builder's own status: unvalidated, no GST, do not post real invoices.
-        $this->assertFalse($body['erp_invoice_builder']['validated']);
+        // The builder's own status: VALIDATED against the factory's own real
+        // exports, and still never LIVE-POSTED. Two different facts, and the
+        // statement used to get both of them wrong — it claimed the voucher was
+        // unvalidated and carried no GST, which stopped being true the moment
+        // it was rebuilt. A false honesty statement is worse than none.
+        $this->assertTrue($body['erp_invoice_builder']['validated']);
         $this->assertSame(
-            'The ERP\'s Sales voucher XML is not yet validated against real Tally and carries no GST — do not post real '
-            .'invoices from here while DEC-20260809-003 stands.',
+            'The ERP\'s Sales voucher was checked field by field against 55 real Sales vouchers exported from this factory\'s Tally and emits CGST/SGST or IGST, Rounding Off and a per-line ledger. It has not yet been posted to a live Tally, and it refuses to stage at all when the customer ledger, HSN, rate, godown or allowed company is missing — a refusal never blocks the invoice.',
             $body['erp_invoice_builder']['note'],
         );
 

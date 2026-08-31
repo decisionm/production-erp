@@ -99,6 +99,7 @@ use App\Modules\Quality\Http\Controllers\SpcChartController;
 use App\Modules\Quality\Http\Controllers\SpcMeasurementController;
 use App\Modules\Sales\Http\Controllers\CustomerController;
 use App\Modules\Sales\Http\Controllers\DeliveryController;
+use App\Modules\Sales\Http\Controllers\DispatchQualityApprovalController;
 use App\Modules\Sales\Http\Controllers\FulfilmentControlController;
 use App\Modules\Sales\Http\Controllers\InvoiceController;
 use App\Modules\Sales\Http\Controllers\SalesAvailabilityController;
@@ -674,6 +675,14 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('instruments', MeasuringInstrumentController::class)->only(['index', 'store']);
             Route::get('instruments/{instrument}/calibrations', [CalibrationRecordController::class, 'index']);
             Route::post('instruments/{instrument}/calibrations', [CalibrationRecordController::class, 'store']);
+
+            // QUALITY'S DISPATCH SIGN-OFF (DEC-20260831-003). The record lives
+            // on a Sales order line; the ACT is Quality's, so it is gated here
+            // — Sales must not be able to approve its own dispatch. The
+            // dispatch itself then refuses in DeliveryService on the quantity
+            // stamped by these routes.
+            Route::post('dispatch-approvals/lines/{sales_order_line}/approve', [DispatchQualityApprovalController::class, 'approve']);
+            Route::post('dispatch-approvals/lines/{sales_order_line}/revoke', [DispatchQualityApprovalController::class, 'revoke']);
 
             Route::apiResource('spc-characteristics', SpcCharacteristicController::class)->only(['index', 'store']);
             Route::get('spc-characteristics/{spc_characteristic}/measurements', [SpcMeasurementController::class, 'index']);

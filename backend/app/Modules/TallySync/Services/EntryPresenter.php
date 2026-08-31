@@ -94,7 +94,16 @@ class EntryPresenter
      * and an HSN on 11 of 146 items) and the owner answers who mints the invoice
      * number.
      */
-    private const SALES_STAGED_LINE = 'DERIVED FROM THE STRUCTURE OF 55 REAL SALES VOUCHER EXPORTS — NOT YET POSTED TO A REAL TALLY (flag off; owner gate Q71 and the GST master data)';
+    /**
+     * The Delivery Note builder's own status line. It cannot say "validated
+     * against a real export" because there is no real export to validate
+     * against: the factory's Tally holds ZERO Delivery Notes. The ERP posts one
+     * by owner decision (DEC-20260831-004), so this voucher is an INTRODUCTION,
+     * and the first live post is the check on its structure.
+     */
+    private const DELIVERY_NOTE_INTRODUCED_LINE = 'A VOUCHER TYPE THIS FACTORY HAS NEVER USED — AND THAT IS WHY IT CANNOT BE VALIDATED AGAINST AN EXPORT';
+
+    private const SALES_STAGED_LINE = 'VALIDATED AGAINST 55 REAL SALES VOUCHER EXPORTS — NOT YET LIVE-POSTED TO A REAL TALLY';
 
     private const PURCHASE_ORDER_STAGED_LINE = 'DERIVED FROM THE STRUCTURE OF 107 REAL PURCHASE ORDER EXPORTS — NOT YET POSTED TO A REAL TALLY (flag off; owner gate Q35)';
 
@@ -566,19 +575,16 @@ class EntryPresenter
         $unvalidated = match ($category) {
             TallyTransactionCategory::SalesInvoice => [
                 'note' => 'The agent\'s Sales voucher builder is, in its own words, "'.self::SALES_STAGED_LINE.'" — '
-                    .'rebuilt against the factory\'s own 55 real Sales vouchers, so it now emits CGST/SGST or IGST '
-                    .'and Rounding Off, and debits the party the tax-inclusive total. It has still never posted '
-                    .'to a real Tally, and it cannot until the GST master data is complete and Accounts settles which '
-                    .'book mints the invoice number. Real sales are invoiced in Tally (DEC-20260809-003); that decision '
-                    .'stands until a superseding one is recorded.',
+                    .'it was checked field by field against the factory\'s own 55 real Sales vouchers and emits '
+                    .'CGST/SGST or IGST, Rounding Off and a per-line ledger, debiting the party the tax-inclusive '
+                    .'total. What it has not yet done is post one to a live Tally: the first real post is the check '
+                    .'on everything an export cannot prove. The ERP now originates the sale (DEC-20260831-004).',
                 'builder' => self::SALES_BUILDER,
-                // THE DECISION STILL STANDS. DEC-20260809-003 records that all
-                // real sales are invoiced directly in Tally, and a decision is
-                // superseded by a RECORD, never by a rewrite or a conversation.
-                // The builder being correct now does not retire it; until the
-                // owner records the move to ERP-originated sales, this flag
-                // keeps naming the decision that governs the question.
-                'decision' => 'DEC-20260809-003',
+                // The decision that governs whether this voucher may post at
+                // all. DEC-20260809-003 said real sales are invoiced directly
+                // in Tally; DEC-20260831-004 supersedes it — the ERP is now the
+                // origin — and this flag names the one in force.
+                'decision' => 'DEC-20260831-004',
             ],
             TallyTransactionCategory::ReceiptNote => [
                 'note' => 'The agent\'s Receipt Note voucher builder is, in its own words, a "'.self::UNVALIDATED_LINE.'" — '
@@ -587,9 +593,12 @@ class EntryPresenter
                 'builder' => self::RECEIPT_NOTE_BUILDER,
             ],
             TallyTransactionCategory::DeliveryNote => [
-                'note' => 'The agent\'s Delivery Note voucher builder is, in its own words, a "'.self::UNVALIDATED_LINE.'" — '
-                    .'"Validate the tag structure against a real export".',
+                'note' => 'The agent\'s Delivery Note voucher builder is, in its own words, "'.self::DELIVERY_NOTE_INTRODUCED_LINE.'". '
+                    .'The factory\'s own Tally holds none of these vouchers and none of its real Sales vouchers references one, '
+                    .'so the ERP is introducing the practice by owner decision (DEC-20260831-004) rather than mirroring it — '
+                    .'and the first live post is the check on a structure reasoned from the Sales voucher, not measured.',
                 'builder' => self::DELIVERY_NOTE_BUILDER,
+                'decision' => 'DEC-20260831-004',
             ],
             TallyTransactionCategory::Journal => [
                 'note' => 'The agent\'s Journal voucher builder is, in its own words, a "'.self::UNVALIDATED_LINE.'" — '
