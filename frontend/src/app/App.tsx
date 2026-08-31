@@ -24,8 +24,7 @@ import CapacityPlanPage from '@/features/production/pages/CapacityPlanPage';
 import CartonTracePage from '@/features/production/pages/CartonTracePage';
 import FactoryDayBinPage from '@/features/production/pages/FactoryDayBinPage';
 import MaterialRequestsPage from '@/features/material-flow/pages/MaterialRequestsPage';
-import ProductionReturnPage from '@/features/material-flow/pages/ProductionReturnPage';
-import StoreIssueQueuePage from '@/features/material-flow/pages/StoreIssueQueuePage';
+import StoreProductionPage from '@/features/material-flow/pages/StoreProductionPage';
 import MrpPage from '@/features/production/pages/MrpPage';
 import ProductionQueuePage from '@/features/production/pages/ProductionQueuePage';
 import ProductionReportsPage from '@/features/production/pages/ReportsPage';
@@ -121,8 +120,20 @@ export default function App() {
                                         for, fulfilled here. It sits under /inventory
                                         because the store is its reader — the floor's
                                         half is /production/material-requests. */}
-                                    <Route path="/inventory/store-issue-queue" element={<StoreIssueQueuePage />} />
-                                    <Route path="/inventory/production-returns" element={<ProductionReturnPage />} />
+                                    <Route path="/inventory/store-production" element={<StoreProductionPage />} />
+                                    {/* Both halves were their own URL until they
+                                        became tabs. Kept alive and query-preserving
+                                        for the same reason the four production
+                                        configuration URLs are — see
+                                        StoreProductionRedirect. */}
+                                    <Route
+                                        path="/inventory/store-issue-queue"
+                                        element={<StoreProductionRedirect tab="issues" />}
+                                    />
+                                    <Route
+                                        path="/inventory/production-returns"
+                                        element={<StoreProductionRedirect tab="returns" />}
+                                    />
                                     {/* SALES ORDER FULFILMENT, the store's half:
                                         the queue of order lines waiting on stock,
                                         and the ETA dashboard behind what the store
@@ -312,4 +323,35 @@ function ProductionConfigurationRedirect({ tab }: { tab: string }) {
     const { search } = useLocation();
 
     return <Navigate to={productionConfigurationTarget(search, tab)} replace />;
+}
+
+/** Same rule as productionConfigurationTarget: `set`, never `append`. */
+export function storeProductionTarget(search: string, tab: string): string {
+    const params = new URLSearchParams(search);
+    params.set('tab', tab);
+
+    return `/inventory/store-production?${params.toString()}`;
+}
+
+/**
+ * A retired material-flow URL, kept alive with its query string intact.
+ *
+ * /inventory/store-issue-queue and /inventory/production-returns were live
+ * screens in the sidebar — the second of them for barely a day — so both are
+ * in real bookmarks and in prose written this week. Neither may 404.
+ *
+ * A COMPONENT rather than a bare <Navigate> for the reason the production
+ * ones are: it carries whatever query string arrives. Nothing sends state to
+ * these two today, but the cost is nothing and the failure it prevents is
+ * silent — a reader landing on a ready-filtered screen with no way back to
+ * what they were looking at.
+ *
+ * This means the two paths read as PAGES, not as redirects, to
+ * App.routes.test.tsx's REDIRECT_ROUTES check (:130), exactly as the four
+ * production URLs do. That is deliberate; its docblock says so.
+ */
+function StoreProductionRedirect({ tab }: { tab: string }) {
+    const { search } = useLocation();
+
+    return <Navigate to={storeProductionTarget(search, tab)} replace />;
 }

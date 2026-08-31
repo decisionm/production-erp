@@ -447,9 +447,26 @@ class StoreIssueThreeStatesTest extends TestCase
         );
     }
 
-    // (f2) the WIP row is older than this phase — it does not win on its own -
+    // (f2) material on the floor is consumed from the floor, issue or not ---
 
-    public function test_a_batch_that_was_issued_nothing_consumes_exactly_where_it_did_before(): void
+    /**
+     * REVERSED BY OWNER DECISION, 31-Aug-2026. This test used to be called
+     * "a batch that was issued nothing consumes exactly where it did before"
+     * and asserted the opposite of what it asserts now.
+     *
+     * The old rule was cautious for a good reason: the Production/WIP row is
+     * older than this phase and carries rehearsal-era balances, so consuming
+     * out of it meant a batch could draw on stock nobody had handed over.
+     * Rather than guess, the build required a store issue to have put the
+     * material there and left the question with the owner.
+     *
+     * The answer came back that the kilograms are real: "Material remaining
+     * in Production/WIP stays available for the next production day,
+     * including existing material without a Store Issue." So the batch now
+     * consumes from the floor, and this test is the one that would have to be
+     * re-argued to change it back.
+     */
+    public function test_a_batch_consumes_from_production_wip_even_when_no_store_issue_put_it_there(): void
     {
         $this->seed(CanonicalMachineSeeder::class);
         $machine = WorkCenter::where('code', 'MC-01')->firstOrFail();
@@ -483,16 +500,19 @@ class StoreIssueThreeStatesTest extends TestCase
             ],
         ])->assertOk();
 
-        // NOT the WIP row. Nothing was handed over, so nothing may be drawn
-        // out of the handover location — the batch consumes from the store
-        // exactly as it did before this phase existed.
+        // THE WIP ROW, because that is where the material is standing. What
+        // put it there is not the question the consumption asks.
         $consumption = StockMovement::query()
             ->where('type', StockMovementType::Issue)
             ->where('purpose', StockMovementPurpose::Consumption->value)
             ->sole();
-        $this->assertSame($this->store->id, $consumption->warehouse_id);
-        $this->assertSame('400.0000', $this->balance($this->wip));
-        $this->assertLedgerMatchesBalances('after a batch that was issued nothing');
+        $this->assertSame($this->wip->id, $consumption->warehouse_id);
+
+        // Drawn down by exactly the consumption, and the store is untouched —
+        // the batch did not reach past the floor for material already on it.
+        $this->assertSame('281.0020', $this->balance($this->wip));
+        $this->assertSame('1000.0000', $this->balance($this->store));
+        $this->assertLedgerMatchesBalances('after a batch consuming un-issued floor stock');
     }
 
     // (f3) material can still come home after the paperwork was closed -------

@@ -170,18 +170,25 @@ describe('the Inventory menu', () => {
 
     /**
      * THE GROUP, in the order a storekeeper works: what a product IS, what is
-     * on hand, the label bench, what production is asking for, where the stock
-     * lives, the ledger behind it all, and the two customer-fulfilment screens
-     * the store owns. Eight, down from nine — the two label registers became
-     * tabs of one entry. A ninth appearing here is the drift this pins.
+     * on hand, the label bench, the material moving between the store and the
+     * floor, where the stock lives, the ledger behind it all, and the two
+     * customer-fulfilment screens the store owns.
+     *
+     * EIGHT. It has been eight since the two label registers became tabs of
+     * one entry, and it is eight again after 31-Aug-2026, when "Store Issue
+     * Queue" and "Returns" became the two directions of one Store ↔
+     * Production screen. (The count in this docblock read "eight, down from
+     * nine" while the array below listed nine — the comment was written for
+     * the label-register merge and never updated when Returns was added on
+     * 30-Aug. Stated properly now: the ARRAY is the pin, this sentence is
+     * only its summary, and a ninth entry appearing here is the drift.)
      */
     it('is the inventory destinations, in working order', () => {
         expect(inventory?.children?.map((child) => child.key)).toEqual([
             '/inventory/items',
             '/inventory/stock',
             '/inventory/barcode-labels',
-            '/inventory/store-issue-queue',
-            '/inventory/production-returns',
+            '/inventory/store-production',
             '/inventory/warehouses',
             '/inventory/stock-movements',
             '/inventory/fulfilment',

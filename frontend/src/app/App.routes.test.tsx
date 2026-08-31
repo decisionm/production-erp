@@ -2,7 +2,7 @@ import { Children, isValidElement } from 'react';
 import type { ReactElement, ReactNode } from 'react';
 import { Navigate, Route } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
-import App, { productionConfigurationTarget } from './App';
+import App, { productionConfigurationTarget, storeProductionTarget } from './App';
 
 /**
  * THE ROUTE TABLE IS A CONTRACT (Phase 7 regression smoke, P7-05).
@@ -42,6 +42,7 @@ const ROUTE_TABLE = [
     '/inventory/barcode-labels',
     '/inventory/batches',
     '/inventory/serial-numbers',
+    '/inventory/store-production',
     '/inventory/store-issue-queue',
     '/inventory/production-returns',
     '/inventory/fulfilment',
@@ -291,4 +292,51 @@ describe('every page module', () => {
 
         expect(failures).toEqual([]);
     }, 120_000);
+});
+
+/**
+ * THE RETIRED MATERIAL-FLOW URLs.
+ *
+ * Two menu entries became two tabs of Store ↔ Production on 31-Aug-2026.
+ * /inventory/production-returns had been live for barely a day when it was
+ * retired, which is exactly why both URLs must keep resolving: the links
+ * written this week are the ones nobody has had time to correct.
+ *
+ * Pinned the same way the production ones are, and for the same reason — a
+ * correct `storeProductionTarget` proves nothing about App.tsx handing each
+ * path the right tab. Sending the queue's URL to the returns tab would look
+ * entirely reasonable to a typecheck.
+ */
+const MATERIAL_FLOW_REDIRECTS: { path: string; tab: string }[] = [
+    { path: '/inventory/store-issue-queue', tab: 'issues' },
+    { path: '/inventory/production-returns', tab: 'returns' },
+];
+
+describe('the retired material-flow URLs', () => {
+    const routes: FoundRoute[] = [];
+    collectRoutes(App(), routes);
+
+    it.each(MATERIAL_FLOW_REDIRECTS)('routes $path to the $tab tab', ({ path, tab }) => {
+        const route = routes.find((r) => r.path === path);
+        expect(route, `${path} is not in the route table`).toBeDefined();
+        const element = route!.element;
+        expect(isValidElement(element)).toBe(true);
+        expect((element as ReactElement<RouteProps>).props.tab).toBe(tab);
+    });
+
+    it.each(MATERIAL_FLOW_REDIRECTS)('carries an existing query string to $tab', ({ tab }) => {
+        const target = storeProductionTarget('?item_id=42', tab);
+        const params = new URLSearchParams(target.split('?')[1]);
+
+        expect(target.split('?')[0]).toBe('/inventory/store-production');
+        expect(params.get('item_id')).toBe('42');
+        expect(params.get('tab')).toBe(tab);
+    });
+
+    it.each(MATERIAL_FLOW_REDIRECTS)('overwrites an incoming tab rather than duplicating it, for $tab', ({ tab }) => {
+        const target = storeProductionTarget('?tab=history', tab);
+
+        expect(target.split('?')[1].match(/(^|&)tab=/g)?.length).toBe(1);
+        expect(new URLSearchParams(target.split('?')[1]).get('tab')).toBe(tab);
+    });
 });

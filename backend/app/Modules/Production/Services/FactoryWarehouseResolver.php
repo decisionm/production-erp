@@ -180,11 +180,28 @@ class FactoryWarehouseResolver
         // anywhere else would issue stock out of a location that no longer
         // holds it and strand the issued material where nothing can draw it.
         //
-        // TWO CONDITIONS, NOT ONE. A STORE ISSUE has to have put material
-        // there: the WIP row is OLDER THAN THIS PHASE and already carries
-        // balances from the rehearsal data, so "WIP holds some" alone would
-        // fire on material no store issue ever put there and quietly
-        // redirect the first completion after deploy.
+        // ONE CONDITION SINCE 31-Aug-2026, AND IT USED TO BE TWO. A store
+        // issue also had to have put the material there, because the WIP row
+        // is OLDER THAN THIS PHASE and already carries balances from the
+        // rehearsal data — so "WIP holds some" alone would fire on material
+        // no store issue ever put there and quietly redirect the first
+        // completion after deploy.
+        //
+        // The owner ruled on exactly that population (DEC-20260831-009,
+        // implementing the WIP-availability clause of DEC-20260831-005):
+        // material remaining in Production/WIP stays available for the next
+        // production day, INCLUDING existing material with no store issue
+        // behind it. On the live instance that is seven of the nine
+        // materials standing in production. Their kilograms are real, they
+        // are on the floor, and the batch that uses them consumes them from
+        // there. The gate is therefore gone, and
+        // Tests\Feature\Inventory\WipAvailableWithoutAStoreIssueTest is
+        // what now holds the behaviour in place.
+        //
+        // REMOVING A GUARD USUALLY OPENS THE HOLE IT COVERED. It does not
+        // here, and the reason is the condition that remains — see the next
+        // paragraph, which was written for the issue-backed case and is now
+        // load-bearing for every case.
         //
         // THE OTHER CONDITION IS "STILL IN PLAY", NOT "HOLDS A POSITIVE
         // BALANCE", and the difference closes a hole this phase would
@@ -211,10 +228,7 @@ class FactoryWarehouseResolver
         // that has issued nothing sees no change at all.
         $wip = $this->productionWip->warehouse();
 
-        if ($wip !== null
-            && $this->storeIssues->hasIssuedIntoProduction($itemId, $wip->id)
-            && $this->productionWipIsInPlay($wip, $itemId)
-        ) {
+        if ($wip !== null && $this->productionWipIsInPlay($wip, $itemId)) {
             return $wip;
         }
 

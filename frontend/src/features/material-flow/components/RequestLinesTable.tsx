@@ -1,7 +1,7 @@
 import { Table, Tooltip, Typography } from 'antd';
 import { itemLabel } from '@/lib/itemLabel';
 import type { MaterialRequestLine } from '../types';
-import { describeRequestLine } from '../words';
+import { describeRequestLine, formatQuantity } from '../words';
 
 /**
  * A request's lines, with the states never collapsed into one number.
@@ -21,6 +21,27 @@ import { describeRequestLine } from '../words';
  */
 export default function RequestLinesTable({ lines }: { lines: MaterialRequestLine[] }) {
     const showReturned = lines.some((line) => line.returned_quantity !== undefined && line.returned_quantity !== null);
+
+    /**
+     * The netting column, on the same rule as `showReturned` above: shown
+     * only where there is something to show.
+     *
+     * A request is raised for what the shift needs LESS whatever is already
+     * standing in Production/WIP (DEC-20260831-005). Where nothing was on the
+     * floor the two numbers are equal and a column of zeroes would be noise;
+     * where something was, this is the line that explains why the store is
+     * being asked for less than production said it needed. Lines raised
+     * before the rule existed carry NULL and are simply not netted.
+     */
+    const netted = (line: MaterialRequestLine): string | null =>
+        line.required_quantity === null
+            ? null
+            : String(Number(line.required_quantity) - Number(line.quantity));
+
+    const showNetted = lines.some((line) => {
+        const off = netted(line);
+        return off !== null && Number(off) > 0;
+    });
 
     const cellsFor = (line: MaterialRequestLine) =>
         describeRequestLine(
@@ -47,6 +68,25 @@ export default function RequestLinesTable({ lines }: { lines: MaterialRequestLin
                 scroll={{ x: 'max-content' }}
                 columns={[
                     { title: 'Material', render: (_, line) => itemLabel(line.item) },
+                    ...(showNetted
+                        ? [
+                              {
+                                  title: (
+                                      <Tooltip title="Already standing in Production/WIP when this request was raised, so the store was not asked for it again.">
+                                          <span>Met from production</span>
+                                      </Tooltip>
+                                  ),
+                                  key: 'netted',
+                                  align: 'right' as const,
+                                  render: (_: unknown, line: MaterialRequestLine) => {
+                                      const off = netted(line);
+                                      return off === null || Number(off) <= 0
+                                          ? '—'
+                                          : formatQuantity(off, line.uom ?? line.item?.uom ?? null);
+                                  },
+                              },
+                          ]
+                        : []),
                     ...template.map((cell) => ({
                         title: (
                             <Tooltip title={cell.help}>

@@ -576,7 +576,10 @@ class StockMovementService
             ->get();
     }
 
-    public function paginateMovements(?int $itemId = null, ?int $warehouseId = null, int $perPage = 20): LengthAwarePaginator
+    /**
+     * @param  list<string>|null  $purposes
+     */
+    public function paginateMovements(?int $itemId = null, ?int $warehouseId = null, ?array $purposes = null, int $perPage = 20): LengthAwarePaginator
     {
         return StockMovement::query()
             // createdBy: two columns, eager-loaded, so a page of the ledger
@@ -590,6 +593,9 @@ class StockMovementService
             ])
             ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
             ->when($warehouseId, fn ($query) => $query->where('warehouse_id', $warehouseId))
+            // whereIn over the enum's string values — stock_movements_purpose_index
+            // was created for this read.
+            ->when($purposes, fn ($query) => $query->whereIn('purpose', $purposes))
             ->orderByDesc('movement_date')
             ->orderByDesc('id')
             ->paginate($perPage);

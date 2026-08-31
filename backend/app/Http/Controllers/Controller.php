@@ -62,6 +62,66 @@ abstract class Controller
     }
 
     /**
+     * A SET-VALUED filter that is still a scalar parameter —
+     * `?purpose=issue_to_production,return_from_production`.
+     *
+     * WHY COMMA-SEPARATED AND NOT `?purpose[]=`. The bracket form is exactly
+     * what scalarQuery refuses, for the reason written on it: a filter that
+     * fails open returns MORE than the caller asked for. Keeping the parameter
+     * a scalar leaves that refusal untouched, so a set filter needs no
+     * exception to it — and the single-value case (`?purpose=consumption`) is
+     * simply the degenerate case of the same rule.
+     *
+     * AN UNKNOWN VALUE IS REFUSED, NOT DROPPED, and that is the half that
+     * matters. Silently ignoring `?purpose=issue_to_prodcution` would answer a
+     * typo with the WHOLE ledger and say nothing — the same fail-open
+     * direction arriving by a different road. The refusal names the values
+     * that do exist, because a caller who mistyped one cannot be expected to
+     * guess the spelling out of a rejection.
+     *
+     * An empty value is no filter (`?purpose=`), matching searchTerm's rule
+     * that an empty box narrows nothing.
+     *
+     * @param  class-string<\BackedEnum>  $enum
+     * @return list<string>|null
+     */
+    protected function filterEnumList(Request $request, string $key, string $enum): ?array
+    {
+        $raw = trim((string) $this->scalarQuery($request, $key, ''));
+
+        if ($raw === '') {
+            return null;
+        }
+
+        $values = array_values(array_unique(array_filter(
+            array_map('trim', explode(',', $raw)),
+            static fn (string $value): bool => $value !== '',
+        )));
+
+        if ($values === []) {
+            return null;
+        }
+
+        $unknown = array_values(array_filter(
+            $values,
+            static fn (string $value): bool => $enum::tryFrom($value) === null,
+        ));
+
+        if ($unknown !== []) {
+            throw ValidationException::withMessages([
+                $key => sprintf(
+                    'The %s filter does not know %s. It takes one or more of: %s.',
+                    $key,
+                    implode(', ', $unknown),
+                    implode(', ', array_map(static fn ($case): string => (string) $case->value, $enum::cases())),
+                ),
+            ]);
+        }
+
+        return $values;
+    }
+
+    /**
      * A QUERY PARAMETER THE LAYER BELOW CAN ACTUALLY REPRESENT.
      *
      * A query string carries arrays: `?search[]=RM` and `?search[a]=RM` both

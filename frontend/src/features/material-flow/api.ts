@@ -1,4 +1,5 @@
 import { api } from '@/lib/api';
+import type { StockMovement } from '@/features/inventory/types';
 import type { Paginated } from '@/lib/types';
 import type {
     BagScanPayload,
@@ -193,4 +194,63 @@ export async function listProductionFloorStock(): Promise<ProductionFloorStockRe
     // "nobody has told the ERP where the floor is". Both arrive as an empty
     // list, and only one of them may be reported as the floor being clear.
     return { data: data.data ?? [], meta: data.meta ?? { wip_configured: true } };
+}
+
+/* --------------------------- the one history ---------------------------- */
+
+/**
+ * EVERY HANDOVER AND EVERY RETURN, newest first — the single movement
+ * history behind the Store ↔ Production screen.
+ *
+ * WHY IT NAMES A WAREHOUSE, and why that is not an optional refinement.
+ * `recordTransfer` writes TWO rows for one physical movement — a
+ * `transfer_out` on the store and a `transfer_in` on Production/WIP — and
+ * stamps BOTH with the same purpose (StockMovementService.php:287, :303;
+ * StockMovementPurpose.php:35-38 says so in as many words). Filtering on
+ * purpose ALONE therefore lists every issue and every return twice, and
+ * makes `meta.total` report double the handovers the factory actually made.
+ * Naming the Production/WIP side selects exactly one leg of each pair,
+ * because recordTransfer refuses from == to (:253-257) so the two legs are
+ * never in the same warehouse. It is a WHERE predicate, so the collapse
+ * happens before the LIMIT and pagination counts events rather than legs.
+ *
+ * DIRECTION IS THEN UNAMBIGUOUS from `type` read against that one leg: an
+ * issue is the `transfer_in` (material arriving INTO production), a return
+ * is the `transfer_out` (material leaving it).
+ *
+ * WHAT THIS LIST IS NOT. It is not a running balance and must never be
+ * presented as one. Consumption — the batch actually using the material — is
+ * a separate event with its own purpose, and it is deliberately NOT here:
+ * `FactoryWarehouseResolver::consumptionSource` books it against
+ * Production/WIP only while `productionWipIsInPlay` holds (:376-385, a
+ * balance test), so consumption rows would appear for most materials and
+ * silently vanish for exactly the over-drawn ones — a partial ledger that
+ * reads as a complete one. What is actually standing in production comes
+ * from the balance read (`listProductionReturnable`), never from summing
+ * these rows.
+ *
+ * A NOTE FOR ANY OTHER CONSUMER of `/inventory/stock-movements`: the purpose
+ * filter is a general capability, but the de-duplication is NOT automatic.
+ * Send `?purpose=issue_to_production,return_from_production` without a
+ * warehouse and you get both legs of every transfer, with a 200 and no
+ * signal. `transfer_group` (StockMovementResource.php:45) is the other way
+ * to collapse a pair.
+ */
+export async function listStoreProductionMovements(params: {
+    /** The Production/WIP row, from the warehouses index's own meta. */
+    wipWarehouseId: number;
+    itemId?: number;
+    page?: number;
+    perPage?: number;
+}): Promise<Paginated<StockMovement>> {
+    const { data } = await api.get<Paginated<StockMovement>>(`${MATERIAL_FLOW_BASE}/stock-movements`, {
+        params: {
+            purpose: 'issue_to_production,return_from_production',
+            warehouse_id: params.wipWarehouseId,
+            item_id: params.itemId,
+            page: params.page,
+            per_page: params.perPage,
+        },
+    });
+    return data;
 }

@@ -2257,3 +2257,51 @@ behave, not because arithmetic forces it. The two answers are independent:
 the owner may answer either without the other.
 
 **Blocks:** nothing on the screen — same as Q80. *Open since 2026-08-30.*
+
+## Q82 · On the merged Store ↔ Production screen there are two doors home for the same material. Which one should a storekeeper be told to use? — RESOLVED (DEC-20260831-005, DEC-20260831-008)
+
+Raised and answered on 31-Aug-2026, in the session that merged Store Issues
+and Production Returns into one screen. Recorded because the reasoning is
+worth keeping, not because anything is still open.
+
+Both tabs of the merged screen can send material back to the store, and they
+did not behave the same way — which was invisible while they were two URLs
+and obvious once they sat one click apart. The handover drawer returns against
+ONE store issue and is attributed by construction. The Returns tab returns by
+MATERIAL, and it is the only door that reaches material a *completed* handover
+is standing on, or that no handover put on the floor at all. A material with an
+open issue was refused by one and accepted by the other, which reads as a bug.
+
+**The answer:** they are not rivals. Material that came out on a Store Issue
+goes home through that issue — the drawer — for as long as returnable quantity
+remains, whatever the issue's status. The Returns tab's free input is for
+material with no Store Issue behind it, which on the live instance is seven of
+the nine materials standing in production.
+
+Collapsing the two doors would have stranded stock: the drawer's button was
+gated on `is_open`, so material a completed handover was standing on would
+have had no door at all while still blocking its own free return. That gate is
+now keyed on what is outstanding.
+
+## Q83 · Does "material stays available for the next production day" cover material no store issue put there? — RESOLVED (DEC-20260831-009)
+
+Also raised and answered on 31-Aug-2026.
+
+DEC-20260831-005 already said material not returned remains available in
+Production/WIP as the next day's opening material. That was honoured when
+netting the next request — but not where a batch actually draws its material
+from: `consumptionSource` additionally required that a Store Issue had put the
+material there, so for the seven live materials with no issue behind them the
+batch drew from the Store while the WIP kilograms sat untouched.
+
+**The answer is yes, including that material**, and the condition is gone.
+
+One consequence nobody asked for, recorded because it is now true: those
+materials draw Production/WIP down to zero and then continue from the Store,
+and both movements carry purpose `consumption` differing only in
+`warehouse_id` — so the moment the floor ran out is not marked anywhere in the
+consumption history.
+
+**Still open, and untouched by this:** whether anything should CHASE an
+overdue return, and against what clock. The Q69 block raised it; no ruling has
+been given.

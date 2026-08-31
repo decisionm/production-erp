@@ -27,7 +27,14 @@ import { formatQuantity, permitsFractions } from '../words';
  * state say what is possible. A material with nothing free simply has no
  * free input to type in.
  */
-export default function ProductionReturnPage() {
+/**
+ * `embedded` — rendered as a tab of Store ↔ Production. The Card's TITLE is
+ * what goes: "Return to Store" named the direction, and on a tab that
+ * direction is in the tab label ("Returns from production") instead of being
+ * said twice. The toolbar in `extra` is untouched — antd renders the card
+ * head on `title || extra` — and so is every figure, refusal and input.
+ */
+export default function ProductionReturnPage({ embedded = false }: { embedded?: boolean }) {
     const queryClient = useQueryClient();
     const [term, setTerm] = useState('');
     const [search, setSearch] = useState('');
@@ -149,12 +156,16 @@ export default function ProductionReturnPage() {
                     min={0}
                     max={Number(row.unattributed)}
                     step={permitsFractions(row.uom) ? 0.001 : 1}
-                    // A material an open handover is standing on goes home
-                    // through ITS line, in the expanded row — the server
-                    // refuses it here while Q69 is open, and an input that
-                    // only ever produces a refusal is worse than no input.
-                    // The "Held by a store issue" figure beside it is the
-                    // explanation; no sentence is needed.
+                    // A material a handover is standing on goes home through
+                    // ITS line, in the expanded row — the owner settled on
+                    // 31-Aug-2026 (DEC-20260831-005, DEC-20260831-008) that
+                    // material which came out on a store issue returns
+                    // against that exact issue, for open, partially returned
+                    // and completed issues alike. The
+                    // server refuses it here, and an input that only ever
+                    // produces a refusal is worse than no input. The "Held by
+                    // a store issue" figure beside it is the explanation; no
+                    // sentence is needed.
                     disabled={Number(row.unattributed) <= 0 || row.store_issue_lines.length > 0}
                     value={free[row.item_id] ?? null}
                     onChange={(value) => setFree((current) => ({ ...current, [row.item_id]: value }))}
@@ -166,7 +177,7 @@ export default function ProductionReturnPage() {
 
     return (
         <Card
-            title="Return to Store"
+            title={embedded ? undefined : 'Return to Store'}
             extra={
                 <Space>
                     <Input.Search

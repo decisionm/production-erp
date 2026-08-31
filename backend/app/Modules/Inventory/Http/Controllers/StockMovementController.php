@@ -7,6 +7,7 @@ use App\Modules\Inventory\Http\Requests\StoreStockIssueRequest;
 use App\Modules\Inventory\Http\Requests\StoreStockReceiptRequest;
 use App\Modules\Inventory\Http\Requests\StoreStockTransferRequest;
 use App\Modules\Inventory\Http\Resources\StockMovementResource;
+use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Services\StockMovementService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -28,6 +29,15 @@ class StockMovementController extends Controller
         return StockMovementResource::collection($this->stock->paginateMovements(
             itemId: $this->filterId($request, 'item_id'),
             warehouseId: $this->filterId($request, 'warehouse_id'),
+            // WHY the ledger can now be narrowed by purpose: the column and
+            // its index were added by 2026_08_17_150000 for "the reads this
+            // exists for group and filter the ledger by purpose", and until
+            // now nothing could use either. The Store <-> Production history
+            // is the first caller — one chronological list of issues and
+            // returns — but the capability is general, not that screen's
+            // private door (CLAUDE.md decision 3: the API is a product
+            // surface, not the SPA's implementation detail).
+            purposes: $this->filterEnumList($request, 'purpose', StockMovementPurpose::class),
             perPage: $this->perPage($request),
         ));
     }

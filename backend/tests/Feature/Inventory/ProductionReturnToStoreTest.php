@@ -159,15 +159,21 @@ class ProductionReturnToStoreTest extends TestCase
         $this->assertLedgerMatchesBalances('after a deactivated material came home');
     }
 
-    // ---- (3) the bound: an open handover's material is not residue ---------
+    // ---- (3) the bound: a handover's material is not residue ---------------
 
-    public function test_a_material_an_open_handover_is_standing_on_refuses_an_unattributed_return(): void
+    /**
+     * SETTLED BY THE OWNER, 31-Aug-2026 (DEC-20260831-005, DEC-20260831-008).
+     * This refusal used to be a placeholder for Q69 — the build refused
+     * because nobody had ruled, and refusing was the direction that could be
+     * undone. The ruling went the same way: material that came out on a store
+     * issue returns against that issue, and the unattributed door is for
+     * material with no store issue behind it. So the refusal stays, and the
+     * words it uses are now a rule rather than an apology.
+     */
+    public function test_a_material_a_handover_is_standing_on_refuses_an_unattributed_return(): void
     {
-        // Q69 IS OPEN, so this door does not answer it. 200 kg of residue with
-        // a 100 kg handover standing on the same material: allowing the
-        // unattributed return here would be shipping "storekeeper's choice" as
-        // the answer, and an unattributed movement can NEVER be re-attributed
-        // afterwards. Refused, with the other door named.
+        // 200 kg of residue with a 100 kg handover standing on the same
+        // material. The handover's kilograms belong to its document.
         $this->openingStockInProduction($this->resin, '200');
         $this->stockInStore($this->resin, '500');
         $issue = $this->issueResin('100');
@@ -180,8 +186,13 @@ class ProductionReturnToStoreTest extends TestCase
         ])->assertStatus(422);
 
         $message = (string) $refusal->json('errors')['lines.0.quantity'][0];
-        $this->assertStringContainsString('still standing against store issue', $message);
-        $this->assertStringContainsString('cannot be attributed afterwards', $message);
+        $this->assertStringContainsString('came out of the store on store issue', $message);
+        $this->assertStringContainsString($issue['issue_number'], $message, 'the refusal names the issue to open');
+        $this->assertStringNotContainsString(
+            'open question',
+            $message,
+            'the rule is settled — the refusal must not still describe itself as undecided',
+        );
 
         // Nothing moved.
         $this->assertSame('300.0000', $this->balance($this->wip, $this->resin));
@@ -196,7 +207,7 @@ class ProductionReturnToStoreTest extends TestCase
         $this->assertSame('200.0000', $this->balance($this->wip, $this->resin));
 
         // And once no handover stands on it, the residue comes home too — the
-        // refusal is about the open question, not about the material.
+        // refusal is about the DOCUMENT, not about the material.
         $this->postJson('/api/v1/inventory/production-returns', [
             'to_warehouse_id' => $this->store->id,
             'lines' => [['item_id' => $this->resin->id, 'quantity' => '200']],
@@ -204,6 +215,52 @@ class ProductionReturnToStoreTest extends TestCase
 
         $this->assertSame('0.0000', $this->balance($this->wip, $this->resin));
         $this->assertLedgerMatchesBalances('after the handover closed and the residue followed');
+    }
+
+    /**
+     * COMPLETED IS NOT FINISHED — the half of DEC-20260831-008 that is easiest
+     * to lose. Completing a store issue moves no stock, so an issue marked
+     * complete with quantity still outstanding is STILL holding material on
+     * the floor, and that material still belongs to that document.
+     *
+     * This is the case a tidier merge would have broken. `StoreIssueStatus::
+     * isOpen()` is Issued|PartiallyReturned only, so anything keyed on it
+     * treats a completed issue as finished — and if the unattributed door had
+     * been opened for this material on that basis, the kilograms would have
+     * gone home against no document while the handover went on claiming them.
+     */
+    public function test_a_completed_handover_with_material_still_out_keeps_its_claim(): void
+    {
+        $this->openingStockInProduction($this->resin, '200');
+        $this->stockInStore($this->resin, '500');
+        $issue = $this->issueResin('100');
+
+        $this->postJson("/api/v1/inventory/store-issues/{$issue['id']}/complete")->assertOk();
+
+        // Completing moved nothing: 200 residue + 100 issued are still there.
+        $this->assertSame('300.0000', $this->balance($this->wip, $this->resin));
+
+        $refusal = $this->postJson('/api/v1/inventory/production-returns', [
+            'to_warehouse_id' => $this->store->id,
+            'lines' => [['item_id' => $this->resin->id, 'quantity' => '200']],
+        ])->assertStatus(422);
+
+        $this->assertStringContainsString(
+            $issue['issue_number'],
+            (string) $refusal->json('errors')['lines.0.quantity'][0],
+            'a COMPLETED issue with material outstanding still owns that material',
+        );
+        $this->assertSame('300.0000', $this->balance($this->wip, $this->resin));
+
+        // And its own door is still open, which is what stops this stranding
+        // the stock: the attributed return works on a completed issue.
+        $this->postJson('/api/v1/inventory/production-returns', [
+            'to_warehouse_id' => $this->store->id,
+            'lines' => [['store_issue_line_id' => $issue['lines'][0]['id'], 'quantity' => '100']],
+        ])->assertCreated();
+
+        $this->assertSame('200.0000', $this->balance($this->wip, $this->resin));
+        $this->assertLedgerMatchesBalances('after a completed handover was returned against');
     }
 
     public function test_two_unattributed_lines_of_one_material_share_one_budget(): void

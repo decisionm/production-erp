@@ -119,6 +119,19 @@ describe('a request line reads as four named quantities', () => {
         expect(line.map((cell) => cell.value)).toEqual(['100 kg', '40 kg', '60 kg', '5 kg']);
     });
 
+    /**
+     * DEC-20260831-005 made this label load-bearing. A request is raised for
+     * the shortfall after Production/WIP is netted off, so the first cell is
+     * NOT what production said it needed. Left reading "Requested" beside a
+     * "Total required" box holding a bigger number, the honest conclusion for
+     * a storekeeper is that the ERP dropped part of the request.
+     */
+    it('does not call the netted figure "requested" — it is what the store is asked for', () => {
+        expect(line[0].label).toBe('Asked of the store');
+        expect(line[0].label.toLowerCase()).not.toContain('requested');
+        expect(line[0].help.toLowerCase()).toContain('production/wip');
+    });
+
     it('labels the issued cell as not-yet-consumed', () => {
         expect(line[1].label.toLowerCase()).toMatch(/not (yet )?consumed/);
     });

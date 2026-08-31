@@ -366,6 +366,18 @@ export interface StockMovement {
     /** GRN purchase rate — served only to finance.view/manage eyes; absent otherwise. */
     unit_cost?: string | null;
     reference: string | null;
+    /**
+     * WHO RECORDED IT — the user's name, and ABSENT rather than null wherever
+     * the resource was served without the relation eager-loaded (the backend
+     * gates it behind `whenLoaded`, so a lazy belongsTo never becomes one
+     * query per ledger row). Optional here for exactly that reason.
+     *
+     * It was served from the day the column was surfaced and typed nowhere,
+     * which is a quiet way to lose a column: `dataIndex` is a plain string to
+     * antd, so a table naming a field the interface does not have typechecks
+     * cleanly and renders an em dash on every row for ever.
+     */
+    recorded_by?: string | null;
     transfer_group: string | null;
     movement_date: string;
     notes: string | null;
