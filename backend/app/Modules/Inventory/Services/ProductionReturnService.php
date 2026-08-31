@@ -2,6 +2,7 @@
 
 namespace App\Modules\Inventory\Services;
 
+use App\Modules\Inventory\Models\Enums\ReturnedQualityState;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\StockBalance;
@@ -293,6 +294,8 @@ class ProductionReturnService
 
                 $residues[$itemId] = bcsub($residues[$itemId], $quantity, 4);
 
+                $qualityState = ReturnedQualityState::fromNullable($line['quality_state'] ?? null);
+
                 $this->stock->recordTransfer(
                     itemId: $itemId,
                     fromWarehouseId: $wipId,
@@ -302,6 +305,7 @@ class ProductionReturnService
                     notes: $notes,
                     createdBy: $recordedBy,
                     purpose: StockMovementPurpose::ReturnFromProduction,
+                    qualityState: $qualityState,
                 );
 
                 $moved->push([
@@ -309,6 +313,7 @@ class ProductionReturnService
                     'quantity' => $quantity,
                     'store_issue_line_id' => null,
                     'to_warehouse_id' => $toWarehouseId,
+                    'quality_state' => $qualityState->value,
                 ]);
             }
 
@@ -326,6 +331,10 @@ class ProductionReturnService
                         fn (array $line) => [
                             'store_issue_line_id' => $line['store_issue_line_id'],
                             'quantity' => $line['quantity'],
+                            // Carried, not defaulted here: returnUnused reads
+                            // a missing key as `good` in one place, so the two
+                            // halves of the same return cannot disagree.
+                            'quality_state' => $line['quality_state'] ?? null,
                         ],
                         $issueLines,
                     ),
@@ -339,6 +348,10 @@ class ProductionReturnService
                         'quantity' => $line['quantity'],
                         'store_issue_line_id' => $line['store_issue_line_id'],
                         'to_warehouse_id' => $line['to_warehouse_id'],
+                        // Same reading of a missing key as the unattributed
+                        // half above, so the receipt a storekeeper gets back
+                        // says the same thing whichever door they used.
+                        'quality_state' => ReturnedQualityState::fromNullable($line['quality_state'] ?? null)->value,
                     ]);
                 }
             }

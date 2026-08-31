@@ -21,7 +21,36 @@ import type { Item, ItemCategoryValue, ItemRow } from '@/features/inventory/type
 export const CATEGORY_FACET_ALL = 'all';
 export const CATEGORY_FACET_UNCLASSIFIED = 'unclassified';
 
-export type CategoryFacetKey = typeof CATEGORY_FACET_ALL | typeof CATEGORY_FACET_UNCLASSIFIED | ItemCategoryValue;
+/**
+ * EVERYTHING THE STORE HOLDS THAT IS NOT A FINISHED GOOD — the store's own
+ * view of the catalogue, and the DEFAULT one.
+ *
+ * The owner asked for finished goods to come off the Inventory item-master
+ * surface. Taken literally that could mean archiving them, refusing them on
+ * documents, or dropping them from the API, and every one of those destroys
+ * something: a finished good is a real master with real stock, real history
+ * and a live Tally identity, it is what Sales sells and what a batch produces,
+ * and which categories each document may use is still an OPEN question (Q59,
+ * left open by DEC-20260827-002). So none of that is done here.
+ *
+ * WHAT IS DONE IS THE SAFE HALF OF IT, and the boundary is worth stating
+ * because the next reader will be tempted to go further: the item master
+ * OPENS on materials instead of on everything, and "Finished goods" is still
+ * a facet one click away with its count on it. Nothing is archived, nothing
+ * is deleted, no API changes, search still reaches every item, item detail
+ * still opens, and the Stock, movement, sales and production screens are
+ * untouched. A person who wants finished goods clicks the word.
+ *
+ * If the owner meant something stronger, that is a decision to record and
+ * then build — not one to reach by widening this filter.
+ */
+export const CATEGORY_FACET_MATERIALS = 'materials';
+
+export type CategoryFacetKey =
+    | typeof CATEGORY_FACET_ALL
+    | typeof CATEGORY_FACET_MATERIALS
+    | typeof CATEGORY_FACET_UNCLASSIFIED
+    | ItemCategoryValue;
 
 export interface CategoryFacet {
     key: CategoryFacetKey;
@@ -31,6 +60,9 @@ export interface CategoryFacet {
 
 /** The order the factory works in: what it makes, then what it makes it from. */
 const FACET_ORDER: { key: CategoryFacetKey; label: string }[] = [
+    // Materials first: it is where the screen opens, so it is where a reader's
+    // eye should already be when they arrive.
+    { key: CATEGORY_FACET_MATERIALS, label: 'Materials' },
     { key: CATEGORY_FACET_ALL, label: 'All' },
     { key: 'finished_good', label: 'Finished goods' },
     { key: 'raw_material', label: 'Raw material' },
@@ -44,6 +76,12 @@ const FACET_ORDER: { key: CategoryFacetKey; label: string }[] = [
 
 export function matchesCategoryFacet(item: Pick<Item, 'category'>, facet: CategoryFacetKey): boolean {
     if (facet === CATEGORY_FACET_ALL) return true;
+    // NOT-A-FINISHED-GOOD, which deliberately KEEPS the unclassified items
+    // (category null) and the ones a server did not serve a category for
+    // (undefined). Reading either as a finished good would hide, behind a
+    // filter nobody chose, the exact rows DEC-20260827-002 says are "not
+    // recorded yet" and are the largest thing a person can fix here.
+    if (facet === CATEGORY_FACET_MATERIALS) return item.category !== 'finished_good';
     // `null` is "nobody has said yet"; `undefined` is a server that did not
     // serve the field at all. types.ts states that three-state rule and the
     // Category column already honours it, so the facet must not collapse the
@@ -174,27 +212,41 @@ function facetMemory(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | nu
     }
 }
 
+/**
+ * WHAT THE ITEM MASTER OPENS ON when nobody has chosen — Materials, not All.
+ *
+ * This USED TO BE `all`, and the swap is the whole of the finished-goods
+ * change on this screen (see CATEGORY_FACET_MATERIALS for the boundary and
+ * for what was deliberately not done). It moves no data and removes no facet:
+ * "All" and "Finished goods" are both still one click away, with their counts.
+ */
+const DEFAULT_FACET: CategoryFacetKey = CATEGORY_FACET_MATERIALS;
+
 export function readRememberedFacet(): CategoryFacetKey {
     try {
         const stored = facetMemory()?.getItem(REMEMBERED_FACET_KEY);
-        return stored != null && isKnownFacet(stored) ? stored : CATEGORY_FACET_ALL;
+        return stored != null && isKnownFacet(stored) ? stored : DEFAULT_FACET;
     } catch {
-        return CATEGORY_FACET_ALL;
+        return DEFAULT_FACET;
     }
 }
 
 export function rememberFacet(facet: CategoryFacetKey): void {
     try {
-        // "All" is the absence of a preference, so it is removed rather than
-        // written: a browser that has never chosen and one that has just
-        // chosen All must open the same way.
-        if (facet === CATEGORY_FACET_ALL) {
+        // THE SENTINEL IS THE DEFAULT, WHICHEVER FACET THAT IS — it was "All"
+        // only because "All" was the default. Now that Materials is, choosing
+        // "All" has to be STORED like any other deliberate choice: leave it as
+        // the removed-key case and a storekeeper who picked All would find
+        // themselves back on Materials next time, which is the screen quietly
+        // overruling them.
+        if (facet === DEFAULT_FACET) {
             facetMemory()?.removeItem(REMEMBERED_FACET_KEY);
             return;
         }
         facetMemory()?.setItem(REMEMBERED_FACET_KEY, facet);
     } catch {
         // Storage that refuses to be written (private window, quota) leaves the
-        // screen working exactly as before; it simply opens on All next time.
+        // screen working exactly as before; it simply opens on the default
+        // next time.
     }
 }

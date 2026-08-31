@@ -2,6 +2,7 @@
 
 namespace App\Modules\Inventory\Services;
 
+use App\Modules\Inventory\Models\Enums\ReturnedQualityState;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Enums\StockMovementType;
 use App\Modules\Inventory\Models\Enums\StoreIssueStatus;
@@ -428,6 +429,12 @@ class StoreIssueService
                     notes: $notes,
                     createdBy: $recordedBy,
                     purpose: StockMovementPurpose::ReturnFromProduction,
+                    // PER LINE, NOT PER RETURN. One trip back to the hatch can
+                    // carry a clean sack of masterbatch and a wet one, and a
+                    // single state for the whole document would have to pick
+                    // one of them and be wrong about the other. A caller that
+                    // says nothing means `good` — see ReturnedQualityState.
+                    qualityState: ReturnedQualityState::fromNullable($requested['quality_state'] ?? null),
                 );
 
                 $line->quantity_returned = bcadd((string) $line->quantity_returned, $quantity, 4);

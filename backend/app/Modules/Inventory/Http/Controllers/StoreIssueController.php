@@ -112,6 +112,10 @@ class StoreIssueController extends Controller
                 fn (array $line) => [
                     'store_issue_line_id' => (int) $line['store_issue_line_id'],
                     'quantity' => (string) $line['quantity'],
+                    // Left as the raw value, null included: the service reads
+                    // a missing state as `good` in ONE place, so this must not
+                    // decide it a second time and risk the two disagreeing.
+                    'quality_state' => $line['quality_state'] ?? null,
                 ],
                 $data['lines'],
             ),

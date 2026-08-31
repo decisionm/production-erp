@@ -5,7 +5,7 @@ import { listAllWarehouses } from '@/features/inventory/api';
 import { itemLabel } from '@/lib/itemLabel';
 import { ListEmpty } from '@/lib/ListEmpty';
 import { apiRefusalMessage, listProductionReturnable, recordProductionReturn } from '../api';
-import type { ProductionReturnable } from '../types';
+import type { ProductionReturnable, ReturnedQualityState } from '../types';
 import { formatQuantity, permitsFractions } from '../words';
 
 /**
@@ -34,6 +34,22 @@ import { formatQuantity, permitsFractions } from '../words';
  * said twice. The toolbar in `extra` is untouched — antd renders the card
  * head on `title || extra` — and so is every figure, refusal and input.
  */
+/**
+ * The two states a storekeeper is choosing between at the hatch — is this fit
+ * to go back out, or not. The server's enum, and no third value invented on
+ * this side of the wire.
+ *
+ * DAMAGED CHANGES NO ARITHMETIC TODAY, deliberately: the quantity moves to
+ * the same store either way, and what the factory should then DO with damaged
+ * material is an open owner question. So no warning, no refusal and no
+ * disabled Return button hangs off this choice — a screen that acted on an
+ * answer nobody has given would be picking one.
+ */
+const CONDITION_OPTIONS: { value: ReturnedQualityState; label: string }[] = [
+    { value: 'good', label: 'Good' },
+    { value: 'damaged', label: 'Damaged' },
+];
+
 export default function ProductionReturnPage({ embedded = false }: { embedded?: boolean }) {
     const queryClient = useQueryClient();
     const [term, setTerm] = useState('');
@@ -41,6 +57,8 @@ export default function ProductionReturnPage({ embedded = false }: { embedded?: 
     const [destination, setDestination] = useState<number | undefined>();
     const [free, setFree] = useState<Record<number, number | null>>({});
     const [attributed, setAttributed] = useState<Record<number, number | null>>({});
+    const [freeCondition, setFreeCondition] = useState<Record<number, ReturnedQualityState>>({});
+    const [attributedCondition, setAttributedCondition] = useState<Record<number, ReturnedQualityState>>({});
 
     const floor = useQuery({
         queryKey: ['material-flow', 'production-returnable', search],
@@ -75,18 +93,45 @@ export default function ProductionReturnPage({ embedded = false }: { embedded?: 
             .map((warehouse) => ({ value: warehouse.id, label: warehouse.name }));
     }, [warehouses.data]);
 
+    /**
+     * WHAT CONDITION EACH LINE CAME BACK IN, keyed exactly as its quantity is
+     * — by item for the free rows, by store issue line for the attributed
+     * ones. Per line and not per document: one trip to the hatch can carry a
+     * clean sack and a wet one.
+     *
+     * A key with nothing in it is `good`, and that is the SERVER's reading
+     * too, not a default invented here — an omitted quality_state is recorded
+     * as good. So the map holds only the deliberate departures from it.
+     */
     const lines = useMemo(() => {
-        const typed: { item_id?: number; store_issue_line_id?: number; quantity: number }[] = [];
+        const typed: {
+            item_id?: number;
+            store_issue_line_id?: number;
+            quantity: number;
+            quality_state?: ReturnedQualityState;
+        }[] = [];
 
         for (const [itemId, quantity] of Object.entries(free)) {
-            if (quantity && quantity > 0) typed.push({ item_id: Number(itemId), quantity });
+            if (quantity && quantity > 0) {
+                typed.push({
+                    item_id: Number(itemId),
+                    quantity,
+                    quality_state: freeCondition[Number(itemId)] ?? 'good',
+                });
+            }
         }
         for (const [lineId, quantity] of Object.entries(attributed)) {
-            if (quantity && quantity > 0) typed.push({ store_issue_line_id: Number(lineId), quantity });
+            if (quantity && quantity > 0) {
+                typed.push({
+                    store_issue_line_id: Number(lineId),
+                    quantity,
+                    quality_state: attributedCondition[Number(lineId)] ?? 'good',
+                });
+            }
         }
 
         return typed;
-    }, [free, attributed]);
+    }, [free, attributed, freeCondition, attributedCondition]);
 
     const record = useMutation({
         mutationFn: () =>
@@ -98,6 +143,8 @@ export default function ProductionReturnPage({ embedded = false }: { embedded?: 
             message.success(`Returned ${lines.length} line${lines.length === 1 ? '' : 's'} to store`);
             setFree({});
             setAttributed({});
+            setFreeCondition({});
+            setAttributedCondition({});
             await queryClient.invalidateQueries({ queryKey: ['material-flow'] });
             await queryClient.invalidateQueries({ queryKey: ['inventory'] });
         },
@@ -169,6 +216,23 @@ export default function ProductionReturnPage({ embedded = false }: { embedded?: 
                     disabled={Number(row.unattributed) <= 0 || row.store_issue_lines.length > 0}
                     value={free[row.item_id] ?? null}
                     onChange={(value) => setFree((current) => ({ ...current, [row.item_id]: value }))}
+                    style={{ width: '100%' }}
+                />
+            ),
+        },
+        {
+            // DISABLED IN LOCKSTEP WITH ITS QUANTITY, for the same reason: a
+            // condition on a row that cannot return through this door answers
+            // a question nobody asked.
+            title: 'Condition',
+            key: 'condition',
+            width: 130,
+            render: (row: ProductionReturnable) => (
+                <Select<ReturnedQualityState>
+                    options={CONDITION_OPTIONS}
+                    disabled={Number(row.unattributed) <= 0 || row.store_issue_lines.length > 0}
+                    value={freeCondition[row.item_id] ?? 'good'}
+                    onChange={(value) => setFreeCondition((current) => ({ ...current, [row.item_id]: value }))}
                     style={{ width: '100%' }}
                 />
             ),
@@ -268,6 +332,24 @@ export default function ProductionReturnPage({ embedded = false }: { embedded?: 
                                             value={attributed[line.store_issue_line_id] ?? null}
                                             onChange={(value) =>
                                                 setAttributed((current) => ({
+                                                    ...current,
+                                                    [line.store_issue_line_id]: value,
+                                                }))
+                                            }
+                                            style={{ width: '100%' }}
+                                        />
+                                    ),
+                                },
+                                {
+                                    title: 'Condition',
+                                    key: 'condition',
+                                    width: 130,
+                                    render: (line: ProductionReturnable['store_issue_lines'][number]) => (
+                                        <Select<ReturnedQualityState>
+                                            options={CONDITION_OPTIONS}
+                                            value={attributedCondition[line.store_issue_line_id] ?? 'good'}
+                                            onChange={(value) =>
+                                                setAttributedCondition((current) => ({
                                                     ...current,
                                                     [line.store_issue_line_id]: value,
                                                 }))

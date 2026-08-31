@@ -2409,3 +2409,61 @@ stock ledger and into Tally.
 **Blocks:** extending the arrival rule past weighed materials. Nothing that
 works today is waiting on it — resin and masterbatch are counted at the gate
 now, and packaging arrives exactly as it did. *Open since 2026-08-31.*
+
+## Q88 · Must unused material be returned to the Store every evening, or may it stay on the floor?
+
+The instruction of 31-Aug-2026 that opened the store/inventory workflow reads
+as a MANDATORY end-of-day return: unused material goes back to the Store at
+the end of production. **DEC-20260831-005, in force, says the opposite of the
+mandatory half** — a return may be partial or full, and "material that is not
+returned REMAINS AVAILABLE in Production/WIP and is the next day's opening
+material on the floor; it is not consumed, not written off, and not moved by
+the passing of a day."
+
+Both cannot be true, and the difference is not cosmetic:
+
+  · **Carry-forward stands (today's behaviour).** The floor opens each day
+    holding what it held, and the next material request nets against it —
+    which is the other half of DEC-20260831-005 and is built, live and tested.
+  · **Mandatory return.** Production/WIP must be flat at the end of every
+    shift, which means the ERP has to refuse or flag a non-empty floor, and
+    the netting clause becomes close to dead — there would rarely be anything
+    standing to net against. Material re-issued the next morning would also
+    make two ledger movements a day for kilograms that never physically moved.
+
+**Nothing has been changed.** The shipped behaviour is DEC-20260831-005, and
+an agent may not reverse a decision in force by reading a later message as one
+(AGENTS.md: discussion is not a decision). If you meant to change the rule,
+the answer becomes a new record superseding it.
+
+**Blocks:** any end-of-day enforcement. Nothing that works today is waiting on
+it. *Open since 2026-09-01.*
+
+## Q89 · What should the Store do with material returned DAMAGED?
+
+A production return now records the condition it came back in — `good` or
+`damaged`, per line, beside the quantity, the unit and the Store Issue it came
+out on. That much was asked for directly.
+
+What was NOT decided, and is deliberately not implemented, is what the
+condition should DO. **Today a damaged return moves exactly what a good one
+moves**: the same quantity, into the same Store, freely issuable again
+afterwards. The condition is recorded on the stock movement and shown; no
+balance, hold or refusal hangs off it. That is the same shape DEC-20260831-002
+took for the stock screen — record and show the fact, change no write path.
+
+**What is asked:** when a storekeeper takes back material marked damaged,
+
+  · may the Store issue it again as it stands, or
+  · should it be held from issue until Quality looks at it (the machinery
+    exists — DEC-20260825-001's incoming-QC hold — but that decision reaches
+    arrival bags only, and extending it to returns is a new rule), or
+  · should it leave stock altogether as a write-off, which is a Tally
+    consequence and not only an ERP one?
+
+Recording it without acting on it is the conservative direction: the evidence
+is being kept from today, so whichever answer comes back can be applied to
+what was written down. Guessing a hold would have answered this question.
+
+**Blocks:** any behaviour attached to the damaged state. Nothing that works
+today is waiting on it. *Open since 2026-09-01.*
