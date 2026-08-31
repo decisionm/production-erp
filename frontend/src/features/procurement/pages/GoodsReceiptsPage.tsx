@@ -244,8 +244,20 @@ function unitPriceSummary(receipt: GoodsReceiptNote): string {
     return prices.length > 0 ? prices.join(', ') : '—';
 }
 
-function isMassUom(uom: string): boolean {
-    return ['kg', 'kgs', 'kilogram', 'kilograms'].includes(uom.trim().toLowerCase().replace(/\.$/, ''));
+/**
+ * Is this unit the kg family? An EXACT mirror of the backend's
+ * Item::isKgUom, and since 31-Aug-2026 the two must not drift: the server
+ * now REQUIRES a lots block on a weighed arrival, and this function is what
+ * decides whether the form pre-opens the row to enter it. Disagree, and the
+ * storekeeper is shown no row and handed a refusal they cannot satisfy.
+ *
+ * `\.+$` rather than `\.$` — strip EVERY trailing dot, as the backend's
+ * rtrim($uom, '.') does. Tally writes "Kgs." on 90+ live items; one stray
+ * double dot would otherwise be a mass unit to the server and a counted one
+ * here, which is exactly the drift this comment exists to prevent.
+ */
+export function isMassUom(uom: string): boolean {
+    return ['kg', 'kgs', 'kilogram', 'kilograms'].includes(uom.trim().toLowerCase().replace(/\.+$/, ''));
 }
 
 /**

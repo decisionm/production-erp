@@ -8,6 +8,7 @@ use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\ProductionWipLocationResolver;
+use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Procurement\Models\Vendor;
 use App\Modules\Production\Services\FactoryWarehouseResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -55,7 +56,12 @@ class TwoUnitsChainTest extends TestCase
         config(['production.traceability_enabled' => true]);
 
         $user = User::factory()->create(['is_active' => true]);
-        foreach (['procurement.manage', 'inventory.manage', 'production.manage'] as $permission) {
+        // quality.manage joined the list on 31-Aug-2026: a weighed arrival
+        // now lands in incoming-QC hold and NOTHING may be issued from it
+        // until an inspection releases it (owner decision, Q77 + the QA
+        // clause). Receiving is no longer enough to make stock usable, so a
+        // chain test has to walk the inspection too.
+        foreach (['procurement.manage', 'inventory.manage', 'production.manage', 'quality.manage'] as $permission) {
             Permission::findOrCreate($permission, 'web');
             $user->givePermissionTo($permission);
         }
@@ -545,8 +551,36 @@ class TwoUnitsChainTest extends TestCase
             'warehouse_id' => $this->store->id,
             'reference' => 'TU-DC',
             'received_date' => '2026-08-18',
-            'lines' => [['purchase_order_line_id' => $lineId, 'quantity' => $quantity]],
+            // A weighed arrival is counted at the gate now (Q77): one bag
+            // holding the whole delivery, whose weight reconciles exactly to
+            // the received quantity. A COUNTED material takes no lots block —
+            // bag lots are kg-only — which is the difference this whole test
+            // class exists to hold apart.
+            'lines' => [array_filter([
+                'purchase_order_line_id' => $lineId,
+                'quantity' => $quantity,
+                'lots' => Item::isKgUom($item->uom)
+                    ? [['bag_count' => 1, 'bag_weight_kg' => $quantity]]
+                    : null,
+            ], static fn ($value) => $value !== null)],
         ])->assertCreated();
+
+        // AND THEN QA RELEASES IT. A weighed arrival is born waiting for
+        // incoming QC, and held bags may not leave a store by any door
+        // (DEC-20260825-001) — so without this the material is received and
+        // unusable, which is the point of the hold and would otherwise read
+        // here as a broken chain.
+        if (Item::isKgUom($item->uom)) {
+            $grnLineId = GoodsReceiptNote::query()->latest('id')->firstOrFail()->lines()->value('id');
+
+            $this->postJson('/api/v1/quality/incoming-inspections', [
+                'goods_receipt_note_line_id' => $grnLineId,
+                'inspected_quantity' => $quantity,
+                'accepted_quantity' => $quantity,
+                'rejected_quantity' => '0',
+                'inspection_date' => '2026-08-18',
+            ])->assertSuccessful();
+        }
     }
 
     /** An accepted ask, submitted and waiting — not yet issued against. */

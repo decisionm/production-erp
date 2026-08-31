@@ -305,9 +305,22 @@ function buildReportXml(company: string, reportId: string, asOf: string): string
 
     return (
         '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>' +
-        // TYPE=Data, not Collection. The Day Book read established that this is
-        // the request shape this factory's Tally answers (#66); a Collection
-        // with a FETCH would be a guess at a second shape for the same data.
+        // A REPORT REQUEST — AND THIS IS THE OPEN QUESTION ON THIS MODULE.
+        //
+        // This was written when the Day Book read used the same shape and was
+        // believed to be what this factory's Tally answers. #67 then MEASURED
+        // the opposite: the purchase-rate read returned zero three times over,
+        // and only a TDL COLLECTION got real vouchers out of it. That reader
+        // now asks by Collection and falls back to the report, reporting which
+        // one answered.
+        //
+        // Bills Receivable and Sales Order Outstanding are different reports
+        // and may answer perfectly well — but that is a hope, not a
+        // measurement, and the honest statement is that the first pull may
+        // return nothing for exactly the reason #67 found. Which is why these
+        // readers say WHAT THE DOCUMENT HELD when they come back empty. Moving
+        // them to Collection-with-fallback is the follow-up; it is not done
+        // here because guessing a second unmeasured shape is how #66 happened.
         `<TYPE>Data</TYPE><ID>${escapeXml(reportId)}</ID></HEADER><BODY><DESC><STATICVARIABLES>` +
         '<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>' +
         `<SVFROMDATE>${escapeXml(tallyDate)}</SVFROMDATE>` +

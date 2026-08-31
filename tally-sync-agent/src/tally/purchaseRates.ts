@@ -83,8 +83,56 @@ const VOUCHER_TYPES: Record<string, PurchaseRateLine['voucher_type']> = {
 const parser = new XMLParser({ ignoreAttributes: false, parseTagValue: false, trimValues: true });
 
 /** Strip Tally's control-char language markers and trim — as masters.ts does. */
+/**
+ * Decode Tally's numeric character references. Same reasoning, and the same
+ * incident, as masters.ts: fast-xml-parser with `parseTagValue: false` leaves
+ * `&#13;&#10;` and `&#4;` as literal printable text that a control-character
+ * strip cannot see.
+ */
+function decodeEntities(raw: string): string {
+    return raw.replace(/&#(x[0-9a-f]{1,6}|\d{1,7});/gi, (_match, code: string) => {
+        const point = code.toLowerCase().startsWith('x') ? parseInt(code.slice(1), 16) : parseInt(code, 10);
+
+        return Number.isFinite(point) && point > 0 && point <= 0x10ffff ? String.fromCodePoint(point) : '';
+    });
+}
+
+/**
+ * NEVER `String(anObject)`, and this cost a whole round trip to learn.
+ *
+ * fast-xml-parser runs with `ignoreAttributes: false`, so an element carrying
+ * an attribute parses to an OBJECT — `<PARTYLEDGERNAME TYPE="String">Acme
+ * </PARTYLEDGERNAME>` becomes `{ '@_TYPE': 'String', '#text': 'Acme' }` — while
+ * a bare element is a plain string. WHICH ONE YOU GET DEPENDS ON THE REQUEST:
+ * the Day Book report answered with bare strings, and the Collection export
+ * answers with typed ones.
+ *
+ * So `String(value)` produced the literal text `[object Object]`, and on
+ * 31-Aug-2026 all 458 imported rows landed with that as their supplier name.
+ * The read looked like a total success — 458 lines, every unit, every GST rate,
+ * every item matched to an ERP item — and could answer nothing at all, because
+ * no vendor matches a party called `[object Object]`.
+ *
+ * Handled HERE rather than at the ten call sites on purpose: a per-site fix is
+ * one that the next field added can be written without, and the failure it
+ * produces is plausible-looking data rather than a crash.
+ */
 function clean(value: unknown): string {
-    const raw = String(value ?? '');
+    if (value == null) return '';
+
+    // An attributed element keeps its content under '#text'. One with
+    // attributes and no text has no content, which is '' — never the object's
+    // stringification.
+    const scalar = typeof value === 'object'
+        ? (value as Record<string, unknown>)['#text'] ?? ''
+        : value;
+
+    // Still not a primitive (repeated tags parse to an array, a nested list to
+    // an object): there is no single text value, and refusing to invent one is
+    // the point.
+    if (typeof scalar === 'object') return '';
+
+    const raw = decodeEntities(String(scalar));
     let out = '';
     for (const ch of raw) {
         if (ch.charCodeAt(0) >= 0x20) out += ch;
@@ -92,9 +140,12 @@ function clean(value: unknown): string {
     return out.trim();
 }
 
+/**
+ * Kept as the name that reads best at the call sites. clean() now handles both
+ * shapes, so the two are deliberately one function — a caller can no longer
+ * pick the wrong one.
+ */
 function textOf(field: unknown): string {
-    if (field == null) return '';
-    if (typeof field === 'object') return clean((field as Record<string, unknown>)['#text']);
     return clean(field);
 }
 
@@ -346,53 +397,185 @@ function toTallyDate(iso: string): string {
     return iso.replace(/-/g, '');
 }
 
-function buildDayBookXml(company: string, from: string, to: string): string {
+/**
+ * The date window and company every request shape shares.
+ *
+ * SVFROMDATE is set as well as SVTODATE for the reason stockSummary.ts records
+ * from experience against this same Tally: omitting it has been seen to make
+ * Tally fall back to the company's current period rather than the range asked
+ * for.
+ */
+function staticVariables(company: string, from: string, to: string): string {
     return (
-        '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>' +
-        '<TYPE>Data</TYPE><ID>Day Book</ID></HEADER><BODY><DESC><STATICVARIABLES>' +
-        '<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>' +
+        '<STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>' +
         `<SVFROMDATE>${escapeXml(toTallyDate(from))}</SVFROMDATE>` +
         `<SVTODATE>${escapeXml(toTallyDate(to))}</SVTODATE>` +
         `<SVCURRENTCOMPANY>${escapeXml(company)}</SVCURRENTCOMPANY>` +
-        // Without this Tally exports voucher headers with no inventory lines,
-        // and a rate lookup with no rates is the whole feature missing.
-        '<EXPLODEFLAG>Yes</EXPLODEFLAG>' +
-        '</STATICVARIABLES></DESC></BODY></ENVELOPE>'
+        '</STATICVARIABLES>'
     );
 }
 
 /**
- * Export the Day Book for a date window and return its purchase lines.
+ * A COLLECTION over vouchers — the shape every read that has ever worked
+ * against this factory's Tally uses.
  *
- * Through withTallyGate like every other read: one request to Tally at a time,
- * ever. The timeout is generous because a full financial year's Day Book is
- * several megabytes on this factory's data.
+ * WHY THIS EXISTS. The Day Book request below is the ONLY `TYPE=Data` report
+ * request in this agent, and it was also the only read that came back empty
+ * against the live gateway (three pulls on 31-Aug-2026, `total: 0`, against a
+ * company holding 107+ purchase orders in the window). Meanwhile
+ * `masters.ts` (AgentMasters, List of Companies) and `stockSummary.ts`
+ * (AgentStockSummary) are all `TYPE=Collection` with a TDL COLLECTION, and all
+ * three work. That is a fact about this codebase against this Tally, not a
+ * preference.
+ *
+ * The FILTER + `<SYSTEM TYPE="Formulae">` pairing is copied deliberately from
+ * stockSummary.ts's item filter rather than invented: it is the one filtering
+ * idiom already proven here.
+ *
+ * NATIVEMETHOD carries the sub-collections. `AllInventoryEntries.*` asks for
+ * the whole inventory sub-collection including its own nested lists — the rate
+ * details and accounting allocations the GST split and purchase ledger come
+ * from — which a flat FETCH of dotted paths does not reliably reach.
  */
-export async function exportPurchaseRates(target: TallyTarget, from: string, to: string): Promise<PurchaseRateLine[]> {
+function buildVoucherCollectionXml(company: string, from: string, to: string): string {
+    return (
+        '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>' +
+        '<TYPE>Collection</TYPE><ID>AgentPurchaseVouchers</ID></HEADER><BODY><DESC>' +
+        staticVariables(company, from, to) +
+        '<TDL><TDLMESSAGE><COLLECTION NAME="AgentPurchaseVouchers" ISMODIFY="No" ISFIXED="No" ' +
+        'ISINITIALIZE="No" ISOPTION="No" ISINTERNAL="No"><TYPE>Voucher</TYPE>' +
+        '<FILTER>AgentIsPurchaseVoucher</FILTER>' +
+        '<NATIVEMETHOD>GUID,Date,VoucherNumber,VoucherTypeName,Reference,PartyLedgerName,' +
+        'PartyName,PartyGSTIN,IsCancelled,IsOptional,IsDeleted</NATIVEMETHOD>' +
+        '<NATIVEMETHOD>AllInventoryEntries.*</NATIVEMETHOD>' +
+        '</COLLECTION>' +
+        '<SYSTEM TYPE="Formulae" NAME="AgentIsPurchaseVoucher">' +
+        '$VoucherTypeName = "Purchase" OR $VoucherTypeName = "Purchase Order"' +
+        '</SYSTEM></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>'
+    );
+}
+
+/** The original report-style export, kept as the second thing to try. */
+function buildDayBookXml(company: string, from: string, to: string): string {
+    return (
+        '<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST>' +
+        '<TYPE>Data</TYPE><ID>Day Book</ID></HEADER><BODY><DESC>' +
+        staticVariables(company, from, to).replace(
+            '</STATICVARIABLES>',
+            // Without this Tally exports voucher headers with no inventory
+            // lines, and a rate lookup with no rates is the whole feature
+            // missing.
+            '<EXPLODEFLAG>Yes</EXPLODEFLAG></STATICVARIABLES>',
+        ) +
+        '</DESC></BODY></ENVELOPE>'
+    );
+}
+
+/**
+ * The request shapes to try, in order of how much this codebase trusts them.
+ *
+ * TWO SHAPES, ONE PRESS, and that is a deliberate response to how expensive a
+ * wrong guess is here: every attempt costs an agent publish and a round trip
+ * through somebody standing at the factory PC. Two hypotheses were each
+ * shipped alone today and each was only partly right. This build tests both
+ * and SAYS WHICH ONE ANSWERED, so the next change is informed rather than
+ * guessed.
+ *
+ * The second is only sent if the first yields nothing, so the ordinary path
+ * remains a single read through the Tally gate.
+ */
+const REQUEST_SHAPES: { name: string; build: (company: string, from: string, to: string) => string }[] = [
+    { name: 'collection:voucher', build: buildVoucherCollectionXml },
+    { name: 'data:daybook', build: buildDayBookXml },
+];
+
+/** One request through the Tally gate — one at a time, ever. */
+async function askTally(target: TallyTarget, xml: string): Promise<string> {
     const { data } = await withTallyGate(() =>
-        axios.post<string>(`http://${target.host}:${target.port}`, buildDayBookXml(target.company, from, to), {
+        axios.post<string>(`http://${target.host}:${target.port}`, xml, {
             headers: { 'Content-Type': 'text/xml' },
+            // Generous: a full financial year of vouchers is several megabytes
+            // on this factory's data.
             timeout: 180000,
             responseType: 'text',
         }),
     );
 
-    const lines = parseDayBook(data);
+    return typeof data === 'string' ? data : String(data ?? '');
+}
 
-    // A zero read is reported with what WAS in the document, so "the factory
-    // bought nothing" and "this parser did not understand the answer" are
-    // never again the same observation. Counts and voucher-type names only —
-    // no rate, party or item reaches the log (FC-06).
-    if (lines.length === 0) {
-        const seen = describeDayBook(data);
-        logger.warn('Purchase-rate read found no quotable lines', {
-            bytes: typeof data === 'string' ? data.length : 0,
+/** What one attempt saw — logged whether it answered or not. */
+interface Attempt {
+    shape: string;
+    bytes: number;
+    vouchersInDocument: number;
+    voucherTypes: Record<string, number>;
+    quotableLines: number;
+    error?: string;
+}
+
+/**
+ * Read this factory's purchase vouchers for a date window.
+ *
+ * TRIES EACH REQUEST SHAPE UNTIL ONE ANSWERS, and records what every attempt
+ * saw. The shapes are ordered by how much this codebase trusts them — see
+ * REQUEST_SHAPES — and the second is only sent when the first yields nothing,
+ * so the ordinary path stays a single read.
+ *
+ * WHY IT REPORTS SO MUCH. On 31-Aug-2026 three consecutive pulls returned
+ * `total: 0` and, from the cloud side, "the factory bought nothing", "Tally
+ * refused the request" and "this parser did not understand the answer" were
+ * one indistinguishable observation. Each round of guessing cost a publish and
+ * somebody walking to the factory PC. The log line below separates them in one
+ * read: bytes says whether Tally answered at all, vouchersInDocument says
+ * whether the document was understood, and voucherTypes says whether anything
+ * in it was a purchase.
+ *
+ * Counts and voucher-type names ONLY. No rate, party or item name reaches the
+ * log — those are Owner/Accounts (FC-06) and this file is on the factory PC.
+ */
+export async function exportPurchaseRates(target: TallyTarget, from: string, to: string): Promise<PurchaseRateLine[]> {
+    const attempts: Attempt[] = [];
+
+    for (const shape of REQUEST_SHAPES) {
+        let body = '';
+
+        try {
+            body = await askTally(target, shape.build(target.company, from, to));
+        } catch (err) {
+            // A shape Tally rejects outright must not abandon the read — the
+            // next one may be the one it understands.
+            attempts.push({
+                shape: shape.name,
+                bytes: 0,
+                vouchersInDocument: 0,
+                voucherTypes: {},
+                quotableLines: 0,
+                error: err instanceof Error ? err.message : String(err),
+            });
+
+            continue;
+        }
+
+        const lines = parseDayBook(body);
+        const seen = describeDayBook(body);
+
+        attempts.push({
+            shape: shape.name,
+            bytes: body.length,
             vouchersInDocument: seen.vouchers,
             voucherTypes: seen.types,
-            from,
-            to,
+            quotableLines: lines.length,
         });
+
+        if (lines.length > 0) {
+            logger.info(`Purchase-rate read answered by "${shape.name}"`, { attempts, from, to });
+
+            return lines;
+        }
     }
 
-    return lines;
+    logger.warn('Purchase-rate read found no quotable lines in ANY request shape', { attempts, from, to });
+
+    return [];
 }

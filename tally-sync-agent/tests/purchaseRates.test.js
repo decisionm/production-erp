@@ -289,3 +289,179 @@ test('the walk terminates on a deeply nested document', () => {
     // Bounded depth: it must not hang, and it must not throw.
     assert.doesNotThrow(() => parseDayBook(`<ENVELOPE>${xml}</ENVELOPE>`));
 });
+
+/* ── The request shapes, and the fallback between them ────────────────── */
+
+const axios = require('axios');
+const { exportPurchaseRates } = require('../dist/tally/purchaseRates');
+
+/** Capture every request body, and answer each with a canned response. */
+function withTally(responses, run) {
+    const sent = [];
+    const original = axios.post;
+    axios.post = async (_url, body) => {
+        sent.push(String(body));
+        const next = responses.shift();
+        if (next instanceof Error) throw next;
+        return { data: next ?? '<ENVELOPE></ENVELOPE>' };
+    };
+
+    return run(sent).finally(() => {
+        axios.post = original;
+    });
+}
+
+const TARGET = { host: '127.0.0.1', port: 9000, company: 'SYNTHETIC POLYMERS' };
+
+test('the FIRST shape tried is a Collection — the only shape that has ever worked here', async () => {
+    await withTally([dayBook([voucher()])], async (sent) => {
+        await exportPurchaseRates(TARGET, '2026-04-01', '2026-08-31');
+
+        assert.equal(sent.length, 1, 'a shape that answers must not be followed by another request');
+        assert.match(sent[0], /<TYPE>Collection<\/TYPE>/);
+        assert.match(sent[0], /<TYPE>Voucher<\/TYPE>/);
+        // The filter idiom copied from stockSummary.ts, which works here.
+        assert.match(sent[0], /<FILTER>AgentIsPurchaseVoucher<\/FILTER>/);
+        assert.match(sent[0], /VoucherTypeName = "Purchase"/);
+        assert.match(sent[0], /VoucherTypeName = "Purchase Order"/);
+        // The sub-collection the rate, GST and purchase ledger all live in.
+        assert.match(sent[0], /AllInventoryEntries\.\*/);
+    });
+});
+
+test('both shapes carry the company and the date window', async () => {
+    await withTally(['<ENVELOPE></ENVELOPE>', '<ENVELOPE></ENVELOPE>'], async (sent) => {
+        await exportPurchaseRates(TARGET, '2026-04-01', '2026-08-31');
+
+        assert.equal(sent.length, 2, 'an empty first answer must fall through to the second shape');
+        for (const body of sent) {
+            assert.match(body, /<SVFROMDATE>20260401<\/SVFROMDATE>/);
+            assert.match(body, /<SVTODATE>20260831<\/SVTODATE>/);
+            assert.match(body, /<SVCURRENTCOMPANY>SYNTHETIC POLYMERS<\/SVCURRENTCOMPANY>/);
+        }
+    });
+});
+
+test('the Day Book fallback still asks Tally to explode the inventory lines', async () => {
+    await withTally(['<ENVELOPE></ENVELOPE>', dayBook([voucher()])], async (sent) => {
+        const lines = await exportPurchaseRates(TARGET, '2026-04-01', '2026-08-31');
+
+        assert.equal(lines.length, 1, 'the second shape answering must be used');
+        assert.match(sent[1], /<TYPE>Data<\/TYPE><ID>Day Book<\/ID>/);
+        assert.match(sent[1], /<EXPLODEFLAG>Yes<\/EXPLODEFLAG>/);
+    });
+});
+
+test('a shape Tally REFUSES does not abandon the read — the next one is still tried', async () => {
+    await withTally([new Error('Tally said no'), dayBook([voucher()])], async (sent) => {
+        const lines = await exportPurchaseRates(TARGET, '2026-04-01', '2026-08-31');
+
+        assert.equal(sent.length, 2);
+        assert.equal(lines.length, 1);
+    });
+});
+
+test('every shape failing yields no lines rather than throwing into the loop', async () => {
+    await withTally([new Error('no'), new Error('also no')], async () => {
+        const lines = await exportPurchaseRates(TARGET, '2026-04-01', '2026-08-31');
+
+        // The caller records a pull that found nothing; it is not an outage.
+        assert.deepEqual(lines, []);
+    });
+});
+
+/* ── Attributed elements: the shape a COLLECTION export actually returns ── */
+
+/**
+ * Tally attributes its fields when answering a Collection request —
+ * `<PARTYLEDGERNAME TYPE="String">Acme</PARTYLEDGERNAME>` — and with
+ * `ignoreAttributes: false` those parse to objects, not strings. The Day Book
+ * report returned bare strings, so every fixture above uses bare elements and
+ * every one of them PASSED while live data was importing `[object Object]` as
+ * the supplier name on all 458 rows.
+ *
+ * These fixtures are the other shape. They are the tests that would have
+ * caught it.
+ */
+function attributedVoucher() {
+    return (
+        '<VOUCHER VCHTYPE="Purchase Order" ACTION="Create">' +
+        '<GUID TYPE="String">guid-attr</GUID>' +
+        '<DATE TYPE="Date">20260701</DATE>' +
+        '<VOUCHERTYPENAME TYPE="String">Purchase Order</VOUCHERTYPENAME>' +
+        '<VOUCHERNUMBER TYPE="String">77</VOUCHERNUMBER>' +
+        '<REFERENCE TYPE="String">REF-77</REFERENCE>' +
+        '<PARTYLEDGERNAME TYPE="String">SYNTHETIC SUPPLIES</PARTYLEDGERNAME>' +
+        '<PARTYGSTIN TYPE="String">33AAAAA0000A1ZA</PARTYGSTIN>' +
+        '<ISCANCELLED TYPE="Logical">No</ISCANCELLED>' +
+        '<ALLINVENTORYENTRIES.LIST>' +
+        '<STOCKITEMNAME TYPE="String">ITEM_A</STOCKITEMNAME>' +
+        '<GSTHSNNAME TYPE="String">39076190</GSTHSNNAME>' +
+        '<RATE TYPE="Rate">674.000/Kgs.</RATE>' +
+        '<AMOUNT TYPE="Amount">-32352.000</AMOUNT>' +
+        '<BILLEDQTY TYPE="Quantity"> 48.000 Kgs.</BILLEDQTY>' +
+        '<ACCOUNTINGALLOCATIONS.LIST><LEDGERNAME TYPE="String">Interstate Purchase Taxable</LEDGERNAME></ACCOUNTINGALLOCATIONS.LIST>' +
+        '<RATEDETAILS.LIST><GSTRATEDUTYHEAD TYPE="String">IGST</GSTRATEDUTYHEAD><GSTRATE TYPE="Number"> 18</GSTRATE></RATEDETAILS.LIST>' +
+        '</ALLINVENTORYENTRIES.LIST>' +
+        '</VOUCHER>'
+    );
+}
+
+test('an attributed PARTYLEDGERNAME reads as the party, never "[object Object]"', () => {
+    const [line] = parseDayBook(dayBook([attributedVoucher()], 'EXPORTDATA'));
+
+    // The exact production defect: 458 rows imported with this as the supplier.
+    assert.notEqual(line.party_ledger_name, '[object Object]');
+    assert.equal(line.party_ledger_name, 'SYNTHETIC SUPPLIES');
+});
+
+test('every field of an attributed voucher survives the parse', () => {
+    const [line] = parseDayBook(dayBook([attributedVoucher()], 'EXPORTDATA'));
+
+    assert.equal(line.voucher_guid, 'guid-attr');
+    assert.equal(line.voucher_date, '2026-07-01');
+    assert.equal(line.voucher_type, 'purchase_order');
+    assert.equal(line.voucher_number, '77');
+    assert.equal(line.voucher_reference, 'REF-77');
+    assert.equal(line.party_gstin, '33AAAAA0000A1ZA');
+    assert.equal(line.stock_item_name, 'ITEM_A');
+    assert.equal(line.rate_value, 674);
+    assert.equal(line.rate_unit, 'Kgs.');
+    assert.equal(line.quantity, 48);
+    assert.equal(line.igst_rate, 18);
+    assert.equal(line.hsn_code, '39076190');
+    assert.equal(line.purchase_ledger_name, 'Interstate Purchase Taxable');
+});
+
+test('NOTHING a voucher yields can ever be the string "[object Object]"', () => {
+    // A blanket assertion rather than a per-field one: the defect class is
+    // "some field is an object and got stringified", and the next field added
+    // must be covered without anybody remembering to extend this test.
+    const [line] = parseDayBook(dayBook([attributedVoucher()], 'EXPORTDATA'));
+
+    for (const [key, value] of Object.entries(line)) {
+        assert.ok(
+            typeof value !== 'string' || !value.includes('[object'),
+            `${key} was stringified from an object: ${value}`,
+        );
+    }
+});
+
+test('an attributed logical flag still cancels the voucher', () => {
+    const cancelled = attributedVoucher().replace(
+        '<ISCANCELLED TYPE="Logical">No</ISCANCELLED>',
+        '<ISCANCELLED TYPE="Logical">Yes</ISCANCELLED>',
+    );
+
+    assert.deepEqual(parseDayBook(dayBook([cancelled], 'EXPORTDATA')), []);
+});
+
+test('an element carrying attributes but no text reads as absent, not as an object', () => {
+    const noText = attributedVoucher().replace(
+        '<REFERENCE TYPE="String">REF-77</REFERENCE>',
+        '<REFERENCE TYPE="String"/>',
+    );
+    const [line] = parseDayBook(dayBook([noText], 'EXPORTDATA'));
+
+    assert.equal(line.voucher_reference, null);
+});
