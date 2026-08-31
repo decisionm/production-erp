@@ -7,12 +7,14 @@ use App\Modules\Procurement\Events\PurchaseOrderCancelled;
 use App\Modules\Procurement\Events\PurchaseOrderClosed;
 use App\Modules\Procurement\Events\PurchaseOrderSent;
 use App\Modules\Procurement\Exceptions\PurchaseOrderLifecycleException;
+use App\Modules\Procurement\Exceptions\RequisitionOverOrderException;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Procurement\Models\PurchaseOrder;
 use App\Modules\Procurement\Models\PurchaseOrderLine;
 use App\Modules\Procurement\Models\PurchaseOrderRevision;
 use App\Modules\Procurement\Models\PurchaseOrderSchedule;
+use App\Modules\Procurement\Models\PurchaseRequisition;
 use App\Modules\TallySync\Services\TallySyncLinkService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -70,6 +72,7 @@ class PurchaseOrderService
     public function __construct(
         private readonly ProcurementDocumentQuery $query,
         private readonly TallySyncLinkService $tallyLinks,
+        private readonly RequisitionCoverageService $coverage,
     ) {}
 
     /**
@@ -216,10 +219,19 @@ class PurchaseOrderService
 
             $this->writeLines($order, $data['lines']);
 
+            // NO COVERAGE GUARD HERE, and that is the owner's rule rather
+            // than an omission: a DRAFT reserves nothing, so a draft's lines
+            // are not in the sum and a guard on this path could never fire.
+            // A guard that cannot fire is worse than none — it reads as a
+            // protection that is not there. The refusal lives in send(),
+            // where an order first starts holding quantity.
+            //
             // A Tally mirror arrives already sent — it IS the live order;
-            // draft/send is the ERP-native lifecycle only.
+            // draft/send is the ERP-native lifecycle only. It therefore
+            // starts holding quantity immediately and must carry sent_at,
+            // or cancelling it later would hand back balance it had spent.
             if (($data['source'] ?? 'erp') === 'tally') {
-                $order->update(['status' => PurchaseOrderStatus::Sent]);
+                $order->update(['status' => PurchaseOrderStatus::Sent, 'sent_at' => now()]);
             }
 
             return $this->decorate($order);
@@ -247,7 +259,16 @@ class PurchaseOrderService
                 );
             }
 
-            $fresh->update(['status' => PurchaseOrderStatus::Sent]);
+            // sent_at is stamped with the status, in one update: the two are
+            // the same fact, and a Sent order without one would later read as
+            // never-sent if it were cancelled.
+            $fresh->update(['status' => PurchaseOrderStatus::Sent, 'sent_at' => now()]);
+
+            // AFTER the flip, never before: the order must be in its own sum.
+            // Sending is where a purchase order starts holding quantity
+            // against its requisition, so it is where the combined quantity
+            // is checked.
+            $this->guardRequisitionCoverage($fresh);
 
             DB::afterCommit(fn () => event(new PurchaseOrderSent($fresh)));
 
@@ -293,6 +314,9 @@ class PurchaseOrderService
             PurchaseOrderLine::query()->whereIn('id', $lineIds)->delete();
             $fresh->unsetRelation('lines');
 
+            // Amend is Draft-only, and a draft holds nothing, so there is
+            // nothing here for the coverage rule to guard: whatever quantity
+            // is typed, it is checked when the draft is SENT.
             $this->writeLines($fresh, $data['lines']);
 
             return $fresh;
@@ -488,6 +512,71 @@ class PurchaseOrderService
             ->withCount(self::WITH_COUNT)
             ->lockForUpdate()
             ->firstOrFail();
+    }
+
+    /**
+     * MANY ORDERS AGAINST ONE REQUISITION, NEVER MORE THAN IT ASKED FOR.
+     *
+     * A requisition may be answered by as many purchase orders as the buyer
+     * needs — split across vendors, or ordered in tranches — but the
+     * combined quantity of every order that HOLDS quantity against it
+     * (RequisitionCoverageService::reserves()) may not exceed what it asked
+     * for, per item. Not in a FormRequest: a request can only see the one
+     * order being typed, and the rule is about all of them together.
+     *
+     * CALLED FROM send(), AND ONLY FROM send(). On the owner's rule a draft
+     * reserves nothing, so create() and amend() have nothing to check — the
+     * quantity a buyer types becomes real at the moment the order goes to
+     * the vendor, and that is the moment this runs. The accepted cost, named
+     * when the rule was chosen: two drafts may each be typed for the whole
+     * requisition, and the second is refused at Send rather than at typing.
+     *
+     * THE LOCK IS THE RULE. Inside the caller's transaction, it takes a row
+     * lock on the REQUISITION before summing. send() already locks the
+     * ORDER row (lockedForAction), but two DIFFERENT drafts against one
+     * requisition being sent at the same moment lock two different orders —
+     * they would both read the same total, both find room, and both commit.
+     * The requisition is the thing they contend for, so the requisition is
+     * what is locked; the second transaction blocks until the first commits,
+     * then re-sums and sees it. The precise defect
+     * PurchaseRequisitionService::decide() already carries this lock for
+     * (Approve and Reject raced on one draft and both landed).
+     *
+     * A TALLY MIRROR IS RECORDED, NOT REFUSED. `source: tally` is a
+     * read-only reflection of an order that already exists in Tally (the
+     * book the ERP does not argue with — DEC-20260812-002 and
+     * StorePurchaseOrderRequest's class docblock, where the retired-vendor
+     * and archived-item rules are scoped away for this same reason). An ERP
+     * refusal cannot unmake that order; it can only leave the ERP unable to
+     * show it, and an invisible order is exactly what breaks the
+     * remaining-quantity tracking the decision asks for. So a mirror is
+     * counted towards the requisition — it consumes balance and is visible
+     * on the line — but never rejected by this guard. An ERP-entered order
+     * that follows one is refused normally, on the true total.
+     */
+    private function guardRequisitionCoverage(PurchaseOrder $order): void
+    {
+        if ($order->purchase_requisition_id === null || $order->isTallyMirror()) {
+            return;
+        }
+
+        $requisition = PurchaseRequisition::query()
+            ->lockForUpdate()
+            ->find($order->purchase_requisition_id);
+
+        if ($requisition === null) {
+            return;
+        }
+
+        // Off the database, not off whatever the caller had loaded: the rows
+        // this transaction just wrote have to be in the sum.
+        $requisition->unsetRelation('lines')->unsetRelation('purchaseOrders');
+
+        $overOrdered = $this->coverage->overOrderedItems($requisition);
+
+        if ($overOrdered !== []) {
+            throw RequisitionOverOrderException::forItems($requisition->id, $overOrdered);
+        }
     }
 
     /**

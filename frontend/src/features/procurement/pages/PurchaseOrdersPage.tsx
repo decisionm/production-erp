@@ -20,6 +20,7 @@ import {
     poNumber,
     purchasableItemOptions,
     reconcileReceipts,
+    uomPhrase,
     statusTag,
     tallyStateLine,
 } from '@/features/procurement/purchaseOrders';
@@ -208,9 +209,15 @@ export default function PurchaseOrdersPage() {
                             const summary = reconcileReceipts(row.lines).summary;
 
                             return (
+                                // UNIT-WISE, NOT A TOTAL. This cell printed
+                                // `received / ordered` summed across every
+                                // line, so an order for 500 Kgs of resin and
+                                // 40 Nos of caps read "0 / 540" — kilograms
+                                // added to pieces, a figure in no unit that a
+                                // buyer cannot check against anything.
                                 <Tooltip title={`${summary.complete} of ${summary.lines} line${summary.lines === 1 ? '' : 's'} fully received`}>
                                     <span style={numeric}>
-                                        {summary.received} / {summary.ordered}
+                                        {uomPhrase(summary.by_uom, 'received')} of {uomPhrase(summary.by_uom, 'ordered')}
                                         {row.receipts_count !== undefined ? ` · ${row.receipts_count} GRN` : ''}
                                     </span>
                                 </Tooltip>
