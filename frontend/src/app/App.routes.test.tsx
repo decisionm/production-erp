@@ -81,6 +81,7 @@ const ROUTE_TABLE = [
     '/sales/deliveries',
     '/sales/invoices',
     '/sales/fulfilment-control',
+    '/finance/client-outstanding',
     '/finance/chart-of-accounts',
     '/finance/journal-entries',
     '/finance/reports',

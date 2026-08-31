@@ -30,6 +30,8 @@ const buildStamp = (() => {
 // requests to /api and /sanctum are proxied to the Laravel dev server
 // so the browser sees everything as same-origin, matching production
 // and avoiding CORS/Sanctum stateful-domain complexity.
+const apiTarget = process.env.VITE_API_TARGET ?? 'http://127.0.0.1:8000';
+
 export default defineConfig(({ command }) => ({
     plugins: [
         react(),
@@ -127,8 +129,17 @@ export default defineConfig(({ command }) => ({
             // Explicit IPv4 loopback — plain "localhost" can resolve to ::1
             // first on some machines and silently hit a different local
             // service if anything else happens to share this port.
-            '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
-            '/sanctum': { target: 'http://127.0.0.1:8000', changeOrigin: true },
+            //
+            // OVERRIDABLE so a BRANCH can be run beside main. The default is
+            // unchanged, so nobody's normal `npm run dev` moves. Reviewing a
+            // branch meant serving its frontend on a spare port while this
+            // proxy still pointed at whichever backend happened to own 8000 —
+            // main's — and the branch's own endpoints answered 404 on a screen
+            // that otherwise looked fine. Two checkouts, one hardcoded port.
+            //
+            //   VITE_API_TARGET=http://127.0.0.1:8010 npx vite --port 5180
+            '/api': { target: apiTarget, changeOrigin: true },
+            '/sanctum': { target: apiTarget, changeOrigin: true },
         },
     },
 }));

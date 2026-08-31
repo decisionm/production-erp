@@ -1,13 +1,6 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
-import type {
-    BalanceSheet,
-    GLAccount,
-    JournalEntry,
-    ProfitAndLoss,
-    Receivable,
-    TrialBalanceRow,
-} from './types';
+import type { BalanceSheet, ClientOutstandingReport, GLAccount, JournalEntry, ProfitAndLoss, Receivable, TrialBalanceRow } from './types';
 
 export async function listGLAccounts(): Promise<Paginated<GLAccount>> {
     const { data } = await api.get<Paginated<GLAccount>>('/finance/gl-accounts');
@@ -81,5 +74,17 @@ export async function getBalanceSheet(): Promise<BalanceSheet> {
 
 export async function getReceivables(): Promise<Receivable[]> {
     const { data } = await api.get<{ data: Receivable[] }>('/finance/reports/receivables');
+    return data.data;
+}
+
+/**
+ * The whole client-outstanding position in one read.
+ *
+ * NOT PAGINATED, deliberately: the page's header totals and its ageing columns
+ * have to agree with the rows underneath them, and a paginated client list
+ * would make the header sum a different set from the table.
+ */
+export async function getClientOutstanding(): Promise<ClientOutstandingReport> {
+    const { data } = await api.get<{ data: ClientOutstandingReport }>('/finance/client-outstanding');
     return data.data;
 }

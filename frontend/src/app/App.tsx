@@ -44,6 +44,7 @@ import LeadsPage from '@/features/crm/pages/LeadsPage';
 import OpportunitiesPage from '@/features/crm/pages/OpportunitiesPage';
 import QuotationsPage from '@/features/crm/pages/QuotationsPage';
 import ChartOfAccountsPage from '@/features/finance/pages/ChartOfAccountsPage';
+import ClientOutstandingPage from '@/features/finance/pages/ClientOutstandingPage';
 import JournalEntriesPage from '@/features/finance/pages/JournalEntriesPage';
 import ReportsPage from '@/features/finance/pages/ReportsPage';
 import CapasPage from '@/features/quality/pages/CapasPage';
@@ -237,6 +238,7 @@ export default function App() {
                                     <Route path="/sales/deliveries" element={<DeliveriesPage />} />
                                     <Route path="/sales/invoices" element={<InvoicesPage />} />
                                     <Route path="/sales/fulfilment-control" element={<FulfilmentControlPage />} />
+                                    <Route path="/finance/client-outstanding" element={<ClientOutstandingPage />} />
                                     <Route path="/finance/chart-of-accounts" element={<ChartOfAccountsPage />} />
                                     <Route path="/finance/journal-entries" element={<JournalEntriesPage />} />
                                     <Route path="/finance/reports" element={<ReportsPage />} />

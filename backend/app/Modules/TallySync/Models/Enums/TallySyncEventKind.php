@@ -74,6 +74,14 @@ enum TallySyncEventKind: string
      */
     case PurchaseRatesReceived = 'purchase-rates.received';
 
+    /**
+     * Tally → ERP: the outstanding position landed from a Bills Receivable and
+     * Sales Order Outstanding read. Details carry COUNTS AND THE AS-AT DATE
+     * ONLY — never a party, a bill reference or an amount. What a named client
+     * owes is Owner/Accounts (FC-06) and the event feed is not gated for it.
+     */
+    case ReceivablesReceived = 'receivables.received';
+
     /** Tally → ERP: a godown-wise stock summary was previewed and kept as a snapshot. */
     case StockSummaryPreviewed = 'stock-summary.previewed';
 

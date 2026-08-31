@@ -14,6 +14,7 @@ use App\Modules\CRM\Http\Controllers\LeadActivityController;
 use App\Modules\CRM\Http\Controllers\LeadController;
 use App\Modules\CRM\Http\Controllers\OpportunityController;
 use App\Modules\CRM\Http\Controllers\QuotationController;
+use App\Modules\Finance\Http\Controllers\ClientOutstandingController;
 use App\Modules\Finance\Http\Controllers\FinancialReportController;
 use App\Modules\Finance\Http\Controllers\GLAccountController;
 use App\Modules\Finance\Http\Controllers\JournalEntryController;
@@ -683,6 +684,20 @@ Route::prefix('v1')->group(function () {
             Route::get('reports/profit-and-loss', [FinancialReportController::class, 'profitAndLoss']);
             Route::get('reports/balance-sheet', [FinancialReportController::class, 'balanceSheet']);
             Route::get('reports/receivables', [FinancialReportController::class, 'receivables']);
+
+            // WHAT EVERY CLIENT OWES AND WHAT IS STILL TO SHIP THEM, from the
+            // position the agent mirrored out of Tally. Read-only and derived:
+            // it owns no table and writes nothing.
+            //
+            // HERE RATHER THAN UNDER `crm`, deliberately: these rows name a
+            // client and the money they owe, which is what `reports/receivables`
+            // directly above is gated for. The CRM gate is held by people who
+            // work leads, and it is the weaker of the two.
+            //
+            // It is a SIBLING of that report, not a replacement — this one
+            // reads Tally, where this factory raises its sales; that one reads
+            // the ERP's own invoices. They are not blended.
+            Route::get('client-outstanding', [ClientOutstandingController::class, 'index']);
         });
 
         Route::prefix('crm')->middleware('module:crm')->group(function () {
@@ -803,6 +818,11 @@ Route::prefix('v1')->group(function () {
             // posts from — no voucher, no stock, no master. Same ability as
             // the masters pull (tally-sync:masters), gated in the controller.
             Route::post('purchase-rates', [TallySyncAgentController::class, 'purchaseRates']);
+            // THE OUTSTANDING POSITION from the agent's Bills Receivable and
+            // Sales Order Outstanding reads. Inbound only, and it writes two
+            // tables nothing posts from — no voucher, no stock, no master.
+            // Same ability as the masters pull, gated in the controller.
+            Route::post('receivables', [TallySyncAgentController::class, 'receivables']);
 
             // READ-ONLY godown-wise stock summary, reported and discarded. The
             // route says `preview` because there is no sibling that writes: an

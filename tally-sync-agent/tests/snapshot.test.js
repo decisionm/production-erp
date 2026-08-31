@@ -374,7 +374,7 @@ test('agentVersion() reads package.json and is the strict semver the release gat
     assert.match(agentVersion(), /^\d+\.\d+\.\d+$/);
 });
 
-test('this candidate is 0.4.4 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9, the purchase-rate read since 0.4.0', () => {
+test('this candidate is 0.4.5 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9, the purchase-rate read since 0.4.0, the receivables read since 0.4.5', () => {
     // The drawer's "agent ≥ 0.3.8" line depends on 0.3.8 being the snapshot
     // FLOOR, which does not move; the candidate itself advances. 0.3.9 added
     // purchaseOrder.ts (Phase 6, staged, flag off); 0.4.0 adds the Day Book
@@ -402,5 +402,22 @@ test('this candidate is 0.4.4 — snapshots since 0.3.8, the Purchase Order buil
     // "[object Object]". 0.4.3's Collection read worked and imported 458 rows
     // whose supplier name was exactly that — a total success that could answer
     // nothing.
-    assert.equal(agentVersion(), '0.4.4');
+    // 0.4.5 adds the RECEIVABLES READ — tally/receivables.ts and the tray item
+    // that runs it: Bills Receivable and Sales Order Outstanding, feeding the
+    // Finance client-outstanding page. Read-only, on no timer, and it posts
+    // nothing to Tally, like every other pull here. Its parsers walk the
+    // document for their nodes rather than following a path — 0.4.2's lesson,
+    // applied before it could be paid for twice.
+    //
+    // IT STILL ASKS THE WAY 0.4.3 STOPPED ASKING. These two readers request a
+    // REPORT (TALLYREQUEST=Export, TYPE=Data, ID=...), which is what the
+    // purchase-rate read did until 0.4.3 measured that this factory's Tally
+    // answers a TDL Collection and not that. Bills Receivable is a different
+    // report and may well answer — but nobody has measured it, and the honest
+    // position is that the first pull may return nothing for the same reason
+    // the purchase-rate pulls did on 31-Aug. That is why the readers report
+    // WHAT THE DOCUMENT HELD when they find nothing, and why moving them to
+    // the Collection shape is the open follow-up rather than a claim already
+    // made here.
+    assert.equal(agentVersion(), '0.4.5');
 });

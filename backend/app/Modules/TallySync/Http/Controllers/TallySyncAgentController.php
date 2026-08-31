@@ -11,6 +11,7 @@ use App\Modules\TallySync\Http\Requests\StoreTallySyncSnapshotRequest;
 use App\Modules\TallySync\Http\Requests\SyncCompaniesRequest;
 use App\Modules\TallySync\Http\Requests\SyncMastersRequest;
 use App\Modules\TallySync\Http\Requests\SyncPurchaseRatesRequest;
+use App\Modules\TallySync\Http\Requests\SyncReceivablesRequest;
 use App\Modules\TallySync\Http\Resources\TallySyncEntryResource;
 use App\Modules\TallySync\Http\Resources\TallySyncSnapshotResource;
 use App\Modules\TallySync\Models\Enums\TallySyncEventKind;
@@ -21,6 +22,7 @@ use App\Modules\TallySync\Services\AgentIdentity;
 use App\Modules\TallySync\Services\MasterSyncService;
 use App\Modules\TallySync\Services\PurchaseRateSyncService;
 use App\Modules\TallySync\Services\StockSummaryPreviewService;
+use App\Modules\TallySync\Services\TallyReceivableSyncService;
 use App\Modules\TallySync\Services\TallySyncEventRecorder;
 use App\Modules\TallySync\Services\TallySyncService;
 use App\Modules\TallySync\Services\TallySyncSnapshotService;
@@ -267,6 +269,50 @@ class TallySyncAgentController extends Controller
         // put Owner/Accounts data (FC-06) on a screen that is not gated for it.
         $this->events->record(
             TallySyncEventKind::PurchaseRatesReceived,
+            null,
+            ['company' => $incoming] + $summary,
+            TallySyncEvent::DIRECTION_TALLY_TO_ERP,
+            $request->user(),
+        );
+
+        return response()->json(['data' => $summary]);
+    }
+
+    /**
+     * THE OUTSTANDING POSITION the agent read out of Tally — the bills the
+     * factory is owed, and the sales orders it has still to ship.
+     *
+     * Inbound only. It writes two mirror tables nothing posts from: no
+     * voucher, no stock, no master, and no customer is created. The CRM's
+     * client-outstanding page is the only reader.
+     *
+     * BOUND TO ONE COMPANY, like the purchase-rate pull and for a sharper
+     * reason: filing one company's debtors against another's clients would put
+     * a real client's name beside a debt that is not theirs, and somebody would
+     * chase it.
+     */
+    public function receivables(SyncReceivablesRequest $request, TallyReceivableSyncService $receivables, AppSettingService $settings): JsonResponse
+    {
+        abort_unless($request->user()?->tokenCan('tally-sync:masters'), 403, 'Token missing the tally-sync:masters ability.');
+
+        $data = $request->validated();
+        $incoming = $data['company'] ?? null;
+        $bound = $settings->get(TallySettingsController::KEY_COMPANY);
+
+        abort_if(
+            $bound !== null && $incoming !== null && $bound !== $incoming,
+            409,
+            "This ERP is bound to Tally company '{$bound}'. Refusing an outstanding position from '{$incoming}' — that would file one company's debtors against another's clients.",
+        );
+
+        $summary = $receivables->sync($data['bills'], $data['orders'], $data['as_of'], $incoming ?? $bound);
+
+        $this->agentLog($request, 'receivables.received', ['company' => $incoming] + $summary);
+        // Counts and the as-at date only. A party, a bill reference or an
+        // amount here would put Owner/Accounts data (FC-06) on a screen that
+        // is not gated for it.
+        $this->events->record(
+            TallySyncEventKind::ReceivablesReceived,
             null,
             ['company' => $incoming] + $summary,
             TallySyncEvent::DIRECTION_TALLY_TO_ERP,
