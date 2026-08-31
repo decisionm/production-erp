@@ -46,6 +46,14 @@ export interface MaterialFlowMaterial extends MaterialFlowItemRef {
      */
     available_in_production: string;
     /**
+     * What is ACTUALLY standing in Production/WIP, netted or not — negative
+     * included. A negative balance and a unit the master no longer agrees with
+     * are both excluded from the netting and both stay visible
+     * (DEC-20260831-005): showing only the usable figure prints 0 for each,
+     * which reads as an empty floor.
+     */
+    standing_in_production: string;
+    /**
      * False only when the material IS standing on the floor but in a unit the
      * item master no longer agrees with (FC-03). The quantity is real and the
      * netting is refused — the screen must not read as "the floor is empty".

@@ -156,6 +156,28 @@ class MaterialRequestNetsAgainstProductionTest extends TestCase
 
         $this->assertFalse($material['production_unit_matches']);
         $this->assertSame('0.0000', $material['available_in_production']);
+        // VISIBLE, though excluded from the netting. Publishing only the
+        // usable figure would show 0 and read as an empty floor.
+        $this->assertSame('300.0000', $material['standing_in_production']);
+    }
+
+    public function test_a_negative_balance_is_visible_on_the_picker_and_still_nets_nothing(): void
+    {
+        StockBalance::query()->create([
+            'item_id' => $this->resin->id,
+            'warehouse_id' => $this->wip->id,
+            'quantity' => '-112.3250',
+            'average_cost' => '0',
+        ]);
+
+        $material = collect($this->getJson('/api/v1/inventory/requestable-materials')->assertOk()->json('data'))
+            ->firstWhere('id', $this->resin->id);
+
+        // Excluded from the netting...
+        $this->assertSame('0.0000', $material['available_in_production']);
+        // ...and still visible, sign and all. A discrepancy the floor is
+        // standing next to must not disappear from the screen that lists it.
+        $this->assertSame('-112.3250', $material['standing_in_production']);
     }
 
     // ---- (6) orphan material nets normally -------------------------------
