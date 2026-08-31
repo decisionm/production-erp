@@ -37,7 +37,22 @@ class SyncPurchaseRatesRequest extends FormRequest
         return [
             'company' => ['sometimes', 'nullable', 'string', 'max:255'],
 
-            'lines' => ['required', 'array'],
+            /*
+             * PRESENT, NOT REQUIRED — and the difference is a whole class of
+             * silent failure. Laravel's `required` REJECTS an empty array, so
+             * a Day Book window holding no purchase voucher at all made the
+             * agent post `lines: []`, take a 422, and log the failure on the
+             * factory PC where nobody on this side can see it. The ERP then
+             * shows no rates and no error, which is indistinguishable from
+             * "nobody has pressed the button yet".
+             *
+             * This is the same mistake as the masters `max:15` on 31-Aug: an
+             * inbound mirror refusing a legitimate state. A pull that found
+             * nothing IS a legitimate state — the factory may simply have
+             * bought nothing in the window — and the honest record of it is a
+             * stored sync that reports zero, not a rejected request.
+             */
+            'lines' => ['present', 'array'],
             'lines.*.voucher_guid' => ['required', 'string', 'max:255'],
             'lines.*.line_index' => ['required', 'integer', 'min:0'],
             'lines.*.voucher_type' => ['required', Rule::in(TallyPurchaseRate::TYPES)],
