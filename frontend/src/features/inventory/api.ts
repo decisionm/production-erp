@@ -514,3 +514,41 @@ export async function repointReservation(
     );
     return data.data;
 }
+
+/* ------------------------------ the lookup ------------------------------ */
+
+/** One kind of number the factory writes on something. */
+export type FactoryLookupKind = 'item' | 'bag' | 'lot' | 'batch' | 'serial' | 'store_issue';
+
+export interface FactoryLookupMatch {
+    kind: FactoryLookupKind;
+    id: number;
+    identifier: string | null;
+    label: string;
+    detail: string | null;
+    retired: boolean;
+    /** The term WAS this identifier, not merely contained in it. */
+    exact: boolean;
+    /** The identifier is unique across the factory, not just within its item. */
+    unique: boolean;
+}
+
+export interface FactoryLookupResult {
+    term: string;
+    /**
+     * Set ONLY when the reader is holding exactly one unambiguous thing: a
+     * single, exact hit on a globally unique identifier. The caller may jump
+     * straight there. Null means "here is a list, you choose" — including for
+     * an exact batch or serial number, which are unique only within an item.
+     */
+    resolved: FactoryLookupMatch | null;
+    matches: FactoryLookupMatch[];
+    /** Kinds deliberately NOT looked up, and why. Never silently empty. */
+    omitted: { kind: FactoryLookupKind; reason: string }[];
+}
+
+/** What is this number? See FactoryLookupService for the rules behind `resolved`. */
+export async function factoryLookup(term: string): Promise<FactoryLookupResult> {
+    const { data } = await api.get<{ data: FactoryLookupResult }>('/inventory/lookup', { params: { q: term } });
+    return data.data;
+}

@@ -174,7 +174,11 @@ describe('the Inventory menu', () => {
      * floor, where the stock lives, the ledger behind it all, and the two
      * customer-fulfilment screens the store owns.
      *
-     * EIGHT. It has been eight since the two label registers became tabs of
+     * NINE since 31-Aug-2026, when Find was added at the head of the group:
+     * the entry point for a person holding a number who does not know which
+     * of the eight screens below owns it.
+     *
+     * EIGHT before that. It had been eight since the two label registers became tabs of
      * one entry, and it is eight again after 31-Aug-2026, when "Store Issue
      * Queue" and "Returns" became the two directions of one Store ↔
      * Production screen. (The count in this docblock read "eight, down from
@@ -185,6 +189,7 @@ describe('the Inventory menu', () => {
      */
     it('is the inventory destinations, in working order', () => {
         expect(inventory?.children?.map((child) => child.key)).toEqual([
+            '/inventory/find',
             '/inventory/items',
             '/inventory/stock',
             '/inventory/barcode-labels',

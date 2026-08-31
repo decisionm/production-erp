@@ -55,6 +55,7 @@ import SpcChartPage from '@/features/quality/pages/SpcChartPage';
 import SpcCharacteristicsPage from '@/features/quality/pages/SpcCharacteristicsPage';
 import BarcodeLabelsPage from '@/features/inventory/pages/BarcodeLabelsPage';
 import BatchesPage from '@/features/inventory/pages/BatchesPage';
+import FactoryLookupPage from '@/features/inventory/pages/FactoryLookupPage';
 import ItemDetailPage from '@/features/inventory/pages/ItemDetailPage';
 import ItemsPage from '@/features/inventory/pages/ItemsPage';
 import MaterialLotsPage from '@/features/inventory/pages/MaterialLotsPage';
@@ -97,6 +98,12 @@ export default function App() {
                                     <Route path="/crm/leads" element={<LeadsPage />} />
                                     <Route path="/crm/opportunities" element={<OpportunitiesPage />} />
                                     <Route path="/crm/quotations" element={<QuotationsPage />} />
+                                    {/* WHAT IS THIS NUMBER? One box over every
+                                        identifier space the factory writes on
+                                        something. Addressable (?q=) so a
+                                        scanner wedge can land straight on an
+                                        answer. */}
+                                    <Route path="/inventory/find" element={<FactoryLookupPage />} />
                                     <Route path="/inventory/items" element={<ItemsPage />} />
                                     <Route path="/inventory/items/:id" element={<ItemDetailPage />} />
                                     <Route path="/inventory/warehouses" element={<WarehousesPage />} />

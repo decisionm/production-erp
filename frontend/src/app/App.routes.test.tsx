@@ -33,6 +33,7 @@ const ROUTE_TABLE = [
     '/crm/leads',
     '/crm/opportunities',
     '/crm/quotations',
+    '/inventory/find',
     '/inventory/items',
     '/inventory/items/:id',
     '/inventory/warehouses',
