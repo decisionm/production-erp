@@ -21,6 +21,16 @@ export interface Vendor {
      * older backend.
      */
     tally_ledger_name?: string | null;
+    /**
+     * WHERE THIS VENDOR'S DETAILS CAME FROM, present only on one linked to a
+     * Tally ledger — by the import command or by an Owner/Accounts confirm on
+     * the Tally vendor review. `synced_at` is when the pull last CONFIRMED
+     * that ledger, read from the mirror rather than from this row's own
+     * timestamps, which move whenever anything about the vendor changes.
+     *
+     * Null on a vendor typed in by hand, and absent on an older backend.
+     */
+    tally_source?: { source: 'tally'; ledger_guid: string; synced_at: string | null } | null;
     /** Archived-by-soft-delete, distinct from is_active. */
     archived_at?: string | null;
     /**
@@ -669,4 +679,102 @@ export interface SupplierBillListFilters {
     vendor_id?: number;
     page?: number;
     per_page?: number;
+}
+
+/*
+ * ── TALLY-ASSISTED PROCUREMENT (read-only from Tally) ────────────────────
+ *
+ * Two surfaces, both Owner/Accounts (FC-06): the vendor review, where a
+ * person confirms what Tally says about a party before it reaches the vendor
+ * master, and the vendor/item rate lookup on the purchase-order form.
+ *
+ * Nothing on either surface posts to Tally. The existing approved workflows
+ * still handle voucher posting.
+ */
+
+/** How a Tally ledger was matched to an ERP vendor, or why it was not. */
+export type TallyVendorMatchBasis = 'none' | 'ledger_guid' | 'gstin' | 'gstin_ambiguous';
+
+/**
+ * `new` — no ERP vendor for this party yet.
+ * `conflict` — matched, and Tally now says something different.
+ * `ambiguous` — the GSTIN could mean more than one party, so nothing is
+ *   offered to apply. Measured: 23 GSTINs sit on more than one ledger in the
+ *   live books, two Sundry Creditors among them sharing one.
+ */
+export type TallyVendorReviewKind = 'new' | 'conflict' | 'ambiguous';
+
+export interface TallyVendorDifference {
+    field: string;
+    current: string | null;
+    proposed: string;
+}
+
+export interface TallyVendorReviewRow {
+    tally_ledger_guid: string;
+    ledger_name: string;
+    ledger_group: string | null;
+    kind: TallyVendorReviewKind;
+    match_basis: TallyVendorMatchBasis;
+    proposed: Record<string, string | null>;
+    differences: TallyVendorDifference[];
+    vendor?: { vendor_id: number; code: string; name: string };
+    ambiguous_with?: { vendor_id: number; code: string; name: string }[];
+    name_clash?: { vendor_id: number; code: string; name: string } | null;
+    links_identity?: boolean;
+    source: 'tally';
+    tally_synced_at: string | null;
+}
+
+export interface TallyVendorReviewQueue {
+    groups: string[];
+    group_census: Record<string, number>;
+    rows: TallyVendorReviewRow[];
+    last_synced_at: string | null;
+}
+
+/** One quoted voucher line — an agreed rate or a billed one. */
+export interface TallyPurchaseRateQuote {
+    voucher_type: 'purchase_order' | 'purchase_invoice';
+    voucher_number: string | null;
+    voucher_reference: string | null;
+    voucher_date: string | null;
+    party_ledger_name: string;
+    party_gstin: string | null;
+    stock_item_name: string;
+    rate_value: string;
+    rate_unit: string | null;
+    quantity: string | null;
+    quantity_unit: string | null;
+    amount: string | null;
+    gst: {
+        cgst_rate: string | null;
+        sgst_rate: string | null;
+        igst_rate: string | null;
+        cess_rate: string | null;
+        hsn_code: string | null;
+        purchase_ledger_name: string | null;
+    };
+    item_uom: string | null;
+    unit_matches: boolean;
+    /**
+     * THE ONLY FIELD THE FORM MAY ACT ON BY ITSELF. Everything else is
+     * information a person reads; this says whether the rate's basis was
+     * confirmed to match the item's own unit. False means SHOW, never fill.
+     */
+    may_prefill: boolean;
+    prefill_blocked_reason: string | null;
+    source: 'tally';
+    tally_synced_at: string | null;
+}
+
+export interface TallyVendorItemRate {
+    vendor: { id: number; name: string; tally_ledger_name: string | null } | null;
+    item: { id: number; name: string; uom: string | null } | null;
+    purchase_order: TallyPurchaseRateQuote | null;
+    purchase_invoice: TallyPurchaseRateQuote | null;
+    /** The latest of the two by voucher date — the suggestion, never an instruction. */
+    suggestion: TallyPurchaseRateQuote | null;
+    unavailable_reason: string | null;
+    last_synced_at: string | null;
 }

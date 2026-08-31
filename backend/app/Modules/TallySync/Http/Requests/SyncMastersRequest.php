@@ -50,6 +50,13 @@ class SyncMastersRequest extends FormRequest
             // recorded GSTIN.
             'ledgers.*.gstin' => ['sometimes', 'nullable', 'string', 'max:15'],
             'ledgers.*.state_name' => ['sometimes', 'nullable', 'string', 'max:255'],
+            // Contact details, on the same absent-means-leave-alone contract.
+            // Measured on the live company's All Masters export: 4 of 1742
+            // ledgers carry an email and 78 a phone, so these keys will be
+            // absent from almost every row and that is the truth about the
+            // books, not a gap in the pull.
+            'ledgers.*.email' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'ledgers.*.phone' => ['sometimes', 'nullable', 'string', 'max:64'],
 
             'items' => ['sometimes', 'array'],
             'items.*.guid' => ['required', 'string', 'max:255'],

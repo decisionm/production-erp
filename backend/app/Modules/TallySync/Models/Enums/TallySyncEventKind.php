@@ -66,6 +66,14 @@ enum TallySyncEventKind: string
     /** Tally → ERP: the agent reported the companies it found. */
     case CompaniesReceived = 'companies.received';
 
+    /**
+     * Tally → ERP: purchase-order and purchase-invoice rate lines landed from
+     * a Day Book read. Details carry the counts and the date window only —
+     * NEVER a rate, a party or an item, because purchase rates and supplier
+     * identity are Owner/Accounts (FC-06) and the event feed is not.
+     */
+    case PurchaseRatesReceived = 'purchase-rates.received';
+
     /** Tally → ERP: a godown-wise stock summary was previewed and kept as a snapshot. */
     case StockSummaryPreviewed = 'stock-summary.previewed';
 

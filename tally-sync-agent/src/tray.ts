@@ -2,6 +2,7 @@ import { Tray, Menu, nativeImage, shell, app } from 'electron';
 import path from 'path';
 import { getStatus, runSyncCycle, setPaused } from './sync';
 import { runMastersSync } from './mastersSync';
+import { runPurchaseRatesSync } from './purchaseRatesSync';
 import { getStockReadStatus } from './stockSummarySync';
 import { getConfig } from './config';
 import { logFilePath } from './logger';
@@ -39,6 +40,15 @@ function buildMenu(onOpenSettings: () => void): Menu {
             label: 'Pull Masters from Tally',
             enabled: isConfigured(),
             click: () => void runMastersSync().then(refresh).catch(refresh),
+        },
+        {
+            // A READ, and an operator's deliberate one — same standing as the
+            // masters pull above and for the same reason (no automatic reads
+            // from Tally since v0.3.4). It exports the Day Book and posts the
+            // purchase rates it finds to the ERP; it writes nothing to Tally.
+            label: 'Pull Purchase Rates from Tally',
+            enabled: isConfigured(),
+            click: () => void runPurchaseRatesSync().then(refresh).catch(refresh),
         },
         {
             label: status.paused ? 'Resume' : 'Pause',

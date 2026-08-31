@@ -4,6 +4,7 @@ namespace App\Modules\Procurement\Http\Resources;
 
 use App\Modules\Procurement\Models\Vendor;
 use App\Modules\Procurement\Services\VendorService;
+use App\Modules\TallySync\Models\Ledger;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -25,6 +26,27 @@ class VendorResource extends JsonResource
             'state_code' => $this->state_code,
             // The vendor's ledger name in Tally (Phase 6) — null until Accounts sets it.
             'tally_ledger_name' => $this->tally_ledger_name,
+            /*
+             * THE PROVENANCE OF WHAT CAME FROM TALLY. `tally_ledger_guid` is
+             * the exact identity — present only on a vendor the import or the
+             * Owner/Accounts review linked, absent on one typed in by hand —
+             * and `tally_synced_at` is when the pull last CONFIRMED that
+             * ledger's details, read from the mirror rather than from this
+             * row's `updated_at`, which moves whenever anything here changes.
+             *
+             * A vendor with a guid and no stamp is honest too: it says the
+             * link exists and no pull has refreshed the ledger since the
+             * column was added.
+             */
+            'tally_source' => $vendor->tally_ledger_guid !== null ? [
+                'source' => 'tally',
+                'ledger_guid' => $vendor->tally_ledger_guid,
+                // The MODEL, not ->value(): a plucked column bypasses the
+                // cast and would come back as a raw driver string, which
+                // formats differently on MySQL and sqlite.
+                'synced_at' => Ledger::where('tally_guid', $vendor->tally_ledger_guid)
+                    ->first(['tally_synced_at'])?->tally_synced_at?->toIso8601String(),
+            ] : null,
             'is_active' => $this->is_active,
             // Archived-by-soft-delete, distinct from is_active. Both exist on
             // this table and only the screen can tell the operator which one

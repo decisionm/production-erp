@@ -10,6 +10,8 @@ import type {
     PurchaseRequisitionListFilters,
     SupplierBill,
     SupplierBillListFilters,
+    TallyVendorItemRate,
+    TallyVendorReviewQueue,
     Vendor,
 } from './types';
 
@@ -410,5 +412,55 @@ export async function listSupplierBillLedgerOptions(q = ''): Promise<{ name: str
         '/procurement/supplier-bills/ledger-options',
         { params: q.trim() !== '' ? { q: q.trim() } : {} },
     );
+    return data.data;
+}
+
+/*
+ * ── TALLY-ASSISTED PROCUREMENT ───────────────────────────────────────────
+ * All five sit behind module:finance and the FC-06 predicate — a login
+ * without Owner/Accounts standing is refused the whole answer, not a thinned
+ * one. None of them writes to Tally.
+ */
+
+/** The queue of vendor decisions Tally has raised — computed fresh each call. */
+export async function fetchTallyVendorReview(): Promise<TallyVendorReviewQueue> {
+    const { data } = await api.get<{ data: TallyVendorReviewQueue }>('/procurement/tally/vendor-review');
+    return data.data;
+}
+
+/** Name the Tally ledger groups whose parties are candidate vendors — an owner act. */
+export async function setTallyVendorGroups(groups: string[]): Promise<TallyVendorReviewQueue> {
+    const { data } = await api.put<{ data: TallyVendorReviewQueue }>('/procurement/tally/vendor-review/groups', { groups });
+    return data.data;
+}
+
+/** Create the vendor a "new" row proposes. */
+export async function confirmTallyVendorNew(tallyLedgerGuid: string): Promise<void> {
+    await api.post('/procurement/tally/vendor-review/confirm-new', { tally_ledger_guid: tallyLedgerGuid });
+}
+
+/** Apply the named differences — and only those — to the matched vendor. */
+export async function confirmTallyVendorFields(tallyLedgerGuid: string, vendorId: number, fields: string[]): Promise<void> {
+    await api.post('/procurement/tally/vendor-review/confirm-fields', {
+        tally_ledger_guid: tallyLedgerGuid,
+        vendor_id: vendorId,
+        fields,
+    });
+}
+
+/** Set one difference, or a whole ledger, aside — against the value seen. */
+export async function dismissTallyVendorDifference(tallyLedgerGuid: string, field: string): Promise<TallyVendorReviewQueue> {
+    const { data } = await api.post<{ data: TallyVendorReviewQueue }>('/procurement/tally/vendor-review/dismiss', {
+        tally_ledger_guid: tallyLedgerGuid,
+        field,
+    });
+    return data.data;
+}
+
+/** What Tally says this vendor last charged for this item. */
+export async function fetchTallyVendorItemRate(vendorId: number, itemId: number): Promise<TallyVendorItemRate> {
+    const { data } = await api.get<{ data: TallyVendorItemRate }>('/procurement/tally/vendor-item-rate', {
+        params: { vendor_id: vendorId, item_id: itemId },
+    });
     return data.data;
 }

@@ -290,8 +290,16 @@ describe('the Production menu', () => {
  * finance-only must REACH the page (the group surfaces with just that
  * child, even though the group's own module rejects the login — Codex on
  * 073a8c2), and procurement-only must NOT see it.
+ *
+ * TALLY VENDOR REVIEW JOINED IT on the same footing. Supplier IDENTITY is the
+ * other half of FC-06 — "purchase rates and supplier details are
+ * Owner/Accounts only" — so the review that confirms a party into the vendor
+ * master is finance-gated exactly as the bills are. The list below is
+ * therefore the full set of permissionModule children, and it is spelled out
+ * rather than counted: an entry silently joining or leaving this set is a
+ * change of who can see supplier data.
  */
-describe('the Supplier Bills entry (permissionModule)', () => {
+describe('the finance-gated Procurement entries (permissionModule)', () => {
     const user = (permissions: string[]): User => ({
         id: 9,
         name: 'Gate probe',
@@ -300,14 +308,19 @@ describe('the Supplier Bills entry (permissionModule)', () => {
         permissions,
     });
 
-    it('surfaces the Procurement group, with only Supplier Bills, for a finance-only login', () => {
+    it('surfaces the Procurement group, with only the finance-gated entries, for a finance-only login', () => {
         const items = buildNavItems(user(['finance.view', 'finance.manage']));
         const procurement = items.find((item) => item.key === 'procurement');
 
-        expect(procurement?.children?.map((child) => child.key)).toEqual(['/procurement/supplier-bills']);
+        // Both halves of FC-06: the rates (Supplier Bills) and the supplier
+        // identity (Tally Vendor Review). Nothing else in the group.
+        expect(procurement?.children?.map((child) => child.key)).toEqual([
+            '/procurement/tally-vendor-review',
+            '/procurement/supplier-bills',
+        ]);
     });
 
-    it('hides Supplier Bills from a procurement-only login, whose other entries are untouched', () => {
+    it('hides the finance-gated entries from a procurement-only login, whose other entries are untouched', () => {
         const items = buildNavItems(user(['procurement.view', 'procurement.manage']));
         const procurement = items.find((item) => item.key === 'procurement');
 

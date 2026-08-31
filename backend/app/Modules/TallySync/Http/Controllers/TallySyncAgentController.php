@@ -10,6 +10,7 @@ use App\Modules\TallySync\Http\Requests\StockSummaryPreviewRequest;
 use App\Modules\TallySync\Http\Requests\StoreTallySyncSnapshotRequest;
 use App\Modules\TallySync\Http\Requests\SyncCompaniesRequest;
 use App\Modules\TallySync\Http\Requests\SyncMastersRequest;
+use App\Modules\TallySync\Http\Requests\SyncPurchaseRatesRequest;
 use App\Modules\TallySync\Http\Resources\TallySyncEntryResource;
 use App\Modules\TallySync\Http\Resources\TallySyncSnapshotResource;
 use App\Modules\TallySync\Models\Enums\TallySyncEventKind;
@@ -18,6 +19,7 @@ use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Models\TallySyncEvent;
 use App\Modules\TallySync\Services\AgentIdentity;
 use App\Modules\TallySync\Services\MasterSyncService;
+use App\Modules\TallySync\Services\PurchaseRateSyncService;
 use App\Modules\TallySync\Services\StockSummaryPreviewService;
 use App\Modules\TallySync\Services\TallySyncEventRecorder;
 use App\Modules\TallySync\Services\TallySyncService;
@@ -227,6 +229,51 @@ class TallySyncAgentController extends Controller
         return response()->json([
             'data' => $summary,
         ]);
+    }
+
+    /**
+     * Purchase-order and purchase-invoice RATE LINES from the agent's Day Book
+     * read — the inbound half of Procurement's Tally rate lookup.
+     *
+     * READ-ONLY, and structurally so: it writes one table (tally_purchase_rates)
+     * that nothing posts from. No voucher is created, no stock moves, no master
+     * changes, and the existing approved workflows go on handling voucher
+     * posting exactly as before.
+     *
+     * Company-guarded the same way the masters pull is, and refusing rather
+     * than binding: a rate lookup is not the place to decide which Tally
+     * company this ERP is. An instance with no company bound yet has no
+     * business quoting rates at all, so it is told to bind through a masters
+     * pull first.
+     */
+    public function purchaseRates(SyncPurchaseRatesRequest $request, PurchaseRateSyncService $rates, AppSettingService $settings): JsonResponse
+    {
+        abort_unless($request->user()?->tokenCan('tally-sync:masters'), 403, 'Token missing the tally-sync:masters ability.');
+
+        $data = $request->validated();
+        $incoming = $data['company'] ?? null;
+        $bound = $settings->get(TallySettingsController::KEY_COMPANY);
+
+        abort_if(
+            $bound !== null && $incoming !== null && $bound !== $incoming,
+            409,
+            "This ERP is bound to Tally company '{$bound}'. Refusing purchase rates from '{$incoming}' — that would quote one company's rates against another's vendors.",
+        );
+
+        $summary = $rates->sync($data['lines'], $incoming ?? $bound);
+
+        $this->agentLog($request, 'purchase-rates.received', ['company' => $incoming] + $summary);
+        // Counts only. A rate, a party or an item name in the event feed would
+        // put Owner/Accounts data (FC-06) on a screen that is not gated for it.
+        $this->events->record(
+            TallySyncEventKind::PurchaseRatesReceived,
+            null,
+            ['company' => $incoming] + $summary,
+            TallySyncEvent::DIRECTION_TALLY_TO_ERP,
+            $request->user(),
+        );
+
+        return response()->json(['data' => $summary]);
     }
 
     /**

@@ -2305,3 +2305,69 @@ consumption history.
 **Still open, and untouched by this:** whether anything should CHASE an
 overdue return, and against what clock. The Q69 block raised it; no ruling has
 been given.
+## Q84 · When Tally holds both an agreed rate and a billed one, which should lead the suggestion?
+
+The purchase-order form now shows what this vendor last charged for this item:
+the latest Tally **Purchase Order** rate (what was AGREED) and the latest Tally
+**Purchase invoice** rate (what was BILLED). Both are shown, always, and each
+names its voucher and date.
+
+One of them is offered as the prefill, and something has to decide which.
+Shipped as **the later voucher date wins, and the invoice wins a tie** — the
+owner's own word was "the latest applicable rate", and on the same day what was
+actually paid is the better evidence of what this costs. That is a reading of a
+one-line instruction, not a recorded factory rule, and the alternatives are
+real: a factory that negotiates rates forward would want the ORDER to lead
+whenever one exists, because the invoice is history and the order is the
+agreement now in force.
+
+What is known: nothing in the factory record answers it. The suggestion is
+never applied by itself — a person presses Use and may edit the figure
+afterwards — so a wrong default here costs a click, not a wrong order.
+
+**Blocks:** nothing. The change is one comparison in `PurchaseRateLookup`.
+*Open since 2026-08-31.*
+
+## Q85 · Twenty-three GSTINs sit on more than one Tally ledger — which of those pairs are one supplier?
+
+Measured on the live company's own "All Masters" export (1742 ledgers): 665
+carry a GSTIN, and 23 of those GSTINs appear on MORE THAN ONE ledger. Some
+pairs read as the same party filed twice (a name and the same name with a
+suffix, one under Sundry Creditors and its twin under Sundry Debtors); others
+may be genuinely different parties sharing a registration.
+
+Because of this, the vendor review will NOT match a party on a GSTIN that could
+mean two things. It raises an AMBIGUOUS row that names the candidates and
+offers nothing to apply, and the factory resolves it — in Tally, by merging or
+renaming, or in the ERP, by linking the vendor to the right ledger by hand.
+This repository has already paid once for the other behaviour, when a
+first-name-only identity map put one person's employee number on another.
+
+What is known: the count and the shape are measured; WHICH pairs are one
+supplier is a factory fact and cannot be derived. The specific names are not
+written here — supplier identity is Owner/Accounts (FC-06) — and the list can
+be produced from the review screen itself.
+
+**Blocks:** automatic matching for those 23 GSTINs only. Every other party
+matches on its exact Tally identity or its unique GSTIN as normal.
+*Open since 2026-08-31.*
+
+## Q86 · Should supplier email and phone be maintained in Tally, or in the ERP?
+
+The vendor import now brings a party's email and phone across where Tally has
+them. Measured on the same 1742-ledger export, it almost never does: **4**
+ledgers carry an email and **78** a phone, and of 620 Sundry Creditors exactly
+**1** has an email and **8** a phone.
+
+So the ERP's vendor master is going to be the fuller record of how to reach a
+supplier, and the sync is built to protect that: Tally having nothing NEVER
+clears a value somebody typed into the vendor form, and only a difference where
+Tally holds an actual value is ever raised for confirmation.
+
+What the factory has not said is which system it wants to be the one people
+maintain. If it is Tally, somebody has to fill 600-odd blank contact fields
+there. If it is the ERP, that is already how it behaves and this question just
+gets recorded as answered.
+
+**Blocks:** nothing. Both answers are the shipped behaviour; what changes is
+where the office does the typing. *Open since 2026-08-31.*

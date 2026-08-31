@@ -68,6 +68,7 @@ import GoodsReceiptsPage from '@/features/procurement/pages/GoodsReceiptsPage';
 import SupplierBillsPage from '@/features/procurement/pages/SupplierBillsPage';
 import PurchaseOrdersPage from '@/features/procurement/pages/PurchaseOrdersPage';
 import PurchaseRequisitionsPage from '@/features/procurement/pages/PurchaseRequisitionsPage';
+import TallyVendorReviewPage from '@/features/procurement/pages/TallyVendorReviewPage';
 import VendorsPage from '@/features/procurement/pages/VendorsPage';
 import CustomersPage from '@/features/sales/pages/CustomersPage';
 import DeliveriesPage from '@/features/sales/pages/DeliveriesPage';
@@ -219,6 +220,7 @@ export default function App() {
                                     <Route path="/production/reports" element={<ProductionReportsPage />} />
                                     <Route path="/production/rework-orders" element={<ReworkOrdersPage />} />
                                     <Route path="/procurement/vendors" element={<VendorsPage />} />
+                                    <Route path="/procurement/tally-vendor-review" element={<TallyVendorReviewPage />} />
                                     <Route path="/procurement/purchase-requisitions" element={<PurchaseRequisitionsPage />} />
                                     <Route path="/procurement/purchase-orders" element={<PurchaseOrdersPage />} />
                                     <Route path="/procurement/goods-receipts" element={<GoodsReceiptsPage />} />

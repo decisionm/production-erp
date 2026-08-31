@@ -24,6 +24,21 @@ export interface AgentConfig {
      * once, and re-typing it per run is how a snapshot ends up dated a day out.
      */
     stockSummaryAsOf: string;
+    /**
+     * The purchase-rate read window and cadence.
+     *
+     * `purchaseRatesFromDate` is the earliest voucher date the Day Book is
+     * asked for, and it is a STORED SETTING rather than a rolling window: the
+     * lookup answers "what did we last pay", and a window that slid forward
+     * would quietly stop being able to answer it for an item bought twice a
+     * year. Re-reading the same span every cycle is safe because the cloud
+     * upserts on the voucher's own identity.
+     *
+     * There is deliberately NO interval beside it: the Day Book read happens
+     * when an operator presses the tray item, never on a timer — see
+     * purchaseRatesSync.ts for the factory rule behind that.
+     */
+    purchaseRatesFromDate: string;
 }
 
 const defaults: AgentConfig = {
@@ -36,6 +51,8 @@ const defaults: AgentConfig = {
     pollIntervalSeconds: 90,
     mastersPollIntervalSeconds: 3600,
     stockSummaryAsOf: '2026-08-02',
+    // The start of the financial year the factory's own 12-Aug export covers.
+    purchaseRatesFromDate: '2026-04-01',
 };
 
 const store = new Store<AgentConfig>({ defaults });
@@ -50,6 +67,7 @@ export function getConfig(): AgentConfig {
         pollIntervalSeconds: store.get('pollIntervalSeconds'),
         stockSummaryAsOf: store.get('stockSummaryAsOf'),
         mastersPollIntervalSeconds: store.get('mastersPollIntervalSeconds'),
+        purchaseRatesFromDate: store.get('purchaseRatesFromDate'),
     };
 }
 

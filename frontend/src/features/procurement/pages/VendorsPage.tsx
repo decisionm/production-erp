@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, Modal, Space, Table, Typography } from 'antd';
+import { Button, Form, Input, Modal, Space, Table, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -185,6 +185,28 @@ export default function VendorsPage() {
                                 <Typography.Text type="secondary">{words.text}</Typography.Text>
                             );
                         },
+                    },
+                    {
+                        // THE PROVENANCE OF WHAT WAS IMPORTED. A vendor whose
+                        // details came from a Tally ledger says so, and says
+                        // when that ledger was last read — the same claim the
+                        // review screen and the purchase-order rate panel
+                        // make, from the same column. A vendor somebody typed
+                        // in carries no such claim, and must not appear to.
+                        title: 'Source',
+                        key: 'tally_source',
+                        render: (_, row) => (row.tally_source
+                            ? (
+                                <Space direction="vertical" size={0}>
+                                    <Tag color="blue" style={{ marginInlineEnd: 0 }}>Tally</Tag>
+                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                        {row.tally_source.synced_at !== null
+                                            ? `synced ${new Date(row.tally_source.synced_at).toLocaleString()}`
+                                            : 'not yet synced'}
+                                    </Typography.Text>
+                                </Space>
+                            )
+                            : <Typography.Text type="secondary">entered here</Typography.Text>),
                     },
                     {
                         title: 'Status',
