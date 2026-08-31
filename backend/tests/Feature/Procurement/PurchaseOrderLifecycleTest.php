@@ -125,6 +125,10 @@ class PurchaseOrderLifecycleTest extends TestCase
             'lines' => [[
                 'purchase_order_line_id' => $line->id,
                 'quantity' => $quantity,
+                // ITEM_A is measured in Kgs, and a weighed arrival records
+                // what physically came in (Q77). One bag holding the whole
+                // delivery reconciles exactly to the received quantity.
+                'lots' => [['bag_count' => 1, 'bag_weight_kg' => $quantity]],
             ]],
         ])->assertCreated();
     }
@@ -389,7 +393,10 @@ class PurchaseOrderLifecycleTest extends TestCase
         $this->postJson('/api/v1/procurement/goods-receipts', [
             'purchase_order_id' => $cancelled->id,
             'warehouse_id' => $this->store->id,
-            'lines' => [['purchase_order_line_id' => $line->id, 'quantity' => '10']],
+            // Lots supplied so the refusal below is unambiguously about the
+            // CANCELLED order — without them it would be a missing-lots 422
+            // and this test would pass while proving nothing.
+            'lines' => [['purchase_order_line_id' => $line->id, 'quantity' => '10', 'lots' => [['bag_count' => 1, 'bag_weight_kg' => '10']]]],
         ])->assertStatus(422);
 
         $closed = $this->sentOrder();
@@ -398,7 +405,8 @@ class PurchaseOrderLifecycleTest extends TestCase
         $this->postJson('/api/v1/procurement/goods-receipts', [
             'purchase_order_id' => $closed->id,
             'warehouse_id' => $this->store->id,
-            'lines' => [['purchase_order_line_id' => $line->id, 'quantity' => '10']],
+            // Same reason as above: the refusal must be about the CLOSED order.
+            'lines' => [['purchase_order_line_id' => $line->id, 'quantity' => '10', 'lots' => [['bag_count' => 1, 'bag_weight_kg' => '10']]]],
         ])->assertStatus(422);
 
         // No receipt, no stock, on either.

@@ -529,7 +529,13 @@ class PurchaseOrderTraceTest extends TestCase
             'purchase_order_id' => $orderId,
             'warehouse_id' => $this->store->id,
             'received_date' => '2026-08-17',
-            'lines' => [['purchase_order_line_id' => $lineId, 'quantity' => $quantity]],
+            // ITEM_A is measured in Kgs, so the arrival records its bags
+            // (Q77). One bag holding the whole delivery.
+            'lines' => [[
+                'purchase_order_line_id' => $lineId,
+                'quantity' => $quantity,
+                'lots' => [['bag_count' => 1, 'bag_weight_kg' => $quantity]],
+            ]],
         ])->assertCreated()->json('data.id');
     }
 

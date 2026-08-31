@@ -294,11 +294,16 @@ class AtomicGoodsReceiptTraceabilityTest extends TestCase
     public function test_a_grn_linked_manual_lot_requires_the_grn_warehouse(): void
     {
         [$order, $line, $item, $warehouse] = $this->purchase();
-        $payload = $this->payload($order, $line, $warehouse);
-        unset($payload['lines'][0]['lots']);
-        $grn = $this->postJson('/api/v1/procurement/goods-receipts', $payload)
+
+        // The GRN carries its own lots, because since 31-Aug-2026 every
+        // arrival records what physically came in (Q77). The manual lot
+        // below is an ADDITIONAL one booked against that same GRN, which is
+        // the case this rule is about.
+        $grn = $this->postJson('/api/v1/procurement/goods-receipts', $this->payload($order, $line, $warehouse))
             ->assertSuccessful()
             ->json('data');
+
+        $lotsFromTheArrival = MaterialLot::query()->count();
 
         $this->postJson('/api/v1/inventory/material-lots', [
             'grn_id' => $grn['id'],
@@ -311,7 +316,10 @@ class AtomicGoodsReceiptTraceabilityTest extends TestCase
         ])->assertStatus(422)
             ->assertJsonValidationErrors('warehouse_id');
 
-        $this->assertSame(0, MaterialLot::query()->count());
+        // The refusal wrote NOTHING — the arrival's own lots are still all
+        // there is. (Asserting a flat zero would only have been true while a
+        // goods receipt could be booked without recording its bags.)
+        $this->assertSame($lotsFromTheArrival, MaterialLot::query()->count());
     }
 
     public function test_a_grn_linked_manual_lot_cannot_name_a_different_item_or_warehouse(): void
