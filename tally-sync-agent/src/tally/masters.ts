@@ -46,6 +46,16 @@ export interface LedgerNode {
      */
     gstin?: string | null;
     state_name?: string | null;
+    /**
+     * The party's email and phone, on the SAME absent-means-leave-alone
+     * contract as the two above. Measured on the live company's own
+     * "All Masters" export (1742 ledgers): 78 carry a phone and 4 carry an
+     * email, and of 620 Sundry Creditors exactly 1 has an email and 8 a
+     * phone. These keys will therefore be absent from almost every row —
+     * that is the state of the books, not a gap in this pull.
+     */
+    email?: string | null;
+    phone?: string | null;
 }
 
 export interface MastersPayload {
@@ -181,6 +191,21 @@ const LEDGER_GSTIN_FIELDS = ['PARTYGSTIN', 'GSTIN', 'GSTREGISTRATIONNUMBER'] as 
  */
 const LEDGER_STATE_FIELDS = ['PRIORSTATENAME', 'STATENAME', 'LEDSTATENAME'] as const;
 
+/**
+ * MEASURED on the same 1742-ledger export, and ordered by what it found:
+ * EMAIL appears 4 times and EMAILCC never; LEDGERMOBILE and PHONENUMBER
+ * appear 78 times each, LEDGERPHONE and LEDGERCONTACT 3.
+ *
+ * The mobile leads the phone list because a supplier a buyer actually rings
+ * is more useful than a switchboard, and the two are equally present. As with
+ * the GSTIN list, the first candidate carrying a value wins and a build that
+ * has none of them simply yields nothing — a wrong guess costs an empty
+ * column, never a contact somebody typed into the vendor form.
+ */
+const LEDGER_EMAIL_FIELDS = ['EMAIL', 'EMAILCC'] as const;
+
+const LEDGER_PHONE_FIELDS = ['LEDGERMOBILE', 'PHONENUMBER', 'LEDGERPHONE', 'LEDGERCONTACT'] as const;
+
 /** The first candidate field that carries anything, or undefined when none does. */
 function firstOf(node: Record<string, unknown>, fields: readonly string[]): string | undefined {
     for (const field of fields) {
@@ -194,12 +219,23 @@ export async function exportLedgers(t: TallyTarget): Promise<LedgerNode[]> {
     // A ledger's Tally "Parent" is its ledger group. The party fields are
     // requested by name — Tally returns what the FETCH names and nothing more,
     // which is why they were absent until now rather than merely unread.
-    const fetch = ['Name', 'Parent', 'GUID', 'AlterID', ...LEDGER_GSTIN_FIELDS, ...LEDGER_STATE_FIELDS].join(', ');
+    const fetch = [
+        'Name',
+        'Parent',
+        'GUID',
+        'AlterID',
+        ...LEDGER_GSTIN_FIELDS,
+        ...LEDGER_STATE_FIELDS,
+        ...LEDGER_EMAIL_FIELDS,
+        ...LEDGER_PHONE_FIELDS,
+    ].join(', ');
 
     return (await exportCollection(t, 'LEDGER', 'Ledger', fetch))
         .map((n) => {
             const gstin = firstOf(n as Record<string, unknown>, LEDGER_GSTIN_FIELDS);
             const state = firstOf(n as Record<string, unknown>, LEDGER_STATE_FIELDS);
+            const email = firstOf(n as Record<string, unknown>, LEDGER_EMAIL_FIELDS);
+            const phone = firstOf(n as Record<string, unknown>, LEDGER_PHONE_FIELDS);
 
             return {
                 guid: textOf(n.GUID),
@@ -210,6 +246,8 @@ export async function exportLedgers(t: TallyTarget): Promise<LedgerNode[]> {
                 // payload rather than sent as null. Absent means "leave alone".
                 ...(gstin !== undefined ? { gstin } : {}),
                 ...(state !== undefined ? { state_name: state } : {}),
+                ...(email !== undefined ? { email } : {}),
+                ...(phone !== undefined ? { phone } : {}),
             };
         })
         .filter((n) => n.guid && n.name);

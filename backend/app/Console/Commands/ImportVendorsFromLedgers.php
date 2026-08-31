@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Modules\Procurement\Models\Vendor;
+use App\Modules\Procurement\Services\VendorFromLedger;
 use App\Modules\Procurement\Services\VendorService;
 use App\Modules\TallySync\Models\Ledger;
 use Illuminate\Console\Command;
@@ -191,33 +192,21 @@ class ImportVendorsFromLedgers extends Command
 
                 $gstin = trim((string) $ledger->gstin);
 
+                // THE MAPPING IS SHARED, NOT REPEATED. VendorFromLedger is the
+                // one answer to "what does a Tally ledger say a vendor is",
+                // read by this command and by the Owner/Accounts review screen
+                // alike. It used to be spelled out here, which was fine while
+                // this was the only path; a second path with its own copy is
+                // how two rival sets of rules for one act begin. What it does
+                // — the GSTIN-derived state code, nothing invented for the
+                // fields Tally does not carry — is documented on that class.
                 $vendor = $vendors->create([
                     // No code: VendorService mints the next in the same
                     // sequence a person creating one on the form gets.
-                    'name' => $name,
-                    'gstin' => $gstin !== '' ? $gstin : null,
-                    // Everything else a vendor can carry is absent from a Tally
-                    // ledger. Left NULL, never fabricated.
-                    'email' => null,
-                    'phone' => null,
+                    ...VendorFromLedger::attributes($ledger),
+                    // Absent from a Tally ledger entirely. Left NULL, never
+                    // fabricated (AGENTS.md).
                     'address' => null,
-                    // THE STATE COMES FROM THE GSTIN, not from the ledger's
-                    // state field. The 28-Aug ledger master export measured
-                    // why: of 620 Sundry Creditors only 22 carry a state at
-                    // all, while 307 carry a GSTIN. A GSTIN's first two
-                    // digits ARE the GST state code — that is the format's
-                    // definition, not an inference — so it is read rather
-                    // than guessed, and left null when there is no GSTIN.
-                    //
-                    // It matters beyond tidiness: the state decides local
-                    // against interstate, which decides which of the
-                    // factory's purchase ledgers a voucher names
-                    // (DEC-20260812-003).
-                    'state_code' => self::stateCodeFrom($gstin),
-                    // The ledger's own name IS what a voucher must call this
-                    // party, so the mapping Accounts would otherwise type in is
-                    // recorded from the source it comes from.
-                    'tally_ledger_name' => $ledger->name,
                     'is_active' => true,
                 ]);
 
@@ -333,7 +322,7 @@ class ImportVendorsFromLedgers extends Command
 
                     $vendor->update([
                         'gstin' => $gstin,
-                        'state_code' => $vendor->state_code ?: self::stateCodeFrom($gstin),
+                        'state_code' => $vendor->state_code ?: VendorFromLedger::stateCodeFrom($gstin),
                     ]);
                     $filled++;
                 });
@@ -372,21 +361,6 @@ class ImportVendorsFromLedgers extends Command
         }
 
         return self::SUCCESS;
-    }
-
-    /**
-     * The GST state code a GSTIN carries in its first two digits.
-     *
-     * Not an inference: a GSTIN is defined as the two-digit state code, then
-     * the PAN, then the entity and check characters. Read only from a value
-     * that is the right length and starts with two digits, so a malformed or
-     * absent GSTIN yields null rather than a made-up code.
-     */
-    private static function stateCodeFrom(string $gstin): ?string
-    {
-        return strlen($gstin) === 15 && ctype_digit(substr($gstin, 0, 2))
-            ? substr($gstin, 0, 2)
-            : null;
     }
 
     /**

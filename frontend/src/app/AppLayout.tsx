@@ -139,6 +139,11 @@ export const allNavItems: readonly NavGroup[] = [
         module: 'procurement',
         children: [
             { key: '/procurement/vendors', label: 'Vendors' },
+            // Owner/Accounts only, on the same footing as Supplier Bills
+            // below and for the same reason: supplier identity is FC-06, so
+            // the API gates on module:finance while the Finance MODULE itself
+            // stays unadopted and must not become visible through a child.
+            { key: '/procurement/tally-vendor-review', label: 'Tally Vendor Review', permissionModule: 'finance' },
             { key: '/procurement/purchase-requisitions', label: 'Purchase Requisitions' },
             { key: '/procurement/purchase-orders', label: 'Purchase Orders' },
             { key: '/procurement/goods-receipts', label: 'Goods Receipts' },

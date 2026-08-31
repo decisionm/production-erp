@@ -177,7 +177,7 @@ interface AmendModalProps {
  */
 export function AmendPurchaseOrderModal({ order, onClose, onDone, itemOptions }: AmendModalProps) {
     const invalidate = useInvalidatePurchaseOrders();
-    const { control, handleSubmit, reset, formState: { errors } } = useForm<AmendValues>({
+    const { control, handleSubmit, reset, setValue, formState: { errors } } = useForm<AmendValues>({
         resolver: zodResolver(amendSchema),
         defaultValues: { reason: '', lines: [] },
     });
@@ -247,6 +247,11 @@ export function AmendPurchaseOrderModal({ order, onClose, onDone, itemOptions }:
                     control={control}
                     errors={errors}
                     itemOptions={itemOptions}
+                    // The order already knows its vendor and it cannot change
+                    // on an amendment, so the Tally rates under these lines
+                    // are this party's throughout.
+                    vendorId={order?.vendor?.id ?? null}
+                    setUnitPrice={(index, rate) => setValue(`lines.${index}.unit_price`, rate, { shouldDirty: true, shouldValidate: true })}
                     ratesNotPrefilled={defaults?.ratesNotPrefilled ?? false}
                 />
             </Form>

@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation } from '@tanstack/react-query';
 import { Alert, DatePicker, Form, Input, Modal, Select, Space, Switch } from 'antd';
 import { useEffect, useRef } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { Controller, useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
 import { createPurchaseOrder } from '@/features/procurement/api';
 import PurchaseOrderLinesFields, { emptyPurchaseOrderLine, purchaseOrderLinesSchema } from '@/features/procurement/components/PurchaseOrderLinesFields';
@@ -57,7 +57,7 @@ interface CreatePurchaseOrderModalProps {
  * (FC-06: no money on the requisition surface).
  */
 export default function CreatePurchaseOrderModal({ open, onClose, onCreated, vendorOptions, itemOptions, raiseFrom = null }: CreatePurchaseOrderModalProps) {
-    const { control, handleSubmit, reset, formState: { errors } } = useForm<OrderFormValues>({
+    const { control, handleSubmit, reset, setValue, formState: { errors } } = useForm<OrderFormValues>({
         resolver: zodResolver(orderSchema),
         defaultValues: { lines: [emptyPurchaseOrderLine()] },
     });
@@ -69,6 +69,10 @@ export default function CreatePurchaseOrderModal({ open, onClose, onCreated, ven
     // reset below, closing a Raise PO half-way and then clicking New
     // Purchase Order re-offered the requisition's items on what claims to
     // be a blank order.
+    // The vendor the order is for, watched so each line's Tally rate lookup
+    // follows a change of mind about who is being ordered from.
+    const vendorId = useWatch({ control, name: 'vendor_id' });
+
     const formCameFromRequisition = useRef(false);
     useEffect(() => {
         if (!open) return;
@@ -186,7 +190,16 @@ export default function CreatePurchaseOrderModal({ open, onClose, onCreated, ven
                     )}
                 </Form.Item>
 
-                <PurchaseOrderLinesFields control={control} errors={errors} itemOptions={itemOptions} />
+                <PurchaseOrderLinesFields
+                    control={control}
+                    errors={errors}
+                    itemOptions={itemOptions}
+                    // Watched, not read once: picking a different vendor
+                    // re-asks Tally, so the rates under the lines are always
+                    // the ones for the party actually being ordered from.
+                    vendorId={vendorId ?? null}
+                    setUnitPrice={(index, rate) => setValue(`lines.${index}.unit_price`, rate, { shouldDirty: true, shouldValidate: true })}
+                />
             </Form>
         </Modal>
     );

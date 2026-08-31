@@ -49,7 +49,9 @@ use App\Modules\Procurement\Http\Controllers\GoodsReceiptController;
 use App\Modules\Procurement\Http\Controllers\PurchaseOrderController;
 use App\Modules\Procurement\Http\Controllers\PurchaseRequisitionController;
 use App\Modules\Procurement\Http\Controllers\SupplierBillController;
+use App\Modules\Procurement\Http\Controllers\TallyVendorReviewController;
 use App\Modules\Procurement\Http\Controllers\VendorController;
+use App\Modules\Procurement\Http\Controllers\VendorItemRateController;
 use App\Modules\Production\Http\Controllers\BatchPreviewController;
 use App\Modules\Production\Http\Controllers\BinBayController;
 use App\Modules\Production\Http\Controllers\BomController;
@@ -575,6 +577,28 @@ Route::prefix('v1')->group(function () {
             Route::post('supplier-bills/{supplier_bill}/cancel', [SupplierBillController::class, 'cancel']);
             Route::post('supplier-bills/{supplier_bill}/attachment', [SupplierBillController::class, 'attach']);
             Route::get('supplier-bills/{supplier_bill}/attachment', [SupplierBillController::class, 'download']);
+
+            /*
+             * THE TALLY-ASSISTED HALF OF PROCUREMENT — read-only from Tally,
+             * and here rather than in the procurement group above for the
+             * reason that group's comment already gives: every figure and
+             * every party name in these two answers is Owner/Accounts
+             * (FC-06), so the gate is the group's, not a per-field omission.
+             * Each controller re-asks the module's single FC-06 predicate on
+             * top; no new permission name is minted for either.
+             *
+             * The vendor review CONFIRMS master-data changes a person can see
+             * — the masters pull itself creates and corrects nothing. The rate
+             * lookup quotes vouchers Tally already holds and posts nothing:
+             * the existing approved workflows still handle voucher posting.
+             */
+            Route::get('tally/vendor-review', [TallyVendorReviewController::class, 'index']);
+            Route::put('tally/vendor-review/groups', [TallyVendorReviewController::class, 'updateGroups']);
+            Route::post('tally/vendor-review/confirm-new', [TallyVendorReviewController::class, 'confirmNew']);
+            Route::post('tally/vendor-review/confirm-fields', [TallyVendorReviewController::class, 'confirmFields']);
+            Route::post('tally/vendor-review/dismiss', [TallyVendorReviewController::class, 'dismiss']);
+
+            Route::get('tally/vendor-item-rate', [VendorItemRateController::class, 'show']);
         });
 
         Route::prefix('sales')->middleware('module:sales')->group(function () {
@@ -760,6 +784,11 @@ Route::prefix('v1')->group(function () {
             // in the controller.
             Route::post('masters', [TallySyncAgentController::class, 'masters']);
             Route::post('companies', [TallySyncAgentController::class, 'companies']);
+            // Purchase-order and purchase-invoice RATE LINES from the agent's
+            // Day Book read. Inbound only, and it writes one table nothing
+            // posts from — no voucher, no stock, no master. Same ability as
+            // the masters pull (tally-sync:masters), gated in the controller.
+            Route::post('purchase-rates', [TallySyncAgentController::class, 'purchaseRates']);
 
             // READ-ONLY godown-wise stock summary, reported and discarded. The
             // route says `preview` because there is no sibling that writes: an

@@ -70,6 +70,7 @@ const ROUTE_TABLE = [
     '/production/reports',
     '/production/rework-orders',
     '/procurement/vendors',
+    '/procurement/tally-vendor-review',
     '/procurement/purchase-requisitions',
     '/procurement/purchase-orders',
     '/procurement/goods-receipts',

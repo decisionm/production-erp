@@ -5,6 +5,7 @@ import { testCloudConnection } from './cloudApi';
 import { getConfig, setConfig, type AgentConfig } from './config';
 import logger from './logger';
 import { runMastersSync } from './mastersSync';
+import { runPurchaseRatesSync } from './purchaseRatesSync';
 import { startSyncLoop, stopSyncLoop } from './sync';
 import { exportCompanies } from './tally/masters';
 import { createTray, destroyTray } from './tray';
@@ -94,6 +95,15 @@ ipcMain.handle('masters:run', async () => {
     }
 });
 
+ipcMain.handle('purchase-rates:run', async () => {
+    try {
+        const result = await runPurchaseRatesSync();
+        return { ok: true, result };
+    } catch (err) {
+        return { ok: false, error: errorMessage(err) };
+    }
+});
+
 ipcMain.handle('settings:save', (_event, config: AgentConfig) => {
     setConfig(config);
     logger.info('Settings updated', { cloudApiBaseUrl: config.cloudApiBaseUrl, tallyHost: config.tallyHost, tallyPort: config.tallyPort });
@@ -122,6 +132,9 @@ app.whenReady().then(() => {
     // recovering Tally every few minutes would violate that unprompted.
     // Masters refresh remains available as the operator's deliberate act:
     // the tray's "Pull Masters from Tally" and the Settings test actions.
+    // The purchase-rate Day Book read is on exactly the same footing — a tray
+    // item, never a timer, and a HEAVIER read than masters, so the rule
+    // applies to it with more force rather than less.
     // Voucher POSTING (the outbound sync loop above) is unchanged.
 
     // Auto-update: checks the generic feed (the ERP's /storage/agent/latest.yml,

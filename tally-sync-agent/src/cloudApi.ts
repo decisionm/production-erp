@@ -2,6 +2,7 @@ import axios, { type AxiosInstance } from 'axios';
 import { getConfig } from './config';
 import type { SnapshotBody } from './snapshot';
 import type { MastersPayload } from './tally/masters';
+import type { PurchaseRateLine } from './tally/purchaseRates';
 import type { StockSummaryPayload } from './tally/stockSummary';
 
 /**
@@ -91,6 +92,28 @@ export async function syncMasters(payload: MastersPayload, company: string): Pro
     // server refuses masters from a different company than the instance is
     // bound to, preventing cross-company data corruption.
     const { data } = await client().post<{ data: MastersSyncSummary }>('/masters', { ...payload, company });
+    return data.data;
+}
+
+export interface PurchaseRatesSyncSummary {
+    created: number;
+    updated: number;
+    deleted: number;
+    total: number;
+}
+
+/**
+ * Push the purchase-order and purchase-invoice RATE LINES read out of the Day
+ * Book (inbound direction). POST /tally-sync/purchase-rates, requiring the
+ * same tally-sync:masters ability the masters pull needs.
+ *
+ * The cloud writes one table that nothing posts from — no voucher, no stock,
+ * no master. `company` is guarded there exactly as it is for masters, so a
+ * misconfigured agent cannot quote one company's rates against another's
+ * vendors.
+ */
+export async function syncPurchaseRates(lines: PurchaseRateLine[], company: string): Promise<PurchaseRatesSyncSummary> {
+    const { data } = await client().post<{ data: PurchaseRatesSyncSummary }>('/purchase-rates', { lines, company });
     return data.data;
 }
 

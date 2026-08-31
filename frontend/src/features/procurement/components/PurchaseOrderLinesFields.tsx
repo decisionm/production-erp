@@ -1,7 +1,8 @@
 import { Button, DatePicker, Input, InputNumber, Select, Space, Typography } from 'antd';
 import dayjs from 'dayjs';
-import { type Control, Controller, type FieldErrors, useFieldArray } from 'react-hook-form';
+import { type Control, Controller, type FieldErrors, useFieldArray, useWatch } from 'react-hook-form';
 import { z } from 'zod';
+import TallyRatePanel from '@/features/procurement/components/TallyRatePanel';
 
 /**
  * THE LINES EDITOR ONE PURCHASE ORDER FORM SHARES WITH THE OTHER — the
@@ -105,6 +106,23 @@ interface PurchaseOrderLinesFieldsProps<T extends LinesFormValues> {
     errors: FieldErrors<LinesFormValues>;
     itemOptions: { value: number; label: string }[];
     /**
+     * The vendor the order is for. When it is known, each line offers what
+     * Tally says this vendor last charged for that item — a suggestion the
+     * buyer confirms or ignores, never an automatic price. Undefined on a
+     * form that has not asked for a vendor yet, and the panel stays away.
+     */
+    vendorId?: number | null;
+    /**
+     * Put a rate into one line's price field. Supplied by the host form
+     * (which owns useForm and therefore setValue) rather than reached for
+     * here: these fields deliberately hold no form instance of their own, and
+     * the two hosts must not disagree about how a price is set.
+     *
+     * Omitted by a host that does not offer the Tally lookup — the panel then
+     * has nowhere to put a rate, so it is not rendered at all.
+     */
+    setUnitPrice?: (lineIndex: number, rate: number) => void;
+    /**
      * When the reader was NOT served the order's rates (FC-06 — the server
      * omits unit_price for a login without finance standing), the amend
      * form cannot prefill them: the field starts empty and must be typed
@@ -123,12 +141,19 @@ export default function PurchaseOrderLinesFields<T extends LinesFormValues>({
     control,
     errors,
     itemOptions,
+    vendorId = null,
+    setUnitPrice,
     ratesNotPrefilled = false,
 }: PurchaseOrderLinesFieldsProps<T>) {
     // The host form has more fields than `lines`; these fields only ever
     // address `lines.*`, so the narrower control type is the honest one.
     const linesControl = control as unknown as Control<LinesFormValues>;
     const { fields, append, remove } = useFieldArray({ control: linesControl, name: 'lines' });
+
+    // Watched rather than read off `fields`: useFieldArray's snapshot is the
+    // value each row STARTED with, so a panel keyed on it would go on quoting
+    // the first item picked after the buyer changed their mind.
+    const lineValues = useWatch({ control: linesControl, name: 'lines' });
 
     return (
         <>
@@ -191,6 +216,23 @@ export default function PurchaseOrderLinesFields<T extends LinesFormValues>({
                             <div style={{ color: '#ff4d4f', marginTop: 4 }}>{messages.join(' · ')}</div>
                         ) : null;
                     })()}
+                    {/*
+                      WHAT TALLY LAST CHARGED, under the line being priced.
+                      Suggestion only: the Use button is the buyer's act, the
+                      figure never lands by itself, and a rate quoted per a
+                      unit the item is not held in is shown but withheld from
+                      Use (Q40). Hidden entirely from a login without
+                      Owner/Accounts standing (FC-06) — the endpoint refuses
+                      it and the panel renders nothing.
+                    */}
+                    {setUnitPrice !== undefined && (
+                        <TallyRatePanel
+                            vendorId={vendorId}
+                            itemId={lineValues?.[index]?.item_id ?? null}
+                            currentUnitPrice={lineValues?.[index]?.unit_price ?? null}
+                            onUse={(rate) => setUnitPrice(index, rate)}
+                        />
+                    )}
                     <LineSchedulesEditor control={linesControl} lineIndex={index} />
                 </div>
             ))}
