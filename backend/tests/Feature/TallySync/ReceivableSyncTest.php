@@ -3,6 +3,8 @@
 namespace Tests\Feature\TallySync;
 
 use App\Models\User;
+use App\Modules\Core\Services\AppSettingService;
+use App\Modules\TallySync\Http\Controllers\TallySettingsController;
 use App\Modules\TallySync\Models\TallyPendingSalesOrder;
 use App\Modules\TallySync\Models\TallyReceivableBill;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -147,8 +149,8 @@ class ReceivableSyncTest extends TestCase
         // With no company bound in settings the guard cannot fire, so this
         // asserts the shape it protects: a bound ERP refuses a foreign pull
         // rather than filing one company's debtors against another's clients.
-        $bound = app(\App\Modules\Core\Services\AppSettingService::class);
-        $bound->set(\App\Modules\TallySync\Http\Controllers\TallySettingsController::KEY_COMPANY, self::COMPANY);
+        $bound = app(AppSettingService::class);
+        $bound->set(TallySettingsController::KEY_COMPANY, self::COMPANY);
 
         $this->postJson('/api/v1/tally-sync/receivables', $this->payload([
             'company' => 'SOME OTHER COMPANY LTD',

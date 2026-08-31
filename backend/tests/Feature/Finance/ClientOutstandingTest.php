@@ -3,8 +3,10 @@
 namespace Tests\Feature\Finance;
 
 use App\Models\User;
+use App\Modules\Core\Services\AppSettingService;
 use App\Modules\Finance\Services\ClientOutstandingService;
 use App\Modules\Sales\Models\Customer;
+use App\Modules\TallySync\Http\Controllers\TallySettingsController;
 use App\Modules\TallySync\Models\TallyPendingSalesOrder;
 use App\Modules\TallySync\Models\TallyReceivableBill;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -234,8 +236,8 @@ class ClientOutstandingTest extends TestCase
 
     public function test_only_the_bound_company_is_reported(): void
     {
-        app(\App\Modules\Core\Services\AppSettingService::class)
-            ->set(\App\Modules\TallySync\Http\Controllers\TallySettingsController::KEY_COMPANY, self::COMPANY);
+        app(AppSettingService::class)
+            ->set(TallySettingsController::KEY_COMPANY, self::COMPANY);
 
         $this->bill(['party_ledger_name' => 'Ours Ltd', 'party_ledger_guid' => 'g-ours', 'closing_amount' => '1000.0000']);
         $this->bill([
