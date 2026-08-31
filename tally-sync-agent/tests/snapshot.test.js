@@ -374,9 +374,16 @@ test('agentVersion() reads package.json and is the strict semver the release gat
     assert.match(agentVersion(), /^\d+\.\d+\.\d+$/);
 });
 
-test('this candidate is 0.3.9 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9', () => {
+test('this candidate is 0.4.0 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9, the purchase-rate read since 0.4.0', () => {
     // The drawer's "agent ≥ 0.3.8" line depends on 0.3.8 being the snapshot
-    // FLOOR; the candidate itself advances (0.3.9 adds purchaseOrder.ts —
-    // Phase 6, staged, flag off — and is built and tested, NOT published).
-    assert.equal(agentVersion(), '0.3.9');
+    // FLOOR, which does not move; the candidate itself advances. 0.3.9 added
+    // purchaseOrder.ts (Phase 6, staged, flag off); 0.4.0 adds the Day Book
+    // purchase-rate READ — tally/purchaseRates.ts and the tray item that runs
+    // it, feeding Procurement's vendor/item rate lookup. It posts nothing to
+    // Tally and runs on no timer.
+    //
+    // Built and tested, NOT published. Publishing writes the auto-update feed
+    // and the factory agent self-updates from it within hours, so it is the
+    // owner's dispatch — see DEPLOY.md's release ritual.
+    assert.equal(agentVersion(), '0.4.0');
 });
