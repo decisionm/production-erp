@@ -638,10 +638,37 @@ class ProductionReturnService
             }
 
             $quantity = bcadd((string) $line['quantity'], '0', 4);
+            $qualityState = ReturnedQualityState::fromNullable($line['quality_state'] ?? null);
 
-            $asks[$lineId] = isset($asks[$lineId])
-                ? ['index' => $asks[$lineId]['index'], 'quantity' => bcadd($asks[$lineId]['quantity'], $quantity, 4)]
-                : ['index' => $index, 'quantity' => $quantity];
+            if (! isset($asks[$lineId])) {
+                $asks[$lineId] = ['index' => $index, 'quantity' => $quantity, 'quality_state' => $qualityState];
+
+                continue;
+            }
+
+            // TWO ASKS AGAINST ONE HANDOVER LINE ARE ADDED UP — that is what
+            // this merge has always done, and it is right for a quantity. It
+            // is NOT right for a condition: 30 kg good and 20 kg damaged
+            // against the same line is not 50 kg of anything, and picking
+            // either answer would put a state on the ledger nobody wrote.
+            //
+            // Refused rather than resolved, because both readings are lossy
+            // and the storekeeper is the one who knows. The screen cannot
+            // produce this — it holds one condition per line — so this is the
+            // API door being honest, not a case anybody meets at the hatch.
+            if ($asks[$lineId]['quality_state'] !== $qualityState) {
+                throw ValidationException::withMessages([
+                    "lines.{$index}.quality_state" => 'That store issue line is returned twice on this document in '
+                        .'two different conditions. Send one line per condition, against its own store issue line, '
+                        .'so the ledger records which quantity came back in which state.',
+                ]);
+            }
+
+            $asks[$lineId] = [
+                'index' => $asks[$lineId]['index'],
+                'quantity' => bcadd($asks[$lineId]['quantity'], $quantity, 4),
+                'quality_state' => $qualityState,
+            ];
         }
 
         return $asks;
@@ -659,7 +686,7 @@ class ProductionReturnService
      * same column); this is the write side agreeing with it. A caller reaching
      * the API directly is the only way to get here.
      *
-     * @param  array<int, array{index: int|string, quantity: string}>  $asks
+     * @param  array<int, array{index: int|string, quantity: string, quality_state: ReturnedQualityState}>  $asks
      * @return array<int, array<int, array<string, mixed>>>
      */
     private function lockAttributedLines(array $asks, int $wipId): array
@@ -708,6 +735,10 @@ class ProductionReturnService
                 'item_id' => (int) $line->item_id,
                 'quantity' => $ask['quantity'],
                 'to_warehouse_id' => (int) $line->from_warehouse_id,
+                // Carried from the ask, not re-read from the caller's payload:
+                // by here the payload has been grouped and merged, and reading
+                // it again would be reading a different line's answer.
+                'quality_state' => $ask['quality_state']->value,
             ];
         }
 

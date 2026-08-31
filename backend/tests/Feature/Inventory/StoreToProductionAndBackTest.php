@@ -226,6 +226,90 @@ class StoreToProductionAndBackTest extends TestCase
     }
 
     /**
+     * THE ATTRIBUTED DOOR CARRIES THE CONDITION TOO — the half that is easy
+     * to lose, and did not work when this was first written.
+     *
+     * An attributed return does not reach the ledger the way an unattributed
+     * one does: the payload is grouped by store issue line, merged, locked
+     * and re-shaped before it reaches StoreIssueService::returnUnused, and
+     * the grouping copied named keys. `quality_state` was dropped there and
+     * every line came out `good`.
+     *
+     * NOTHING CAUGHT IT, and the reason is worth keeping: a test that returns
+     * GOOD material through this door passes whether the value arrived or was
+     * dropped, because a dropped value reads as `good`. Only `damaged` can
+     * tell the two apart, so this test asserts on damaged deliberately.
+     */
+    public function test_a_return_against_a_store_issue_records_the_condition_it_names(): void
+    {
+        $this->stockIn($this->store, '100');
+
+        $issue = $this->postJson('/api/v1/inventory/store-issues', [
+            'received_by' => $this->supervisor->id,
+            'lines' => [['item_id' => $this->resin->id, 'quantity' => '100']],
+        ])->assertCreated()->json('data');
+
+        $this->postJson('/api/v1/inventory/production-returns', [
+            'to_warehouse_id' => $this->store->id,
+            'lines' => [[
+                'store_issue_line_id' => $issue['lines'][0]['id'],
+                'quantity' => '40',
+                'quality_state' => ReturnedQualityState::Damaged->value,
+            ]],
+        ])->assertCreated();
+
+        $movement = StockMovement::query()
+            ->where('purpose', StockMovementPurpose::ReturnFromProduction->value)
+            ->where('type', StockMovementType::TransferIn->value)
+            ->firstOrFail();
+
+        $this->assertSame(ReturnedQualityState::Damaged, $movement->quality_state);
+        $this->assertSame('40.0000', bcadd((string) $movement->quantity, '0', 4));
+    }
+
+    /**
+     * ONE LINE, ONE CONDITION. Two asks against the same handover line are
+     * ADDED UP — right for a quantity, wrong for a condition: 30 kg good and
+     * 20 kg damaged is not 50 kg of anything, and either answer puts a state
+     * on the ledger nobody wrote. Refused, because the storekeeper is the one
+     * who knows. The screen cannot produce this; the API door can.
+     */
+    public function test_one_handover_line_returned_twice_in_two_conditions_is_refused(): void
+    {
+        $this->stockIn($this->store, '100');
+
+        $issue = $this->postJson('/api/v1/inventory/store-issues', [
+            'received_by' => $this->supervisor->id,
+            'lines' => [['item_id' => $this->resin->id, 'quantity' => '100']],
+        ])->assertCreated()->json('data');
+
+        $lineId = $issue['lines'][0]['id'];
+
+        $this->postJson('/api/v1/inventory/production-returns', [
+            'to_warehouse_id' => $this->store->id,
+            'lines' => [
+                ['store_issue_line_id' => $lineId, 'quantity' => '30', 'quality_state' => 'good'],
+                ['store_issue_line_id' => $lineId, 'quantity' => '20', 'quality_state' => 'damaged'],
+            ],
+        ])->assertUnprocessable()->assertJsonValidationErrors('lines.1.quality_state');
+
+        // And it refused before anything moved: all 100 are still on the floor.
+        $this->assertSame('100.0000', $this->balance($this->wip));
+
+        // The same line returned twice in the SAME condition still adds up, as
+        // it always has — the refusal is about the condition, not the merge.
+        $this->postJson('/api/v1/inventory/production-returns', [
+            'to_warehouse_id' => $this->store->id,
+            'lines' => [
+                ['store_issue_line_id' => $lineId, 'quantity' => '30', 'quality_state' => 'damaged'],
+                ['store_issue_line_id' => $lineId, 'quantity' => '20', 'quality_state' => 'damaged'],
+            ],
+        ])->assertCreated();
+
+        $this->assertSame('50.0000', $this->balance($this->wip));
+    }
+
+    /**
      * THE CONDITION IS RECORDED, AND IT CHANGES NOTHING ELSE — the boundary
      * the enum's docblock states, pinned so a later change to it is a
      * deliberate one rather than a side effect.
