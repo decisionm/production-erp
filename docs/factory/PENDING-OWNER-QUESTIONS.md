@@ -369,7 +369,14 @@ corroborate. One product under two names — with one weight figure to
 correct — or two different products? **Blocks:** entering the ASB-9 paper
 rows; that row's weight norm. *Open since 2026-08-07.*
 
-## Q27 · Dispatch of not-yet-approved batches — QC-pass required, accountant approval required, or ship-anytime as today?
+## Q27 · Dispatch of not-yet-approved batches — QC-pass required, accountant approval required, or ship-anytime as today? — RESOLVED
+
+**Resolved 2026-08-31 by DEC-20260831-006: option (b), the QC pass is required.**
+Internal Quality approval is now recorded against the sales order line — who
+approved, when, and for what quantity — and a line may not be dispatched beyond
+the quantity Quality approved. This narrows DEC-20260807-013, under which a
+quality-REJECTED carton was refused at dispatch while a batch merely not yet
+through QC passed freely.
 
 Dispatch scan now refuses cartons of a quality-REJECTED batch
 (DEC-20260807-013), and the scan/lookup shows a pending batch's state
@@ -1922,7 +1929,13 @@ this answer.
 **Blocks:** nothing built. The return works under either answer.
 *Open since 2026-08-30.*
 
-## Q70 · Does the factory use Tally DELIVERY NOTES at all?
+## Q70 · Does the factory use Tally DELIVERY NOTES at all? — RESOLVED
+
+**Resolved 2026-08-31 by DEC-20260831-007: the ERP posts Delivery Notes.**
+The factory's own Tally held zero of them and none of its 177 real Sales
+vouchers referenced one — so this is the ERP introducing a new practice, not
+mirroring an old one, and it is the owner's to introduce. Posting is
+fail-closed and never blocks a dispatch.
 
 The sales-side sibling of Q63, and the evidence points the same way Q63's did.
 The owner's stated fulfilment sequence is "Sales Order → Delivery Note / stock
@@ -1949,7 +1962,12 @@ defaults OFF, fail-closed, and the listener no-ops. The ERP's own delivery, its
 stock movement and its trace are untouched either way — this is only about what
 reaches Tally. **Blocks:** any Delivery Note emission. *Open since 2026-08-30.*
 
-## Q71 · When the ERP issues an invoice, which book originates the sale?
+## Q71 · When the ERP issues an invoice, which book originates the sale? — RESOLVED
+
+**Resolved 2026-08-31 by DEC-20260831-007: the ERP originates the sale**, which
+reverses DEC-20260809-003 (now superseded). The invoice NUMBERING question is
+expressly still open — Tally owns a contiguous NNN/26-27 'Auto Renumber' series
+that the factory's receipts knock off against, and the ERP mints INV-{id}.
 
 DEC-20260809-003 records that **ALL real sales are invoiced directly in Tally**
 and the ERP Sales module is demo-scale. Yet issuing an ERP invoice has been
@@ -2240,7 +2258,7 @@ the owner may answer either without the other.
 
 **Blocks:** nothing on the screen — same as Q80. *Open since 2026-08-30.*
 
-## Q82 · On the merged Store ↔ Production screen there are two doors home for the same material. Which one should a storekeeper be told to use? — RESOLVED (DEC-20260831-005, DEC-20260831-006)
+## Q82 · On the merged Store ↔ Production screen there are two doors home for the same material. Which one should a storekeeper be told to use? — RESOLVED (DEC-20260831-005, DEC-20260831-008)
 
 Raised and answered on 31-Aug-2026, in the session that merged Store Issues
 and Production Returns into one screen. Recorded because the reasoning is
@@ -2265,7 +2283,7 @@ gated on `is_open`, so material a completed handover was standing on would
 have had no door at all while still blocking its own free return. That gate is
 now keyed on what is outstanding.
 
-## Q83 · Does "material stays available for the next production day" cover material no store issue put there? — RESOLVED (DEC-20260831-007)
+## Q83 · Does "material stays available for the next production day" cover material no store issue put there? — RESOLVED (DEC-20260831-009)
 
 Also raised and answered on 31-Aug-2026.
 

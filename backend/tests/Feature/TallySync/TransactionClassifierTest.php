@@ -153,8 +153,16 @@ class TransactionClassifierTest extends TestCase
 
     public function test_a_delivery_classifies_as_delivery_note(): void
     {
+        // The Delivery Note stages NOTHING without the customer's Tally ledger
+        // name (DEC-20260831-007's fail-closed half). This customer is a
+        // stand-in that was never saved, and the trait completes DATABASE ROWS
+        // — so the name goes on the object itself. tally_ledger_name is not
+        // fillable, hence forceFill.
+        $customer = new Customer(['name' => 'Sri Aurobindo Beverages']);
+        $customer->forceFill(['tally_ledger_name' => 'Sri Aurobindo Beverages']);
+
         $so = new SalesOrder;
-        $so->setRelation('customer', new Customer(['name' => 'Sri Aurobindo Beverages']));
+        $so->setRelation('customer', $customer);
 
         $line = new DeliveryLine(['quantity' => '2000.0000']);
         $line->setRelation('item', new Item(['sku' => 'BTL-500', 'name' => '500ml PET Bottle']));

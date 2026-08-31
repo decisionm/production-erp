@@ -18,6 +18,7 @@ use App\Modules\Sales\Models\SalesOrder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -30,6 +31,7 @@ use Tests\TestCase;
 class FinishedCartonTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     private Item $bottle;
 
@@ -128,6 +130,9 @@ class FinishedCartonTest extends TestCase
             'item_id' => $this->bottle->id, 'quantity' => '2000',
             'unit_price' => '4.50', 'quantity_delivered' => 0,
         ]);
+        // Quality signs the line off; without it the dispatch is refused
+        // outright (DEC-20260831-006) and no carton would ever be scanned.
+        $this->approveQualityForOrder($order->id);
 
         // Two full cartons scanned — 1,200 pieces derived, boxes stamped.
         $delivery = $this->postJson('/api/v1/sales/deliveries', [
@@ -242,6 +247,10 @@ class FinishedCartonTest extends TestCase
         $entry->update(['status' => ShiftProductionEntryStatus::Approved]);
 
         $order = $this->orderFor();
+        // The batch is approved on the floor, but dispatch also needs Quality's
+        // sign-off on the LINE (DEC-20260831-006) — "exactly as before" is
+        // judged with that precondition met, not without it.
+        $this->approveQualityForOrder($order->id);
 
         $this->postJson('/api/v1/sales/deliveries', [
             'sales_order_id' => $order->id,

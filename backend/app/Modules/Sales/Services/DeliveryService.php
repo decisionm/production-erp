@@ -9,6 +9,7 @@ use App\Modules\Inventory\Services\StockReservationService;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
 use App\Modules\Production\Models\FinishedCarton;
 use App\Modules\Sales\Events\DeliveryDispatched;
+use App\Modules\Sales\Exceptions\DispatchNotQualityApprovedException;
 use App\Modules\Sales\Exceptions\OverDeliveryException;
 use App\Modules\Sales\Models\Delivery;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
@@ -168,6 +169,30 @@ class DeliveryService
                 $remaining = bcsub($soLine->quantity, $soLine->quantity_delivered, 4);
                 if (bccomp((string) $lineData['quantity'], $remaining, 4) > 0) {
                     throw OverDeliveryException::forLine($soLine->id, $remaining, (string) $lineData['quantity']);
+                }
+
+                // THE INTERNAL QUALITY GATE — DEC-20260831-006, and the reason
+                // the owner's sequence reads "Quality approves, THEN Sales
+                // dispatches". Judged inside the same transaction and under the
+                // same line lock as the over-delivery cap above, so a
+                // withdrawal committing mid-dispatch cannot be missed.
+                //
+                // Capped on the QUANTITY Quality signed for, not on a boolean:
+                // an approval is of a held quantity, and dispatching past it is
+                // shipping stock nobody inspected. Before this, DEC-20260807-013
+                // refused only an already-REJECTED carton, and a batch merely
+                // not yet through QC went out freely.
+                if (! $soLine->isQualityApproved()) {
+                    throw DispatchNotQualityApprovedException::forLine($soLine->id);
+                }
+
+                $approvedRemaining = bcsub($soLine->qualityApprovedQuantity(), (string) $soLine->quantity_delivered, 4);
+                if (bccomp((string) $lineData['quantity'], $approvedRemaining, 4) > 0) {
+                    throw DispatchNotQualityApprovedException::beyondApproved(
+                        $soLine->id,
+                        bccomp($approvedRemaining, '0', 4) === 1 ? $approvedRemaining : '0.0000',
+                        (string) $lineData['quantity'],
+                    );
                 }
 
                 $delivery->lines()->create([

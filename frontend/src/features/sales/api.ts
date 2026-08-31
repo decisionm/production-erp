@@ -241,3 +241,17 @@ export async function listFulfilmentControl(): Promise<FulfilmentControlRow[]> {
     const { data } = await api.get<{ data: FulfilmentControlRow[] }>('/sales/fulfilment-control');
     return data.data;
 }
+
+/**
+ * Quality signs a sales order line off for dispatch (DEC-20260831-006). Routed
+ * under the QUALITY module although the record lives on a Sales line: the act
+ * is Quality's, and Sales must not be able to approve its own dispatch.
+ */
+export async function approveDispatchQuality(lineId: number, note?: string): Promise<void> {
+    await api.post(`/quality/dispatch-approvals/lines/${lineId}/approve`, { note: note ?? null });
+}
+
+/** Withdraw that approval — refused by the server once anything has gone out. */
+export async function revokeDispatchQuality(lineId: number): Promise<void> {
+    await api.post(`/quality/dispatch-approvals/lines/${lineId}/revoke`);
+}

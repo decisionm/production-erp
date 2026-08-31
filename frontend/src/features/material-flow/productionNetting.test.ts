@@ -8,7 +8,12 @@ import type { MaterialFlowMaterial } from './types';
  * netting the same standing quantity twice, and netting something that is not
  * usable.
  */
-const material = (id: number, available: string, matches = true): MaterialFlowMaterial =>
+const material = (
+    id: number,
+    available: string,
+    matches = true,
+    standing = available,
+): MaterialFlowMaterial =>
     ({
         id,
         sku: `SKU-${id}`,
@@ -16,6 +21,7 @@ const material = (id: number, available: string, matches = true): MaterialFlowMa
         uom: 'Kgs.',
         machine_applies: false,
         available_in_production: available,
+        standing_in_production: standing,
         production_unit_matches: matches,
     }) as MaterialFlowMaterial;
 
@@ -25,7 +31,7 @@ describe('netAgainstProduction', () => {
     it('asks the store for the balance, not the total', () => {
         const [line] = netAgainstProduction([{ item_id: 1, quantity: 1000 }], by(material(1, '300.0000')));
 
-        expect(line).toEqual({ required: 1000, available: 300, ask: 700, unitMismatch: false });
+        expect(line).toEqual({ required: 1000, available: 300, ask: 700, unitMismatch: false, standing: 300 });
     });
 
     it('asks for nothing when the floor already covers the need', () => {
@@ -73,10 +79,12 @@ describe('netAgainstProduction', () => {
         // flag is what lets the screen say the quantity is nonetheless there.
         const [line] = netAgainstProduction(
             [{ item_id: 1, quantity: 1000 }],
-            by(material(1, '0.0000', false)),
+            by(material(1, '0.0000', false, '300.0000')),
         );
 
-        expect(line).toEqual({ required: 1000, available: 0, ask: 1000, unitMismatch: true });
+        // Netted nothing, and the real 300 is still carried so the screen can
+        // show it struck through rather than printing a misleading 0.
+        expect(line).toEqual({ required: 1000, available: 0, ask: 1000, unitMismatch: true, standing: 300 });
     });
 
     it('nets nothing for a material that is not on the floor at all', () => {
@@ -88,12 +96,26 @@ describe('netAgainstProduction', () => {
     it('leaves a line with no material chosen alone', () => {
         const [line] = netAgainstProduction([{ item_id: null, quantity: 500 }], by(material(1, '300.0000')));
 
-        expect(line).toEqual({ required: 500, available: 0, ask: 500, unitMismatch: false });
+        expect(line).toEqual({ required: 500, available: 0, ask: 500, unitMismatch: false, standing: 0 });
+    });
+
+    it('carries a negative balance through for display and nets nothing from it', () => {
+        // The server already reports usable as 0 for a negative; the standing
+        // figure is what keeps a discrepancy the floor is standing next to
+        // from vanishing off the screen that lists it.
+        const [line] = netAgainstProduction(
+            [{ item_id: 1, quantity: 1000 }],
+            by(material(1, '0.0000', true, '-112.3250')),
+        );
+
+        expect(line.available).toBe(0);
+        expect(line.ask).toBe(1000);
+        expect(line.standing).toBe(-112.325);
     });
 
     it('treats an empty quantity as nothing required', () => {
         const [line] = netAgainstProduction([{ item_id: 1, quantity: null }], by(material(1, '300.0000')));
 
-        expect(line).toEqual({ required: 0, available: 0, ask: 0, unitMismatch: false });
+        expect(line).toEqual({ required: 0, available: 0, ask: 0, unitMismatch: false, standing: 300 });
     });
 });

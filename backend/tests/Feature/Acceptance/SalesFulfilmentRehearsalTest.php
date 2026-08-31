@@ -13,6 +13,7 @@ use App\Modules\TallySync\Models\TallySyncEntry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Tests\Support\SeedsSalesTallyMasterData;
 use Tests\TestCase;
 
 /**
@@ -36,6 +37,7 @@ use Tests\TestCase;
 class SalesFulfilmentRehearsalTest extends TestCase
 {
     use RefreshDatabase;
+    use SeedsSalesTallyMasterData;
 
     public function test_the_whole_chain_walks_and_each_step_names_the_next_actor(): void
     {
@@ -111,6 +113,13 @@ class SalesFulfilmentRehearsalTest extends TestCase
         // at all, so this is the path a rehearsal there would actually use.
         $this->actingWith(['sales.view', 'sales.manage']);
 
+        // QUALITY SIGNS THE HELD 600 OFF FIRST — dispatch is gated on internal
+        // quality approval and capped at the approved quantity
+        // (DEC-20260831-006). The gate itself is DispatchQualityGateTest's
+        // subject; here it is the precondition the owner's sequence puts
+        // between the store's hold and Sales' dispatch.
+        $this->approveQualityForDispatch($lineId, '600');
+
         $this->postJson('/api/v1/sales/deliveries', [
             'sales_order_id' => $orderId,
             'warehouse_id' => $fg->id,
@@ -183,6 +192,11 @@ class SalesFulfilmentRehearsalTest extends TestCase
         $this->postJson("/api/v1/sales/sales-orders/{$orderId}/confirm")->assertSuccessful();
 
         $lineId = $this->getJson('/api/v1/sales/fulfilment-control')->assertOk()->json('data.0.line_id');
+
+        // Quality's dispatch sign-off, for the same reason as above
+        // (DEC-20260831-006): this half's subject is what reaches Tally, not
+        // the quality gate, so the sign-off is assumed rather than walked.
+        $this->approveQualityForDispatch($lineId, '100');
 
         $this->postJson('/api/v1/sales/deliveries', [
             'sales_order_id' => $orderId,

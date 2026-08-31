@@ -57,7 +57,11 @@ class OutboundVoucherTest extends TestCase
 
     public function test_delivery_enqueues_a_delivery_note(): void
     {
+        // The Delivery Note posts against the customer's TALLY ledger, and
+        // refuses without one (DEC-20260831-007's fail-closed half). The
+        // customer here is in memory, so the name is stamped on the object.
         $customer = new Customer(['name' => 'Sri Aurobindo Beverages', 'gstin' => '34AABCA1122G1Z4']);
+        $customer->forceFill(['tally_ledger_name' => 'Sri Aurobindo Beverages']);
         $so = new SalesOrder;
         $so->setRelation('customer', $customer);
 

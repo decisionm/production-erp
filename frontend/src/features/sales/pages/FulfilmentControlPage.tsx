@@ -1,11 +1,14 @@
-import { useQuery } from '@tanstack/react-query';
-import { Alert, Input, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Alert, Button, Input, Popconfirm, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { useMemo, useState } from 'react';
-import { listFulfilmentControl } from '@/features/sales/api';
+import { approveDispatchQuality, listFulfilmentControl, revokeDispatchQuality } from '@/features/sales/api';
 import { NOT_RECORDED } from '@/features/sales/types';
 import type { FulfilmentControlRow } from '@/features/sales/types';
 import { formatQuantity } from '@/features/material-flow/words';
 import { itemLabel } from '@/lib/itemLabel';
+import { apiRefusalMessage } from '@/features/material-flow/api';
+import { hasManageAccess } from '@/features/auth/permissions';
+import { useAuthStore } from '@/features/auth/store';
 
 /**
  * THE SALES FULFILMENT CONTROL VIEW — one row per sales order line, and the
@@ -48,8 +51,10 @@ function blockerTone(code: string): string {
             return 'gold';
         case 'in_production':
             return 'blue';
-        case 'held_awaiting_dispatch':
-            return 'cyan';
+        case 'awaiting_quality_approval':
+            return 'magenta';
+        case 'ready_to_dispatch':
+            return 'green';
         case 'awaiting_invoice':
             return 'purple';
         default:
@@ -74,10 +79,42 @@ function NotRecordedCell({ detail }: { detail: string }) {
 
 export default function FulfilmentControlPage() {
     const [search, setSearch] = useState('');
+    const queryClient = useQueryClient();
+
+    // THE ONE ACT ON THIS BOARD, and it is Quality's. Everything else still
+    // lives on the screen that owns it — holding on Store Fulfilment, starting
+    // on the Production Queue, dispatching and invoicing on Sales. Quality's
+    // sign-off is here because this is the board that says "Quality" in the
+    // "who acts next" column, and sending them somewhere else to act on a row
+    // they are already looking at is how a gate gets skipped.
+    const user = useAuthStore((state) => state.user);
+    const canApprove = hasManageAccess(user, 'quality');
 
     const controlQuery = useQuery({
         queryKey: ['sales', 'fulfilment-control'],
         queryFn: listFulfilmentControl,
+    });
+
+    const refresh = () => queryClient.invalidateQueries({ queryKey: ['sales', 'fulfilment-control'] });
+
+    const approve = useMutation({
+        mutationFn: (lineId: number) => approveDispatchQuality(lineId),
+        onSuccess: () => {
+            void message.success('Quality approval recorded');
+            void refresh();
+        },
+        // The 422 IS the answer — the server refuses on figures recomputed
+        // under a lock, and its sentence carries the real number.
+        onError: (error) => void message.error(apiRefusalMessage(error, 'Could not record the approval')),
+    });
+
+    const revoke = useMutation({
+        mutationFn: (lineId: number) => revokeDispatchQuality(lineId),
+        onSuccess: () => {
+            void message.success('Quality approval withdrawn');
+            void refresh();
+        },
+        onError: (error) => void message.error(apiRefusalMessage(error, 'Could not withdraw the approval')),
     });
 
     const rows = useMemo(() => {
@@ -108,13 +145,13 @@ export default function FulfilmentControlPage() {
               this board must not conclude from a covered line that it may ship.
             */}
             <Alert
-                type="warning"
+                type="info"
                 showIcon
-                message="Internal QA approval and customer approval are not recorded in this ERP"
+                message="Stock held is not permission to dispatch"
                 description={
-                    'A line shown as held in full is stock the store has set aside — it is NOT a statement that the '
-                    + 'goods may leave. Both approvals must be confirmed off-system before dispatch, and the '
-                    + 'planned/completed production and store-rejected columns have no source in this build either.'
+                    'Held stock is what the store has set aside. Nothing may leave until internal Quality signs the '
+                    + 'line off, and dispatch is then capped at the quantity they approved. Planned and completed '
+                    + 'production and the store-rejected quantity still have no source in this build and say so.'
                 }
             />
 
@@ -228,12 +265,30 @@ export default function FulfilmentControlPage() {
                     {
                         title: 'Internal QA',
                         key: 'qa',
-                        render: (_, row) => <NotRecordedCell detail={row.quality.detail} />,
+                        render: (_, row) =>
+                            row.quality.state === 'approved' ? (
+                                <Tooltip
+                                    title={`Approved${row.quality.approved_by ? ` by ${row.quality.approved_by}` : ''}${
+                                        row.quality.approved_at ? ` on ${row.quality.approved_at}` : ''
+                                    }${row.quality.note ? ` — ${row.quality.note}` : ''}`}
+                                >
+                                    <Tag color="green">approved</Tag>
+                                </Tooltip>
+                            ) : (
+                                <Tooltip title={row.quality.detail}>
+                                    <Tag color="orange">pending</Tag>
+                                </Tooltip>
+                            ),
                     },
                     {
-                        title: 'Customer approval',
-                        key: 'customer_approval',
-                        render: (_, row) => <NotRecordedCell detail={row.customer_approval.detail} />,
+                        // TWO COLUMNS, NOT ONE. "Stock held" is what the store
+                        // set aside; "Dispatch ready" is what may actually go,
+                        // and it stays 0 until Quality signs off. A single
+                        // figure conflated the two and read as permission.
+                        title: 'Stock held',
+                        key: 'stock_held',
+                        align: 'right',
+                        render: (_, row) => formatQuantity(row.stock_held, row.item?.uom),
                     },
                     {
                         title: 'Dispatch ready',
@@ -258,6 +313,36 @@ export default function FulfilmentControlPage() {
                         key: 'expected',
                         render: (_, row) => row.expected_date ?? '—',
                     },
+                    ...(canApprove
+                        ? [
+                              {
+                                  title: 'Quality action',
+                                  key: 'quality_action',
+                                  fixed: 'right' as const,
+                                  render: (_: unknown, row: FulfilmentControlRow) =>
+                                      row.quality.state === 'approved' ? (
+                                          <Popconfirm
+                                              title="Withdraw this approval?"
+                                              description="Refused by the server once anything has been dispatched."
+                                              onConfirm={() => revoke.mutate(row.line_id)}
+                                          >
+                                              <Button size="small" danger loading={revoke.isPending}>
+                                                  Withdraw
+                                              </Button>
+                                          </Popconfirm>
+                                      ) : (
+                                          <Button
+                                              size="small"
+                                              type="primary"
+                                              loading={approve.isPending}
+                                              onClick={() => approve.mutate(row.line_id)}
+                                          >
+                                              Approve
+                                          </Button>
+                                      ),
+                              },
+                          ]
+                        : []),
                 ]}
             />
         </Space>

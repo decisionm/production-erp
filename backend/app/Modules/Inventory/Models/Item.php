@@ -38,6 +38,15 @@ class Item extends Model
      */
     public ?string $availableInProduction = null;
 
+    /**
+     * What is ACTUALLY standing there, netted or not — negative included.
+     * The owner's rule (DEC-20260831-005, reconfirmed 31-Aug-2026): a negative
+     * or unit-mismatched balance stays VISIBLE and is excluded from netting.
+     * Reporting only the usable figure would show 0 for both, which reads as
+     * an empty floor and is the opposite of visible.
+     */
+    public ?string $standingInProduction = null;
+
     public ?bool $productionUnitMatches = null;
 
     use RecordsConfigurationAudit;

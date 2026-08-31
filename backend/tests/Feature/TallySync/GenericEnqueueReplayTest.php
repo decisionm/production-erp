@@ -98,6 +98,14 @@ class GenericEnqueueReplayTest extends TestCase
         $this->order = SalesOrder::create(['customer_id' => $customer->id, 'status' => SalesOrderStatus::Confirmed, 'order_date' => '2026-08-09']);
         $this->line = $this->order->lines()->create(['item_id' => $this->bottle->id, 'quantity' => '2000', 'unit_price' => '4.50', 'quantity_delivered' => 0]);
 
+        // Dispatch is gated on Quality's internal sign-off (DEC-20260831-006),
+        // and this file's subject is the ENQUEUE guard, not the gate: the
+        // dispatches below are the ordinary approved ones they always were, so
+        // the whole ordered 2000 is signed off once, here. The whole quantity
+        // on purpose — the two-source test spends it as 800 + 1200, and the
+        // cap is the approved quantity less what has already gone out.
+        $this->line = $this->approveQualityForDispatch($this->line);
+
         // The Sales voucher is this file's FIXTURE VEHICLE, not its subject, and
         // SalesVoucherPayload now stages NOTHING without the GST masters behind it
         // (registration, ledger roles, an HSN and rate per item, the customer's

@@ -231,6 +231,15 @@ trait RegressionFixtures
         $order = SalesOrder::create(['customer_id' => $customer->id, 'status' => SalesOrderStatus::Confirmed, 'order_date' => '2026-08-12']);
         $line = $order->lines()->create(['item_id' => $bottle->id, 'quantity' => '1000', 'unit_price' => '1.00', 'quantity_delivered' => 0]);
 
+        // Dispatch is gated on internal quality approval (DEC-20260831-006), and
+        // this fixture's subject is every module's LIST endpoint, not the gate.
+        // Stamped directly rather than through the service, because the line is
+        // deliberately never held here — holding is Store Fulfilment's subject.
+        $line->forceFill([
+            'quality_approved_at' => now(),
+            'quality_approved_quantity' => '1000.0000',
+        ])->save();
+
         $deliveryId = $this->postJson('/api/v1/sales/deliveries', [
             'sales_order_id' => $order->id,
             'warehouse_id' => $fg->id,

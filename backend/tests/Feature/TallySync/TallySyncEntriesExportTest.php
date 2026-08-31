@@ -288,7 +288,12 @@ class TallySyncEntriesExportTest extends TestCase
     private function enqueueDelivery(): TallySyncEntry
     {
         $so = new SalesOrder;
-        $so->setRelation('customer', new Customer(['name' => 'Sri Aurobindo Beverages', 'gstin' => '33AAACS1234A1Z9']));
+        // The Delivery Note is staged fail-closed (DEC-20260831-007): it posts
+        // against the customer's TALLY ledger name, and refuses without one.
+        // This customer is in memory, so the name goes on the object itself.
+        $customer = new Customer(['name' => 'Sri Aurobindo Beverages', 'gstin' => '33AAACS1234A1Z9']);
+        $customer->forceFill(['tally_ledger_name' => 'Sri Aurobindo Beverages']);
+        $so->setRelation('customer', $customer);
 
         $bottle = new DeliveryLine(['quantity' => '2000.0000']);
         $bottle->setRelation('item', new Item(['sku' => 'BTL-500', 'name' => '500ml PET Bottle']));

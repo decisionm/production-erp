@@ -12,6 +12,7 @@ use App\Modules\Sales\Models\Customer;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\SalesOrder;
 use App\Modules\Sales\Models\SalesOrderLine;
+use App\Modules\Sales\Services\DispatchQualityApprovalService;
 use App\Modules\Sales\Services\FulfilmentControlService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -106,11 +107,14 @@ class FulfilmentControlViewTest extends TestCase
     }
 
     /**
-     * THE FALSE GREEN. Everything the line owes is held — and the view still
-     * refuses to call it dispatchable, because the two gates the owner asked
-     * to be separate and visible are not recorded anywhere in this build.
+     * THE FALSE GREEN, and the column the owner called misleading.
+     *
+     * Everything the line owes is HELD — and none of it may go, because Quality
+     * has not signed it off (DEC-20260831-006). `stock_held` says what the store
+     * set aside; `dispatch_ready` stays 0. Those are two different facts and a
+     * single "dispatch ready" figure conflated them into permission to ship.
      */
-    public function test_a_fully_held_line_is_never_called_ready_without_the_two_gates(): void
+    public function test_a_fully_held_line_shows_stock_held_but_nothing_dispatchable_until_quality_signs(): void
     {
         $this->seedStock('500');
         $line = $this->line('200');
@@ -118,20 +122,51 @@ class FulfilmentControlViewTest extends TestCase
 
         $this->actingWith(['sales.view']);
 
-        $response = $this->getJson('/api/v1/sales/fulfilment-control')->assertOk();
-
-        $response
+        $this->getJson('/api/v1/sales/fulfilment-control')
+            ->assertOk()
             ->assertJsonPath('data.0.held', '200.0000')
             ->assertJsonPath('data.0.shortfall', '0.0000')
-            ->assertJsonPath('data.0.dispatch_ready', '200.0000')
-            ->assertJsonPath('data.0.blocker.code', 'held_awaiting_dispatch')
-            ->assertJsonPath('data.0.quality.state', FulfilmentControlService::NOT_RECORDED)
-            ->assertJsonPath('data.0.customer_approval.state', FulfilmentControlService::NOT_RECORDED);
+            ->assertJsonPath('data.0.stock_held', '200.0000')
+            ->assertJsonPath('data.0.dispatch_ready', '0.0000')
+            ->assertJsonPath('data.0.quality.state', 'pending')
+            ->assertJsonPath('data.0.blocker.code', 'awaiting_quality_approval')
+            ->assertJsonPath('data.0.blocker.team', 'Quality');
+    }
 
-        $this->assertStringContainsString(
-            'not recorded',
-            $response->json('data.0.blocker.summary'),
-            'a fully held line must still say the two approval gates are not recorded — never a bare "ready"',
+    /** Once Quality signs, the held stock becomes genuinely dispatchable and the ball moves to Sales. */
+    public function test_quality_approval_turns_held_stock_into_dispatchable_stock(): void
+    {
+        $this->seedStock('500');
+        $line = $this->line('200');
+        app(StockReservationService::class)->reserve($line, '200', null);
+        app(DispatchQualityApprovalService::class)->approve($line, 'Checked the lot', null);
+
+        $this->actingWith(['sales.view']);
+
+        $this->getJson('/api/v1/sales/fulfilment-control')
+            ->assertOk()
+            ->assertJsonPath('data.0.stock_held', '200.0000')
+            ->assertJsonPath('data.0.dispatch_ready', '200.0000')
+            ->assertJsonPath('data.0.quality.state', 'approved')
+            ->assertJsonPath('data.0.quality.approved_quantity', '200.0000')
+            ->assertJsonPath('data.0.blocker.code', 'ready_to_dispatch')
+            ->assertJsonPath('data.0.blocker.team', 'Sales');
+    }
+
+    /** The gate the owner removed must be gone from the wire, not shown as unknown. */
+    public function test_the_row_carries_no_customer_approval_key_at_all(): void
+    {
+        $this->seedStock('500');
+        $this->line('200');
+
+        $this->actingWith(['sales.view']);
+
+        $row = $this->getJson('/api/v1/sales/fulfilment-control')->assertOk()->json('data.0');
+
+        $this->assertArrayNotHasKey(
+            'customer_approval',
+            $row,
+            'there is no customer-approval step — a gate nobody performs must not appear on a screen at all',
         );
     }
 
@@ -153,8 +188,6 @@ class FulfilmentControlViewTest extends TestCase
             'store.rejected',
             'production.planned',
             'production.completed',
-            'quality.state',
-            'customer_approval.state',
         ] as $path) {
             [$group, $key] = explode('.', $path);
             $this->assertSame(
@@ -167,8 +200,9 @@ class FulfilmentControlViewTest extends TestCase
         $this->assertNotEmpty($row['store']['rejected_detail']);
         $this->assertNotEmpty($row['production']['planned_detail']);
         $this->assertNotEmpty($row['production']['completed_detail']);
-        $this->assertNotEmpty($row['quality']['detail']);
-        $this->assertNotEmpty($row['customer_approval']['detail']);
+        // Quality is NOT in that list any more: it is recorded now, and reads
+        // approved/pending rather than confessing it has no source.
+        $this->assertContains($row['quality']['state'], ['approved', 'pending']);
     }
 
     /** The ageing signal owner point 3 asks for: how long the store has sat on a decision. */

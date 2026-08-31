@@ -123,7 +123,7 @@ class TallySyncLinkServiceTest extends TestCase
         $link = $links->for($invoice);
         $this->assertSame('Sales', $link['voucher_type']);
         $this->assertSame("INV-{$invoice->id}", $link['voucher_number']);
-        $this->assertSame('DEC-20260809-003', ((array) $link['flags'])['unvalidated_builder']['decision']);
+        $this->assertSame('DEC-20260831-007', ((array) $link['flags'])['unvalidated_builder']['decision']);
 
         app(TallySyncService::class)->markSynced($entry);
 
