@@ -74,8 +74,34 @@ const parser = new XMLParser({ ignoreAttributes: false, parseTagValue: false, tr
  * a control-char regex — sanitise rather than assume a clean string, since real
  * client data varies.
  */
+/**
+ * Decode Tally's NUMERIC CHARACTER REFERENCES before anything else looks at
+ * the string.
+ *
+ * Added after a live outage on 31-Aug-2026. Tally exports `&#13;&#10;` on a
+ * value someone pressed Enter in and `&#4;` before its reserved words, and
+ * `fast-xml-parser` with `parseTagValue: false` DOES NOT DECODE THEM — so what
+ * arrives is those ten characters literally, every one of them printable, and
+ * clean()'s char-code strip sailed straight past it. Three of the factory's
+ * 1742 ledgers carry a good GSTIN with exactly that on the end (25 characters
+ * into a 15-character column) and they took the whole masters pull down with a
+ * 422.
+ *
+ * Decoding RECOVERS the real value rather than discarding a fact the factory
+ * holds.
+ */
+function decodeEntities(raw: string): string {
+    return raw.replace(/&#(x[0-9a-f]{1,6}|\d{1,7});/gi, (_match, code: string) => {
+        const point = code.toLowerCase().startsWith('x') ? parseInt(code.slice(1), 16) : parseInt(code, 10);
+
+        // Out of range, or NUL, is dropped rather than becoming a replacement
+        // character that would then read as content.
+        return Number.isFinite(point) && point > 0 && point <= 0x10ffff ? String.fromCodePoint(point) : '';
+    });
+}
+
 function clean(value: unknown): string {
-    const raw = String(value ?? '');
+    const raw = decodeEntities(String(value ?? ''));
     let out = '';
     for (const ch of raw) {
         if (ch.charCodeAt(0) >= 0x20) out += ch;
@@ -232,7 +258,13 @@ export async function exportLedgers(t: TallyTarget): Promise<LedgerNode[]> {
 
     return (await exportCollection(t, 'LEDGER', 'Ledger', fetch))
         .map((n) => {
-            const gstin = firstOf(n as Record<string, unknown>, LEDGER_GSTIN_FIELDS);
+            // A GSTIN is fifteen characters by definition. Anything else
+            // after cleaning is a field somebody typed two things into, and
+            // sending it can only cost the cloud a dropped column — so it is
+            // not sent. The cloud sanitises independently (TallyText); this is
+            // the same rule applied at the source, not a substitute for it.
+            const gstinRaw = firstOf(n as Record<string, unknown>, LEDGER_GSTIN_FIELDS);
+            const gstin = gstinRaw !== undefined && gstinRaw.length !== 15 ? undefined : gstinRaw;
             const state = firstOf(n as Record<string, unknown>, LEDGER_STATE_FIELDS);
             const email = firstOf(n as Record<string, unknown>, LEDGER_EMAIL_FIELDS);
             const phone = firstOf(n as Record<string, unknown>, LEDGER_PHONE_FIELDS);
