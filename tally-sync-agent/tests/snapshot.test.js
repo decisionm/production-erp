@@ -374,7 +374,7 @@ test('agentVersion() reads package.json and is the strict semver the release gat
     assert.match(agentVersion(), /^\d+\.\d+\.\d+$/);
 });
 
-test('this candidate is 0.4.2 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9, the purchase-rate read since 0.4.0', () => {
+test('this candidate is 0.4.3 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9, the purchase-rate read since 0.4.0', () => {
     // The drawer's "agent ≥ 0.3.8" line depends on 0.3.8 being the snapshot
     // FLOOR, which does not move; the candidate itself advances. 0.3.9 added
     // purchaseOrder.ts (Phase 6, staged, flag off); 0.4.0 adds the Day Book
@@ -393,5 +393,10 @@ test('this candidate is 0.4.2 — snapshots since 0.3.8, the Purchase Order buil
     // a company with hundreds of purchase orders. THIS build is required for
     // the rate lookup to carry anything; unlike 0.4.1, the cloud cannot
     // compensate for it, because the parsing happens here.
-    assert.equal(agentVersion(), '0.4.2');
+    // 0.4.3 reads purchase vouchers through a TDL COLLECTION — the shape every
+    // read that works against this factory's Tally uses — falling back to the
+    // Day Book report and REPORTING WHICH ONE ANSWERED. The reporting is the
+    // point: three pulls on 31-Aug returned zero and the cloud could not tell
+    // "bought nothing" from "request refused" from "answer not understood".
+    assert.equal(agentVersion(), '0.4.3');
 });
