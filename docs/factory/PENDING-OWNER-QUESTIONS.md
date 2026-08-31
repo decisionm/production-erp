@@ -1858,7 +1858,7 @@ because this file re-mints question numbers at merge.
 supplier-bill screen, its arithmetic, its matching and its attachment work
 under either answer. *Open since 2026-08-28.*
 
-## Q69 · When material comes back from production, must it be returned against the store issue that put it there?
+## Q69 · ~~When material comes back from production, must it be returned against the store issue that put it there?~~ — RESOLVED (DEC-20260831-005)
 
 The daily return was built on 30-Aug-2026: the store issues material to the
 production area, production makes finished goods from it, and the balance is
@@ -1879,7 +1879,23 @@ this factory cannot make (FC-01, DEC-20260807-007: a bag belongs to no
 machine and no batch, and a batch's consumption is calculated). So the screen
 shows the split and a person chooses.
 
-**Until it is answered, the build REFUSES rather than picks.** A material an
+> **RESOLVED — `DEC-20260831-005` (2026-08-31), owner.** Yes, where a Store
+> Issue exists: the return must identify that exact issue, so the handover's
+> own quantity closes and the ledger records which handover the material came
+> back on. Where NO Store Issue exists — the seven materials the live floor
+> could not bring home — it may be returned without one. The rule reaches as
+> far as an issue exists to be named and never requires inventing one.
+>
+> The same decision goes further than this question asked, and the rest is
+> built with it: material not returned stays available in Production/WIP as
+> the next day's opening material, and the next request nets off the usable
+> quantity already standing there for the same item and unit, showing total
+> required / in production / balance to request.
+>
+> Read `CURRENT-DECISIONS.md` for the decision; this entry is kept only as the
+> history of the question.
+
+**Until it was answered, the build REFUSED rather than picked.** A material an
 open store issue is standing on will not accept an unattributed return: the
 refusal names the issue and points at its own line, which always works.
 Materials with no handover behind them — all seven the live instance could

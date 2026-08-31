@@ -14,12 +14,24 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * tape filed as 229 Nos is a different number about a different thing, and
  * that reached the live factory once.
  *
+ * `quantity` is WHAT IS ASKED OF THE STORE, and always has been. Where a
+ * request considered the floor (DEC-20260831-001), `required_quantity` is
+ * what production actually needed and `available_in_production` is what was
+ * already standing there when the request was raised — so `quantity` is the
+ * balance between them, floored at zero. Both are NULL on a request that
+ * never netted, which is not the same as zero: zero would claim the floor was
+ * empty.
+ *
  * `issued_quantity` is how much the store has handed over so far. It is
  * written ONLY through MaterialRequestService::applyIssuedQuantities, and
  * it is NOT consumption: issued material is standing in Production/WIP
  * (DEC-20260817-001) until a batch calculates that it used some of it.
  */
-#[Fillable(['material_request_id', 'item_id', 'quantity', 'uom', 'issued_quantity', 'notes'])]
+#[Fillable([
+    'material_request_id', 'item_id', 'quantity', 'uom', 'issued_quantity', 'notes',
+    // DEC-20260831-001, and NULL where a request never considered the floor.
+    'required_quantity', 'available_in_production',
+])]
 class MaterialRequestLine extends Model
 {
     protected function casts(): array
@@ -27,6 +39,8 @@ class MaterialRequestLine extends Model
         return [
             'quantity' => 'decimal:4',
             'issued_quantity' => 'decimal:4',
+            'required_quantity' => 'decimal:4',
+            'available_in_production' => 'decimal:4',
         ];
     }
 

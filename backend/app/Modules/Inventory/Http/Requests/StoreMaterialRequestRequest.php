@@ -54,6 +54,17 @@ class StoreMaterialRequestRequest extends FormRequest
             // Stock quantities are decimal everywhere in this codebase, and
             // an ask of zero is not an ask.
             'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'decimal:0,4', 'max:99999999999'],
+            // WHAT PRODUCTION NEEDS IN TOTAL, where the caller is asking for
+            // the netted behaviour (DEC-20260831-001). Optional, because
+            // every caller that predates that decision sends `quantity`
+            // alone and means "ask the store for exactly this".
+            //
+            // The SERVER does the subtraction. This is only the input to it:
+            // what is standing in production is read at the moment the
+            // request is written, never taken from the browser, so a tab left
+            // open since this morning cannot net against a floor that has
+            // since been consumed or returned.
+            'lines.*.required_quantity' => ['sometimes', 'nullable', 'numeric', 'gt:0', 'decimal:0,4', 'max:99999999999'],
             'lines.*.notes' => ['sometimes', 'nullable', 'string', 'max:500'],
         ];
     }
