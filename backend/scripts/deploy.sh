@@ -219,8 +219,50 @@ $PHP artisan migrate --force
 # company's books. Any seeder added to this list must be idempotent AND carry no
 # invented transactional data; all three below use firstOrCreate/findOrCreate
 # and refuse to overwrite a value someone on site has since edited.
+# EACH SEEDER IS RETRIED, and a seeder that still fails STILL closes the app.
+#
+# 31-Aug-2026: `migrate` connected to MySQL and applied a migration, and one
+# second later PermissionSeeder was refused by the same database with
+#
+#   SQLSTATE[HY000] [2002] Operation not permitted (Host: 127.0.0.1, Port: 3306)
+#
+# `set -e` exited before `artisan up` and the factory sat on 503 until a human
+# re-ran the workflow — which then succeeded, unchanged, on the first attempt.
+# This is the shared host refusing a connection under load, exactly the event
+# the cache steps below already retry; the difference was that the seeders had
+# no retry, so a transient refusal read as a hard deploy failure.
+#
+# WHAT IS NOT CHANGED, deliberately: a seeder that fails all three attempts
+# still exits and the app STAYS DOWN. These load master data the app cannot
+# function without — PermissionSeeder in particular decides who may do what,
+# and shipping past a half-loaded permission table is not a degraded app, it is
+# a wrong one. So this buys resilience against a flaky connection and gives up
+# exactly none of the safety gate. Idempotent by contract (see above), so a
+# retry after a partial run is safe.
+seed_step() {
+  local seeder="$1"
+  local attempt
+
+  for attempt in 1 2 3; do
+    if $PHP artisan db:seed --class="$seeder" --force; then
+      return 0
+    fi
+    if [ "$attempt" -lt 3 ]; then
+      echo "==> ${seeder} failed (attempt ${attempt}/3); retrying in $((attempt * 5))s" >&2
+      sleep "$((attempt * 5))"
+    fi
+  done
+
+  echo "ERROR: ${seeder} did not succeed after 3 attempts. The schema is migrated but this" >&2
+  echo "       master data is not loaded, so the app is being LEFT CLOSED rather than opened" >&2
+  echo "       with (for example) a half-loaded permission table. Re-run this workflow — it is" >&2
+  echo "       idempotent and takes a fresh backup. Do NOT 'artisan up' by hand." >&2
+
+  return 1
+}
+
 for seeder in PermissionSeeder ShiftSeeder ProductionConfigurationDefaultsSeeder; do
-  $PHP artisan db:seed --class="$seeder" --force
+  seed_step "$seeder"
 done
 
 # Ensure the public storage symlink exists.
