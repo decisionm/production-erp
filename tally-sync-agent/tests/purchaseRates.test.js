@@ -30,19 +30,28 @@ const assert = require('node:assert/strict');
 
 const {
     parseDayBook,
+    describeDayBook,
     parseRate,
     parseQuantity,
     parseTallyDate,
     linesOfVoucher,
 } = require('../dist/tally/purchaseRates');
 
-/** A synthetic Day Book export, in the shape a real one arrives in. */
-function dayBook(vouchers) {
+/**
+ * A synthetic Day Book export.
+ *
+ * `IMPORTDATA` is the shape of the files Tally's UI SAVES; `EXPORTDATA` is what
+ * a live export over the HTTP gateway answers. The first parser matched the
+ * saved files, read every piece of evidence in this repo perfectly, and
+ * returned ZERO against the real Tally. Both shapes are exercised below, and
+ * the parser follows no path at all.
+ */
+function dayBook(vouchers, wrapper = 'IMPORTDATA') {
     return (
-        '<ENVELOPE><HEADER><TALLYREQUEST>Import Data</TALLYREQUEST></HEADER><BODY><IMPORTDATA>' +
+        `<ENVELOPE><HEADER><TALLYREQUEST>Export Data</TALLYREQUEST></HEADER><BODY><${wrapper}>` +
         '<REQUESTDESC><REPORTNAME>Day Book</REPORTNAME></REQUESTDESC><REQUESTDATA>' +
         vouchers.map((v) => `<TALLYMESSAGE>${v}</TALLYMESSAGE>`).join('') +
-        '</REQUESTDATA></IMPORTDATA></BODY></ENVELOPE>'
+        `</REQUESTDATA></${wrapper}></BODY></ENVELOPE>`
     );
 }
 
@@ -228,4 +237,55 @@ test('linesOfVoucher is pure — it contacts nothing and posts nothing', () => {
     const node = p.parse(voucher()).VOUCHER;
 
     assert.equal(linesOfVoucher(node).length, 1);
+});
+
+
+/* ── The envelope, which is what actually broke in production ─────────── */
+
+test('an EXPORTDATA envelope is read — the shape a LIVE gateway export answers', () => {
+    // The 31-Aug-2026 failure exactly: the parser followed
+    // BODY.IMPORTDATA.REQUESTDATA, the wire answered EXPORTDATA, and the pull
+    // reported `total: 0` against a company with hundreds of purchase orders.
+    const [line] = parseDayBook(dayBook([voucher()], 'EXPORTDATA'));
+
+    assert.equal(line.voucher_guid, 'guid-0001');
+    assert.equal(line.rate_value, 674);
+});
+
+test('an IMPORTDATA envelope still reads — the shape of the saved files', () => {
+    assert.equal(parseDayBook(dayBook([voucher()], 'IMPORTDATA')).length, 1);
+});
+
+test('a voucher directly under BODY/DATA is read too — no path is assumed', () => {
+    const xml = `<ENVELOPE><BODY><DATA>${voucher()}</DATA></BODY></ENVELOPE>`;
+
+    assert.equal(parseDayBook(xml).length, 1);
+});
+
+test('a bare collection of vouchers is read', () => {
+    const xml = `<ENVELOPE>${voucher({ guid: 'g-a' })}${voucher({ guid: 'g-b', type: 'Purchase' })}</ENVELOPE>`;
+
+    assert.deepEqual(parseDayBook(xml).map((l) => l.voucher_guid), ['g-a', 'g-b']);
+});
+
+test('describeDayBook separates "bought nothing" from "did not understand the answer"', () => {
+    // A document with vouchers, none of them purchases: the factory traded,
+    // just not with a supplier. Reported as vouchers seen, by type.
+    const traded = describeDayBook(dayBook([voucher({ type: 'Sales' }), voucher({ type: 'Receipt' })]));
+    assert.equal(traded.vouchers, 2);
+    assert.deepEqual(traded.types, { Sales: 1, Receipt: 1 });
+
+    // A document this parser could not read at all: zero vouchers seen. That
+    // is the signal that says "the problem is here", not "the factory idled".
+    const unreadable = describeDayBook('<ENVELOPE><BODY><SOMETHINGELSE/></BODY></ENVELOPE>');
+    assert.equal(unreadable.vouchers, 0);
+    assert.deepEqual(unreadable.types, {});
+});
+
+test('the walk terminates on a deeply nested document', () => {
+    let xml = voucher();
+    for (let i = 0; i < 40; i++) xml = `<L${i}>${xml}</L${i}>`;
+
+    // Bounded depth: it must not hang, and it must not throw.
+    assert.doesNotThrow(() => parseDayBook(`<ENVELOPE>${xml}</ENVELOPE>`));
 });
