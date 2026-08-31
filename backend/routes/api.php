@@ -10,6 +10,7 @@ use App\Modules\Core\Http\Controllers\ExportController;
 use App\Modules\Core\Http\Controllers\PermissionController;
 use App\Modules\Core\Http\Controllers\RoleController;
 use App\Modules\Core\Http\Controllers\UserController;
+use App\Modules\CRM\Http\Controllers\ClientOutstandingController;
 use App\Modules\CRM\Http\Controllers\LeadActivityController;
 use App\Modules\CRM\Http\Controllers\LeadController;
 use App\Modules\CRM\Http\Controllers\OpportunityController;
@@ -686,6 +687,11 @@ Route::prefix('v1')->group(function () {
         });
 
         Route::prefix('crm')->middleware('module:crm')->group(function () {
+            // WHAT EVERY CLIENT OWES AND WHAT IS STILL TO SHIP THEM, from the
+            // position the agent mirrored out of Tally. Read-only and derived:
+            // it owns no table and writes nothing.
+            Route::get('client-outstanding', [ClientOutstandingController::class, 'index']);
+
             Route::apiResource('leads', LeadController::class)->only(['index', 'store', 'update']);
             Route::post('leads/{lead}/convert', [LeadController::class, 'convert']);
             Route::get('leads/{lead}/activities', [LeadActivityController::class, 'index']);
@@ -803,6 +809,11 @@ Route::prefix('v1')->group(function () {
             // posts from — no voucher, no stock, no master. Same ability as
             // the masters pull (tally-sync:masters), gated in the controller.
             Route::post('purchase-rates', [TallySyncAgentController::class, 'purchaseRates']);
+            // THE OUTSTANDING POSITION from the agent's Bills Receivable and
+            // Sales Order Outstanding reads. Inbound only, and it writes two
+            // tables nothing posts from — no voucher, no stock, no master.
+            // Same ability as the masters pull, gated in the controller.
+            Route::post('receivables', [TallySyncAgentController::class, 'receivables']);
 
             // READ-ONLY godown-wise stock summary, reported and discarded. The
             // route says `preview` because there is no sibling that writes: an

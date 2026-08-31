@@ -1,7 +1,7 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type { SalesOrder } from '@/features/sales/types';
-import type { Lead, LeadActivity, LeadActivityType, LeadStatus, Opportunity, Quotation } from './types';
+import type { ClientOutstandingReport, Lead, LeadActivity, LeadActivityType, LeadStatus, Opportunity, Quotation } from './types';
 
 export async function listLeads(): Promise<Paginated<Lead>> {
     const { data } = await api.get<Paginated<Lead>>('/crm/leads');
@@ -118,5 +118,17 @@ export async function acceptQuotation(id: number): Promise<{ quotation: Quotatio
 
 export async function rejectQuotation(id: number): Promise<Quotation> {
     const { data } = await api.post<{ data: Quotation }>(`/crm/quotations/${id}/reject`);
+    return data.data;
+}
+
+/**
+ * The whole client-outstanding position in one read.
+ *
+ * NOT PAGINATED, deliberately: the page's header totals and its ageing columns
+ * have to agree with the rows underneath them, and a paginated client list
+ * would make the header sum a different set from the table.
+ */
+export async function getClientOutstanding(): Promise<ClientOutstandingReport> {
+    const { data } = await api.get<{ data: ClientOutstandingReport }>('/crm/client-outstanding');
     return data.data;
 }
