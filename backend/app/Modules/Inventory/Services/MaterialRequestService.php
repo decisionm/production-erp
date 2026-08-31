@@ -36,6 +36,8 @@ use Illuminate\Support\Facades\DB;
  */
 class MaterialRequestService
 {
+    public function __construct(private readonly ProductionAvailabilityService $onTheFloor) {}
+
     /**
      * Same ceiling as the two Procurement lists: the store's queue has to
      * be able to reach an older request in one page for a deep link.
@@ -128,11 +130,26 @@ class MaterialRequestService
      */
     public function requestableMaterials()
     {
-        return Item::query()
+        $items = Item::query()
             ->productionInput()
             ->where('is_active', true)
             ->orderBy('name')
             ->get();
+
+        // DECORATED, not joined: what is standing in production is a stock
+        // question and belongs to the availability service, and one read
+        // answers it for the whole picker rather than one per line.
+        // Plain properties, like the tallyLink decorations elsewhere — not
+        // attributes, so nothing is persisted and toArray() is untouched.
+        $standing = $this->onTheFloor->forItems($items->pluck('id')->all());
+
+        foreach ($items as $item) {
+            $row = $standing->get($item->id);
+            $item->availableInProduction = $row['usable'] ?? '0.0000';
+            $item->productionUnitMatches = $row['unit_matches'] ?? true;
+        }
+
+        return $items;
     }
 
     /**
@@ -179,19 +196,78 @@ class MaterialRequestService
                 'notes' => $data['notes'] ?? null,
             ]);
 
+            // WHAT IS ALREADY ON THE FLOOR, read ONCE for the whole request
+            // and never per line: two lines of one material must be netted
+            // against the same standing quantity, not each against the whole
+            // of it (DEC-20260831-001).
+            $standing = $this->onTheFloor->forItems(array_column($data['lines'], 'item_id'));
+
             foreach ($data['lines'] as $line) {
+                $itemId = (int) $line['item_id'];
+
+                // THE NETTING IS THE SERVER'S, never the browser's arithmetic.
+                // The screen shows the same three figures, but what a request
+                // ASKS THE STORE FOR is decided here, against the floor as it
+                // stands at this moment — a browser tab open since this
+                // morning would otherwise net against a figure that has since
+                // been consumed or returned.
+                [$required, $available, $asked] = $this->netAgainstProduction($line, $standing, $itemId);
+
                 $request->lines()->create([
-                    'item_id' => $line['item_id'],
-                    'quantity' => $line['quantity'],
+                    'item_id' => $itemId,
+                    'quantity' => $asked,
+                    'required_quantity' => $required,
+                    'available_in_production' => $available,
                     // The ITEM's unit, never the caller's (FC-03).
-                    'uom' => ($items[$line['item_id']] ?? null)?->uom,
+                    'uom' => ($items[$itemId] ?? null)?->uom,
                     'issued_quantity' => '0',
                     'notes' => $line['notes'] ?? null,
                 ]);
+
+                // Spend the standing quantity down: the second line of a
+                // material may only net off what the first one left.
+                if ($standing->has($itemId)) {
+                    $row = $standing->get($itemId);
+                    $row['usable'] = bcsub($row['usable'], bcsub($required ?? $asked, $asked, 4), 4);
+                    $standing->put($itemId, $row);
+                }
             }
 
             return $this->show($request);
         });
+    }
+
+    /**
+     * One line's three figures: what production needs, what is already
+     * standing there, and what is therefore asked of the store.
+     *
+     * TWO SHAPES, ON PURPOSE. A caller that sends `required_quantity` is
+     * asking for the netted behaviour and gets all three figures. A caller
+     * that sends only `quantity` — every caller that existed before
+     * DEC-20260831-001, and every test of them — is asking the store for
+     * exactly that, and nothing is netted or recorded: the two new columns
+     * stay NULL, which is the honest reading of a request that never
+     * considered the floor.
+     *
+     * @param  array<string, mixed>  $line
+     * @param  \Illuminate\Support\Collection<int, array<string, mixed>>  $standing
+     * @return array{0: string|null, 1: string|null, 2: string}
+     */
+    private function netAgainstProduction(array $line, $standing, int $itemId): array
+    {
+        if (! array_key_exists('required_quantity', $line) || $line['required_quantity'] === null) {
+            return [null, null, (string) $line['quantity']];
+        }
+
+        $required = bcadd((string) $line['required_quantity'], '0', 4);
+        $row = $standing->get($itemId);
+        $usable = $row['usable'] ?? '0.0000';
+
+        if (bccomp($usable, '0', 4) !== 1) {
+            $usable = '0.0000';
+        }
+
+        return [$required, $usable, $this->onTheFloor->balanceToRequest($required, $usable)];
     }
 
     /** Draft → submitted: the request enters the store's queue. */

@@ -38,14 +38,36 @@ export interface MaterialFlowItemRef {
  */
 export interface MaterialFlowMaterial extends MaterialFlowItemRef {
     machine_applies: boolean | null;
+    /**
+     * What is USABLY standing in Production/WIP for this material right now
+     * (DEC-20260831-001) — the figure the next request nets off. A negative
+     * balance and a unit that disagrees with the handover both report
+     * "0.0000": neither may be subtracted from what the floor needs.
+     */
+    available_in_production: string;
+    /**
+     * False only when the material IS standing on the floor but in a unit the
+     * item master no longer agrees with (FC-03). The quantity is real and the
+     * netting is refused — the screen must not read as "the floor is empty".
+     */
+    production_unit_matches: boolean;
 }
 
 export interface MaterialRequestLine {
     id: number;
     item_id: number;
     item: MaterialFlowItemRef | null;
-    /** What the floor asked for. */
+    /** WHAT WAS ASKED OF THE STORE. Where the request netted, this is the balance. */
     quantity: string;
+    /**
+     * What production needed in total, and what was already standing on the
+     * floor when the request was raised (DEC-20260831-001).
+     *
+     * NULL — not zero — on a request that never considered the floor: zero
+     * would claim it was empty.
+     */
+    required_quantity: string | null;
+    available_in_production: string | null;
     /** Snapshotted from the item when the request was raised (FC-03). */
     uom: string;
     /** Handed over — standing in Production/WIP, NOT consumed. */
@@ -188,7 +210,16 @@ export interface MaterialRequestFilters {
 
 export interface CreateMaterialRequestLinePayload {
     item_id: number;
+    /**
+     * What is asked of the store. Sent alongside `required_quantity` so the
+     * API keeps the field it has always required — but the SERVER decides the
+     * figure it stores, by subtracting the floor as it stands at that moment.
+     * A tab left open since the morning cannot net against a floor that has
+     * since been consumed or returned.
+     */
     quantity: number;
+    /** What production needs in total (DEC-20260831-001). The netting input. */
+    required_quantity?: number | null;
     notes?: string | null;
 }
 

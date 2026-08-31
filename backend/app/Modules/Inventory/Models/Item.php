@@ -26,6 +26,20 @@ use Illuminate\Support\Facades\Log;
 ])]
 class Item extends Model
 {
+    /**
+     * Read-side decorations set by MaterialRequestService::requestableMaterials()
+     * and read by RequestableMaterialResource — plain properties, never
+     * attributes: not persisted, not in toArray(), null on a bare model.
+     *
+     * What is USABLY standing in Production/WIP for this material
+     * (DEC-20260831-001), and whether the unit it was handed over in still
+     * agrees with this item's own. A disagreement reports a quantity that is
+     * really there and still refuses to net it (FC-03).
+     */
+    public ?string $availableInProduction = null;
+
+    public ?bool $productionUnitMatches = null;
+
     use RecordsConfigurationAudit;
     use SoftDeletes;
 
