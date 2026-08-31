@@ -78,7 +78,12 @@ function newIssueKey(): string {
         : `si-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export default function StoreIssueQueuePage() {
+/**
+ * `embedded` — rendered as a tab of Store ↔ Production rather than as a page
+ * of its own, so the shell owns the heading and the banner. Nothing else
+ * about the screen changes: same reads, same filters, same write paths.
+ */
+export default function StoreIssueQueuePage({ embedded = false }: { embedded?: boolean }) {
     const queryClient = useQueryClient();
     /**
      * The queue's default view is "still to issue" — which the backend
@@ -122,10 +127,28 @@ export default function StoreIssueQueuePage() {
     const machinesQuery = useQuery({ queryKey: ['production', 'work-centers', 'active'], queryFn: () => listWorkCenters(true) });
     const materialsQuery = useQuery({ queryKey: ['material-flow', 'materials'], queryFn: listRequestableMaterials });
 
+    /**
+     * WIDENED TO THE WHOLE `material-flow` PREFIX WHEN THIS SCREEN BECAME A
+     * TAB, and it is not cosmetic. rc-tabs keeps a visited pane MOUNTED while
+     * it is hidden and `refetchOnWindowFocus` is off, so the Returns tab does
+     * not re-read on its way back to the front — it shows whatever it last
+     * fetched. Three specific keys left it showing pre-issue figures.
+     *
+     * The failure that makes this load-bearing rather than tidy: completing a
+     * handover here CLOSES that issue, which moves quantity out of the
+     * Returns tab's "Held by a store issue" column into "Free to return" AND
+     * lifts ProductionReturnService's refusal of an unattributed return
+     * standing over an open issue. Without this invalidation the storekeeper
+     * reads a disabled input and a refusal that no longer applies, and a
+     * retry succeeds with no explanation for why it did.
+     *
+     * The cost, stated rather than left to be discovered: this also
+     * invalidates ['material-flow', 'materials'] — the requestable-materials
+     * master read — on every issue, handover, bag scan and cancel. It is a
+     * small, rarely-changing list, and a stale refusal is the worse trade.
+     */
     const refresh = () => {
-        queryClient.invalidateQueries({ queryKey: ['material-flow', 'queue'] });
-        queryClient.invalidateQueries({ queryKey: ['material-flow', 'request'] });
-        queryClient.invalidateQueries({ queryKey: ['material-flow', 'issues'] });
+        queryClient.invalidateQueries({ queryKey: ['material-flow'] });
     };
 
     const request = requestQuery.data;
@@ -205,11 +228,15 @@ export default function StoreIssueQueuePage() {
 
     return (
         <>
-            <Typography.Title level={3} style={{ marginTop: 0 }}>
-                Store Issue Queue
-            </Typography.Title>
+            {!embedded && (
+                <>
+                    <Typography.Title level={3} style={{ marginTop: 0 }}>
+                        Store Issue Queue
+                    </Typography.Title>
 
-            <Alert type="info" showIcon style={{ marginBottom: 16 }} message={ISSUE_IS_NOT_CONSUMPTION} />
+                    <Alert type="info" showIcon style={{ marginBottom: 16 }} message={ISSUE_IS_NOT_CONSUMPTION} />
+                </>
+            )}
 
             <Card size="small" style={{ marginBottom: 16 }}>
                 <Row gutter={[8, 8]}>

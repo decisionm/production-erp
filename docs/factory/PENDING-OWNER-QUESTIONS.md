@@ -2102,3 +2102,65 @@ headline figure net customer holds or not?
 
 **Blocks:** shipping the stock-state decomposition to the Stock page. The
 underlying figures are unaffected. *Open since 2026-08-30.*
+
+## Q80 · On the merged Store ↔ Production screen there are two doors home for the same material. Which one should a storekeeper be told to use?
+
+Store issues and production returns became two tabs of one screen on
+31-Aug-2026. Both tabs can send material back to the store, and they do not
+behave the same way — which was invisible while they were two URLs and is
+visible now that they sit one click apart.
+
+  · **Issue to production tab**, inside a handover's own drawer: returns
+    against ONE open store issue. The quantity is attributed to that issue by
+    construction, it goes back to the store it came out of, and it records
+    who at the store took it back.
+  · **Returns from production tab**: returns by MATERIAL. It is the only door
+    that can reach material a *completed* handover is still standing on, and
+    the only door for material no handover ever put on the floor — which is
+    most of what is live. It records a note per return rather than a receiver.
+
+The two also disagree in one visible place. A material with an open store
+issue standing on it cannot be returned through the free-return input on the
+Returns tab — the ERP refuses it, because attributing it or not is Q69, still
+open — while the very same material returns without complaint through the
+handover drawer one tab away, because that path names the issue. Both
+behaviours are correct in isolation. Side by side they read as a bug.
+
+Nothing has been changed to resolve this: collapsing the two doors would
+strand material that a completed handover is standing on, leaving it with no
+way home at all while still blocking its own free return.
+
+What is asked: is the handover drawer the door a storekeeper should normally
+use, with the Returns tab reserved for material no open handover covers? Or
+is the Returns tab the daily door and the drawer the exception? The answer
+decides which one gets the plain wording and which gets the caveat.
+
+**Blocks:** nothing shipping. Both doors work today. *Open since 2026-08-31.*
+
+## Q81 · Does "material stays available for the next day's production" cover material no store issue put there?
+
+The instruction of 31-Aug-2026 ends: *"Material remaining in Production/WIP
+stays available for the next day's production."* For material a store issue
+handed over, that is exactly what happens — it stays in Production/WIP and
+tomorrow's batch consumes it from there.
+
+For material that reached the floor without a store issue behind it, it does
+not. The ERP draws tomorrow's consumption from Production/WIP only when a
+store issue put that material there at some point; otherwise it consumes from
+the Store instead, and the kilograms sitting in Production/WIP are passed
+over. Seven of the materials standing in production on the live instance are
+in exactly that position.
+
+This is deliberate, not a defect. The rule exists so that a deployment does
+not silently redirect a live batch onto stock left over from rehearsal, and
+the material is not stranded either way — the Returns tab sends all of it
+home whenever the store wants it back.
+
+What is asked: should the sentence be read as describing issue-backed
+material only — which is what the system does today and the conservative
+answer — or should material on the floor with no handover behind it also be
+consumed from where it stands?
+
+**Blocks:** nothing today. Changing it would alter where a batch takes its
+stock from, which is a stock figure and a write path, so it is not something
+to adjust as part of a screen change. *Open since 2026-08-31.*

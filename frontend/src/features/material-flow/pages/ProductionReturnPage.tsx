@@ -27,7 +27,14 @@ import { formatQuantity, permitsFractions } from '../words';
  * state say what is possible. A material with nothing free simply has no
  * free input to type in.
  */
-export default function ProductionReturnPage() {
+/**
+ * `embedded` — rendered as a tab of Store ↔ Production. The Card's TITLE is
+ * what goes: "Return to Store" named the direction, and on a tab that
+ * direction is in the tab label ("Returns from production") instead of being
+ * said twice. The toolbar in `extra` is untouched — antd renders the card
+ * head on `title || extra` — and so is every figure, refusal and input.
+ */
+export default function ProductionReturnPage({ embedded = false }: { embedded?: boolean }) {
     const queryClient = useQueryClient();
     const [term, setTerm] = useState('');
     const [search, setSearch] = useState('');
@@ -166,7 +173,7 @@ export default function ProductionReturnPage() {
 
     return (
         <Card
-            title="Return to Store"
+            title={embedded ? undefined : 'Return to Store'}
             extra={
                 <Space>
                     <Input.Search

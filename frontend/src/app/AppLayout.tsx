@@ -155,21 +155,26 @@ export const allNavItems: readonly NavGroup[] = [
             // Labels now. /inventory/material-lots stays mounted, so every
             // existing link and bookmark still opens the register directly.
             { key: '/inventory/barcode-labels', label: 'Barcode & Labels' },
-            // The STORE's queue (Phase 7.5): what production has asked for,
-            // fulfilled — in part or in full — here. Issuing is not
-            // consuming: it moves stock into Production/WIP.
-            { key: '/inventory/store-issue-queue', label: 'Store Issue Queue' },
-            // THE OTHER HALF OF THE SAME DAY. The store issues in the morning
-            // and the balance comes back in the evening — and until 30-Aug-2026
-            // the second half had no screen and, for material no handover put
-            // there, no way home at all.
+            // ONE ENTRY, BOTH DIRECTIONS (31-Aug-2026). "Store Issue Queue"
+            // and "Returns" were two entries for the two halves of one daily
+            // act — the store issues in the morning, the balance comes back in
+            // the evening — which asked a storekeeper to know they were halves
+            // of the same thing. They are tabs of one screen now; both old
+            // URLs still resolve, via query-preserving redirects in App.tsx.
             //
-            // "Returns", not "Return to Store". The 30-Aug audit (H-17) found
-            // four labels in this menu already truncating, and "Stock Movements"
-            // — fifteen characters, exactly as long — is one of them. A label
-            // that arrives pre-truncated adds to the defect instead of avoiding
-            // it, and beside "Store Issue Queue" the pair reads out and back.
-            { key: '/inventory/production-returns', label: 'Returns' },
+            // The arrow is the label's whole job: it says the traffic goes
+            // BOTH ways, which is the one thing two separate entries could
+            // never say. At eighteen characters it is well inside the shelf —
+            // the measurement in this file's own header (:36-54) puts the
+            // longest label, "Non-Conformance Reports", at 175px of a 239px
+            // budget, and records that shortening names was considered and
+            // rejected: widen the shelf, keep the words.
+            //
+            // (A previous version of this comment claimed a "30-Aug audit
+            // (H-17)" had found four labels truncating. No such document
+            // exists anywhere in the repo, and the header measurement above
+            // says the opposite. Removed rather than left to be inherited.)
+            { key: '/inventory/store-production', label: 'Store ↔ Production' },
             { key: '/inventory/warehouses', label: 'Warehouses' },
             // The ledger, first-class since 27-Aug-2026. It was NOT in this
             // menu before, and the reason recorded here was true at the time:
