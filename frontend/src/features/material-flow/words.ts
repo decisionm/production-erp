@@ -328,7 +328,7 @@ export interface QuantityCell {
 export function describeRequestLine(quantities: RequestLineQuantities, uom?: string | null): QuantityCell[] {
     return [
         {
-            // "Asked of the store", not "Requested", since DEC-20260831-006.
+            // "Asked of the store", not "Requested", since DEC-20260831-005.
             // The two stopped being the same number: production states what
             // the shift needs in total and the ERP subtracts what is already
             // standing in Production/WIP, so this figure is the shortfall the

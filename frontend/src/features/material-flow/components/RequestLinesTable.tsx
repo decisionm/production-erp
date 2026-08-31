@@ -27,7 +27,7 @@ export default function RequestLinesTable({ lines }: { lines: MaterialRequestLin
      * only where there is something to show.
      *
      * A request is raised for what the shift needs LESS whatever is already
-     * standing in Production/WIP (DEC-20260831-006). Where nothing was on the
+     * standing in Production/WIP (DEC-20260831-005). Where nothing was on the
      * floor the two numbers are equal and a column of zeroes would be noise;
      * where something was, this is the line that explains why the store is
      * being asked for less than production said it needed. Lines raised

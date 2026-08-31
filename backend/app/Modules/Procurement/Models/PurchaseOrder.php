@@ -14,6 +14,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'vendor_id', 'purchase_requisition_id', 'status',
     'order_date', 'expected_date', 'notes', 'created_by',
     'source', 'tally_order_no',
+    // When the order reached the vendor — null while it is a Draft, and the
+    // fact that decides whether a CANCELLED order still counts against its
+    // requisition (RequisitionCoverageService::reserves()).
+    'sent_at',
     // Phase 6 lifecycle record — written once each by close() / cancel();
     // tally_staging only through PurchaseOrderService::recordTallyStaging.
     'closed_reason', 'closed_by', 'closed_at',
@@ -64,6 +68,7 @@ class PurchaseOrder extends Model
             'status' => PurchaseOrderStatus::class,
             'order_date' => 'date',
             'expected_date' => 'date',
+            'sent_at' => 'datetime',
             'closed_at' => 'datetime',
             'cancelled_at' => 'datetime',
             // Canonical key order on every read/write (the GRN's cast, same

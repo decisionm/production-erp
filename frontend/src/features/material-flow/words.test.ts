@@ -120,7 +120,7 @@ describe('a request line reads as four named quantities', () => {
     });
 
     /**
-     * DEC-20260831-006 made this label load-bearing. A request is raised for
+     * DEC-20260831-005 made this label load-bearing. A request is raised for
      * the shortfall after Production/WIP is netted off, so the first cell is
      * NOT what production said it needed. Left reading "Requested" beside a
      * "Total required" box holding a bigger number, the honest conclusion for

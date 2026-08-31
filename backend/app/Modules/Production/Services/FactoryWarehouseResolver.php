@@ -187,7 +187,8 @@ class FactoryWarehouseResolver
         // no store issue ever put there and quietly redirect the first
         // completion after deploy.
         //
-        // The owner ruled on exactly that population (DEC-20260831-005):
+        // The owner ruled on exactly that population (DEC-20260831-007,
+        // implementing the WIP-availability clause of DEC-20260831-005):
         // material remaining in Production/WIP stays available for the next
         // production day, INCLUDING existing material with no store issue
         // behind it. On the live instance that is seven of the nine

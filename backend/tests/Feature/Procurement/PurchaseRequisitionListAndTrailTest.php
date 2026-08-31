@@ -26,7 +26,10 @@ use Tests\TestCase;
  *      after (rejecting likewise); a requisition decided before the stamps
  *      existed keeps NULLs rather than inventing an approver;
  *   3. the resource carries the orders raised FROM the requisition
- *      (purchase_orders.purchase_requisition_id) — id and status only;
+ *      (purchase_orders.purchase_requisition_id) — id, status, document
+ *      number, and whether that order holds quantity against the
+ *      requisition; never a line and never a rate. What each order has
+ *      ORDERED, and what that leaves to order, is RequisitionCoverageTest;
  *   4. a line's unit of measure travels with its item, so the queue can
  *      print "500 Kgs" instead of a bare number.
  */
@@ -137,7 +140,15 @@ class PurchaseRequisitionListAndTrailTest extends TestCase
         $row = collect($this->getJson('/api/v1/procurement/purchase-requisitions')->assertOk()->json('data'))
             ->firstWhere('id', $requisition->id);
 
-        $this->assertSame([['id' => $order->id, 'status' => 'draft']], $row['purchase_orders']);
+        // Plus, since the coverage build, the order's document number and
+        // whether it is one of the orders HOLDING quantity against the
+        // requisition (RequisitionCoverageService::reserves()). FALSE for a
+        // draft: on the owner's rule nothing is held until the order goes to
+        // the vendor. Still id + status + these two: no rate, no lines.
+        $this->assertSame(
+            [['id' => $order->id, 'status' => 'draft', 'document_number' => "PO-{$order->id}", 'reserves_quantity' => false]],
+            $row['purchase_orders'],
+        );
     }
 
     public function test_a_line_travels_with_its_item_and_the_items_uom(): void

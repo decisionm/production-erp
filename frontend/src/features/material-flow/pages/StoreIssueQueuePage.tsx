@@ -94,9 +94,9 @@ function newIssueKey(): string {
  * from the Returns tab, and any attempt to tidy the two return doors into one
  * would have stranded it completely.
  *
- * The owner settled it on 31-Aug-2026: a return must name its store issue for
- * open, partially returned AND completed issues, while returnable quantity
- * remains. So the door opens on exactly that condition — what is outstanding,
+ * The owner settled it on 31-Aug-2026 (DEC-20260831-006): a return must name
+ * its store issue for open, partially returned AND completed issues, while
+ * returnable quantity remains. So the door opens on exactly that condition — what is outstanding,
  * not what the paperwork is called.
  */
 function hasMaterialOutstanding(issue: StoreIssue): boolean {

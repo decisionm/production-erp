@@ -14,6 +14,7 @@ import {
     submitMaterialRequest,
 } from '../api';
 import RequestLinesTable from '../components/RequestLinesTable';
+import { netAgainstProduction } from '../productionNetting';
 import type { CreateMaterialRequestLinePayload, MaterialFlowMaterial, MaterialRequest, ProductionFloorStock } from '../types';
 import {
     formatQuantity,
@@ -100,6 +101,13 @@ export default function MaterialRequestsPage() {
         return map;
     }, [materialsQuery.data]);
 
+    /**
+     * The three figures DEC-20260831-001 puts on this screen, per line.
+     * Display only — the server recomputes them against the floor as it
+     * stands when the request is actually written.
+     */
+    const netted = useMemo(() => netAgainstProduction(lines, materialsById), [lines, materialsById]);
+
     const machineDecisionInput = lines.map((line) => (line.item_id === null ? undefined : materialsById.get(line.item_id)));
     const machineApplies = machineAppliesToRequest(machineDecisionInput);
     const machineField = machineFieldDecision(machineApplies);
@@ -123,6 +131,12 @@ export default function MaterialRequestsPage() {
                     .filter((line) => line.item_id !== null && (line.quantity ?? 0) > 0)
                     .map<CreateMaterialRequestLinePayload>((line) => ({
                         item_id: line.item_id as number,
+                        // WHAT PRODUCTION NEEDS. The server subtracts what is
+                        // standing on the floor at the moment it writes the
+                        // request and stores the balance — this screen shows
+                        // the same three figures but never decides them
+                        // (DEC-20260831-001).
+                        required_quantity: line.quantity as number,
                         quantity: line.quantity as number,
                         notes: line.notes.trim() === '' ? null : line.notes.trim(),
                     })),
@@ -372,9 +386,32 @@ export default function MaterialRequestsPage() {
 
                 <Card size="small" title="What is needed" style={{ marginBottom: 12 }}>
                     <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                        {lines.map((line) => (
+                        {/*
+                          The header carries the three figures' names, once, so
+                          the numbers below need no sentence explaining them.
+                        */}
+                        <Row gutter={8} style={{ display: 'flex' }}>
+                            <Col xs={0} sm={8} />
+                            <Col xs={0} sm={4}>
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                    Required
+                                </Typography.Text>
+                            </Col>
+                            <Col xs={0} sm={3}>
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                    In production
+                                </Typography.Text>
+                            </Col>
+                            <Col xs={0} sm={3}>
+                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                    Ask store for
+                                </Typography.Text>
+                            </Col>
+                            <Col xs={0} sm={6} />
+                        </Row>
+                        {lines.map((line, index) => (
                             <Row key={line.key} gutter={8} align="middle">
-                                <Col xs={24} sm={11}>
+                                <Col xs={24} sm={8}>
                                     <Select
                                         showSearch
                                         optionFilterProp="label"
@@ -393,23 +430,12 @@ export default function MaterialRequestsPage() {
                                         }))}
                                     />
                                 </Col>
-                                <Col xs={12} sm={5}>
+                                <Col xs={12} sm={4}>
                                     <InputNumber
                                         min={0}
                                         value={line.quantity}
-                                        // "Total required", not "Quantity",
-                                        // because the number the floor types
-                                        // is no longer the number the store
-                                        // is asked for: the ERP subtracts
-                                        // what is already standing in
-                                        // production (DEC-20260831-006). A
-                                        // box labelled "Quantity" would make
-                                        // the request look wrong to the
-                                        // person who raised it.
                                         placeholder={
-                                            line.item_id === null
-                                                ? 'Total required'
-                                                : `Total required (${materialsById.get(line.item_id)?.uom ?? ''})`
+                                            line.item_id === null ? 'Required' : `Required (${materialsById.get(line.item_id)?.uom ?? ''})`
                                         }
                                         style={{ width: '100%' }}
                                         onChange={(value) =>
@@ -419,7 +445,41 @@ export default function MaterialRequestsPage() {
                                         }
                                     />
                                 </Col>
-                                <Col xs={12} sm={6}>
+                                {/*
+                                  THE OTHER TWO FIGURES DEC-20260831-001 REQUIRES.
+                                  Read-only, because neither is typed: what is on
+                                  the floor is a fact, and the balance follows from
+                                  it. A unit the master no longer agrees with shows
+                                  the quantity struck through — it IS there, it just
+                                  may not be subtracted (FC-03), and a bare 0 would
+                                  read as an empty floor.
+                                */}
+                                <Col xs={6} sm={3}>
+                                    <Tooltip
+                                        title={
+                                            netted[index]?.unitMismatch
+                                                ? `Standing in production as ${
+                                                      materialsById.get(line.item_id ?? -1)?.uom ?? 'another unit'
+                                                  } — not netted`
+                                                : 'In production'
+                                        }
+                                    >
+                                        <Typography.Text
+                                            type={netted[index]?.unitMismatch ? 'warning' : 'secondary'}
+                                            delete={netted[index]?.unitMismatch}
+                                        >
+                                            {formatQuantity(netted[index]?.available ?? 0)}
+                                        </Typography.Text>
+                                    </Tooltip>
+                                </Col>
+                                <Col xs={6} sm={3}>
+                                    <Tooltip title="Ask the store for">
+                                        <Typography.Text strong>
+                                            {formatQuantity(netted[index]?.ask ?? 0)}
+                                        </Typography.Text>
+                                    </Tooltip>
+                                </Col>
+                                <Col xs={12} sm={4}>
                                     <Input
                                         value={line.notes}
                                         placeholder="Note (optional)"

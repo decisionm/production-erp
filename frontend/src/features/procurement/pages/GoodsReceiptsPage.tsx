@@ -16,7 +16,8 @@ import { createGoodsReceipt, listGoodsReceipts, listPurchaseOrders } from '@/fea
 import GoodsReceiptTallyCell from '@/features/procurement/components/GoodsReceiptTallyCell';
 import { bagLabelsDrawerTitle, grnDrawerTitle, grnNumber } from '@/features/procurement/documentWords';
 import { lineQcLine, receiptQcLine } from '@/features/procurement/grnQc';
-import { RECEIVABLE_PO_FILTERS, isReceivableOrder } from '@/features/procurement/purchaseOrders';
+import { RECEIVABLE_PO_FILTERS, isReceivableOrder, receivableOrderLabel } from '@/features/procurement/purchaseOrders';
+import { fromScaled, toScaled, trimQuantity } from '@/lib/scaledDecimal';
 import type { GoodsReceiptNote, GoodsReceiptNoteLine, PurchaseOrderSchedule } from '@/features/procurement/types';
 import { useProductionSettings } from '@/features/production/packing';
 import { formatDateTime } from '@/lib/datetime';
@@ -36,6 +37,20 @@ function nowReceivedAt(): string {
  * first, then walks forward. Rendered as an editable preview — the server
  * enforces the same arithmetic on whatever the receiver submits.
  */
+/**
+ * What a line still expects, as words — ordered − received on scaled
+ * integers, floored at zero, and a dash when either figure cannot be read.
+ * The picker's label derives its `remaining` the same way, so the summary
+ * and the line beneath it can never disagree by a float's last digit.
+ */
+function openQuantityWords(ordered: string, received: string): string {
+    const orderedScaled = toScaled(ordered);
+    const receivedScaled = toScaled(received);
+    if (orderedScaled === null || receivedScaled === null) return '—';
+
+    return trimQuantity(fromScaled(orderedScaled > receivedScaled ? orderedScaled - receivedScaled : 0n));
+}
+
 function proposeAllocations(schedules: PurchaseOrderSchedule[], quantity: number) {
     if (schedules.length === 0) return undefined;
     let left = quantity;
@@ -70,6 +85,13 @@ const receiptSchema = z.object({
                 purchase_order_line_id: z.number(),
                 item_label: z.string(),
                 item_uom: z.string(),
+                // DISPLAY ONLY — the PO line's own three figures, carried so
+                // the form can print them beside the input. Optional, and
+                // stripped before submit like item_label and item_uom are:
+                // the server reads these from the order, never from us.
+                line_ordered: z.string().optional(),
+                line_received: z.string().optional(),
+                line_remaining: z.string().optional(),
                 quantity: z.number().gt(0, 'Quantity must be greater than 0'),
                 // Absent (not sent) when the PO rate is not visible to this
                 // user — the server then defaults it from the PO line and
@@ -532,7 +554,16 @@ export default function GoodsReceiptsPage() {
         () => orders?.data.filter(isReceivableOrder) ?? [],
         [orders],
     );
-    const orderOptions = receivableOrders.map((o) => ({ value: o.id, label: `PO #${o.id} — ${o.vendor.name}` }));
+    // WHAT IS STILL EXPECTED, IN THE OPTION ITSELF. The picker offered
+    // "PO #12 — Vendor Alpha" and nothing more, so a clerk standing at the
+    // dock chose an order by number, found out what it still expected only
+    // after selecting it, and went back when they had guessed wrong. Every
+    // figure below is already on the row this page holds — the list
+    // eager-loads lines, items and delivery schedules — it was simply never
+    // spelled. Quantities are UNIT-WISE (an order for resin and caps has no
+    // single "how much"), and the label is a plain string so antd's
+    // optionFilterProp search reaches the vendor, the number and the unit.
+    const orderOptions = receivableOrders.map((o) => ({ value: o.id, label: receivableOrderLabel(o) }));
     // WS-B: `StoreGoodsReceiptRequest` refuses a RETIRED store, so an
     // arrival can no longer be booked into one from this form. The
     // Production/WIP row is kept out too (28-Aug audit finding 4): it holds
@@ -651,6 +682,18 @@ export default function GoodsReceiptsPage() {
                 purchase_order_line_id: line.id,
                 item_label: itemLabel(line.item),
                 item_uom: line.item.uom,
+                // THE LINE'S OWN THREE FIGURES, kept beside the input. The
+                // picker's label now summarises the order unit-wise, and a
+                // summary is not a substitute for the line: on a two-item
+                // order "remaining 300 Kgs + 40 Nos" does not say which line
+                // wants which. These are the order's own numbers, printed
+                // per line, each in its item's unit — never added together.
+                line_ordered: line.quantity,
+                line_received: line.quantity_received,
+                // Scaled integers, like the picker's label above it: read as
+                // floats these two subtract to 299.99999999999994, and the
+                // line would then visibly contradict the option that led here.
+                line_remaining: openQuantityWords(line.quantity, line.quantity_received),
                 quantity: Number(line.quantity) - Number(line.quantity_received),
                 // Prefilled from the PO price only when this user can see it;
                 // otherwise left undefined and never sent (see the schema).
@@ -1055,6 +1098,12 @@ export default function GoodsReceiptsPage() {
                                 <span style={{ width: 220, display: 'inline-block' }}>
                                     {field.item_label}
                                     {field.item_uom ? <span style={{ color: '#8c8c8c' }}> ({field.item_uom})</span> : null}
+                                    <br />
+                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                        ordered {trimQuantity(field.line_ordered ?? '')} · received{' '}
+                                        {trimQuantity(field.line_received ?? '')} · remaining{' '}
+                                        {trimQuantity(field.line_remaining ?? '')}
+                                    </Typography.Text>
                                 </span>
                                 <Controller
                                     name={`lines.${index}.quantity`}

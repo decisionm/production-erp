@@ -41,7 +41,11 @@ estimation version). Q53 is the Phase 7.6 configuration-lifecycle branch's
 fulfilment branch (may the ERP emit a Tally Sales Order voucher; the
 contested-stock hold rule). Q63-Q66 are claimed by the product-identity
 branch (Tally GRN usage; purchases without POs; sync cadence; the Tally Sync
-sidebar position). New questions continue from Q67.
+sidebar position). Q69-Q70 were claimed by the PR→PO quantity-tracking
+branch and are RESOLVED below (DEC-20260831-003 / -004) — the unmerged
+sales-order fulfilment branch claims Q69-Q72 for its own four, so whichever
+merges second re-mints, and a resolved entry re-mints exactly as an open one
+does. New questions continue from Q71.
 DEC-20260810-001 landed with PR #158 (carton trace, minted first); PR
 #160's colliding record re-minted as -002 at merge, per this rule.
 DEC-20260809-002/-003 landed with PR #155 (the finance-pull discovery
@@ -1854,7 +1858,7 @@ because this file re-mints question numbers at merge.
 supplier-bill screen, its arithmetic, its matching and its attachment work
 under either answer. *Open since 2026-08-28.*
 
-## Q69 · When material comes back from production, must it be returned against the store issue that put it there? — RESOLVED (DEC-20260831-003, DEC-20260831-004)
+## Q69 · ~~When material comes back from production, must it be returned against the store issue that put it there?~~ — RESOLVED (DEC-20260831-005)
 
 The daily return was built on 30-Aug-2026: the store issues material to the
 production area, production makes finished goods from it, and the balance is
@@ -1875,7 +1879,23 @@ this factory cannot make (FC-01, DEC-20260807-007: a bag belongs to no
 machine and no batch, and a batch's consumption is calculated). So the screen
 shows the split and a person chooses.
 
-**Until it is answered, the build REFUSES rather than picks.** A material an
+> **RESOLVED — `DEC-20260831-005` (2026-08-31), owner.** Yes, where a Store
+> Issue exists: the return must identify that exact issue, so the handover's
+> own quantity closes and the ledger records which handover the material came
+> back on. Where NO Store Issue exists — the seven materials the live floor
+> could not bring home — it may be returned without one. The rule reaches as
+> far as an issue exists to be named and never requires inventing one.
+>
+> The same decision goes further than this question asked, and the rest is
+> built with it: material not returned stays available in Production/WIP as
+> the next day's opening material, and the next request nets off the usable
+> quantity already standing there for the same item and unit, showing total
+> required / in production / balance to request.
+>
+> Read `CURRENT-DECISIONS.md` for the decision; this entry is kept only as the
+> history of the question.
+
+**Until it was answered, the build REFUSED rather than picked.** A material an
 open store issue is standing on will not accept an unattributed return: the
 refusal names the issue and points at its own line, which always works.
 Materials with no handover behind them — all seven the live instance could
@@ -2103,94 +2123,167 @@ headline figure net customer holds or not?
 **Blocks:** shipping the stock-state decomposition to the Stock page. The
 underlying figures are unaffected. *Open since 2026-08-30.*
 
-## Q80 · On the merged Store ↔ Production screen there are two doors home for the same material. Which one should a storekeeper be told to use? — RESOLVED (DEC-20260831-003, DEC-20260831-004)
+<!--
+  MERGE NOTE, 31-Aug-2026. The two procurement questions below arrived on the
+  purchase-requisition-coverage branch numbered Q69 and Q70, and both numbers
+  were already taken on main by unrelated questions merged while that branch
+  was open. Re-minted here to Q80 and Q81, which is what this file has always
+  said it does — "this file re-mints question numbers at merge", and why the
+  code refers to a question BY NAME and never by number.
 
-Store issues and production returns became two tabs of one screen on
-31-Aug-2026. Both tabs can send material back to the store, and they do not
-behave the same way — which was invisible while they were two URLs and is
-visible now that they sit one click apart.
+  Their decision records were re-minted for the same reason: DEC-20260831-001
+  and -002 were taken on main by two inventory decisions, so the procurement
+  pair are DEC-20260831-003 and -004. Records are immutable, so the ones
+  already merged keep their ids and the unmerged pair moved.
+-->
 
-  · **Issue to production tab**, inside a handover's own drawer: returns
-    against ONE open store issue. The quantity is attributed to that issue by
-    construction, it goes back to the store it came out of, and it records
-    who at the store took it back.
-  · **Returns from production tab**: returns by MATERIAL. It is the only door
-    that can reach material a *completed* handover is still standing on, and
-    the only door for material no handover ever put on the floor — which is
-    most of what is live. It records a note per return rather than a receiver.
+## Q80 · Does a DRAFT purchase order already reserve quantity against its requisition? — RESOLVED
 
-The two also disagree in one visible place. A material with an open store
-issue standing on it cannot be returned through the free-return input on the
-Returns tab — the ERP refuses it, because attributing it or not is Q69, still
-open — while the very same material returns without complaint through the
-handover drawer one tab away, because that path names the issue. Both
-behaviours are correct in isolation. Side by side they read as a bug.
+**Resolved 2026-08-31 by DEC-20260831-003: NO — a draft reserves nothing.**
+Nothing is held until the order goes to the vendor, and a draft may be typed
+for any quantity. The owner chose this over the shipped default, accepting
+the named cost: the refusal now arrives at Send rather than at typing, so two
+drafts may each be raised for the whole requisition and the second is refused
+after the vendor and the rates were typed. The combined-quantity rule
+therefore lives in `PurchaseOrderService::send()`; a guard on create or amend
+would be unreachable. The wording below is the question as it was asked.
 
-Nothing has been changed to resolve this: collapsing the two doors would
-strand material that a completed handover is standing on, leaving it with no
-way home at all while still blocking its own free return.
+The 30-Aug build gives every purchase-requisition line the four figures a
+buyer needs before raising an order — what was requested, what has already
+been ordered against it, what is still to order, and whether the line is Not
+Ordered / Partially Ordered / Fully Ordered — and refuses, in the backend, a
+purchase order whose lines would push the combined ordered quantity for an
+item past what that requisition asked for.
 
-What is asked: is the handover drawer the door a storekeeper should normally
-use, with the Returns tab reserved for material no open handover covers? Or
-is the Returns tab the daily door and the drawer the exception? The answer
-decides which one gets the plain wording and which gets the caveat.
+"Combined ordered quantity" has to name a set of order states, and this
+question is one half of what that set is. A purchase order is born a DRAFT
+and is not sent to the vendor until somebody sends it. Two readings, both
+defensible in a factory:
 
-**Blocks:** nothing shipping. Both doors work today. *Open since 2026-08-31.*
+- **Draft reserves** (the build's current default). A buyer who has typed
+  a draft for 500 of 800 cannot type a second draft for 500 as well; the
+  requisition's Balance to Order falls the moment the draft exists. The
+  cost is that an abandoned draft holds quantity until it is cancelled.
+- **Draft does not reserve.** Only what the vendor actually holds counts,
+  so nothing is reserved until Send. The cost is that two buyers, or one
+  buyer twice, can raise drafts that together over-order, and the refusal
+  arrives only at Send — after the rates and the vendor were typed.
 
-## Q81 · Does "material stays available for the next day's production" cover material no store issue put there? — RESOLVED (DEC-20260831-005)
+What is known: nothing in the factory record answers this. DEC-20260812-002
+puts the purchase order in the ERP and names "the ERP's remaining-quantity
+tracking" as the thing that keeps the two books agreeing, but it does not
+say which order states count towards it. The ERP's own lifecycle is
+Draft → Sent → PartiallyReceived → Closed, with Cancelled beside it.
 
-The instruction of 31-Aug-2026 ends: *"Material remaining in Production/WIP
-stays available for the next day's production."* For material a store issue
-handed over, that is exactly what happens — it stays in Production/WIP and
-tomorrow's batch consumes it from there.
+The build ships with **Draft reserves**, because of the two answers it is
+the one that cannot let combined orders exceed the requisition — the exact
+failure the refusal exists to prevent. Read that claim narrowly: it is about
+THIS question only. The pair of defaults the build ships (draft reserves,
+cancelled releases) is not "the conservative pair" — the next question's
+default is the PERMISSIVE half of its own choice, and is a judgement rather
+than a safety property. Neither default should be read as an
+already-half-made decision.
 
-For material that reached the floor without a store issue behind it, it does
-not. The ERP draws tomorrow's consumption from Production/WIP only when a
-store issue put that material there at some point; otherwise it consumes from
-the Store instead, and the kilograms sitting in Production/WIP are passed
-over. Seven of the materials standing in production on the live instance are
-in exactly that position.
+It is a DEFAULT, not a decision: the states live in one named constant in
+`RequisitionCoverageService`, the constant's comment names this question in
+words, and a test varies only the order's status across that boundary, so
+the other answer is a one-line change with a red test to apply it
+deliberately.
 
-This is deliberate, not a defect. The rule exists so that a deployment does
-not silently redirect a live batch onto stock left over from rehearsal, and
-the material is not stranded either way — the Returns tab sends all of it
-home whenever the store wants it back.
+**Blocks:** nothing on the screen. The four figures, the status words, the
+UoM-wise display and the refusal itself all work under either answer — only
+which orders are counted changes. *Open since 2026-08-30.*
 
-What is asked: should the sentence be read as describing issue-backed
-material only — which is what the system does today and the conservative
-answer — or should material on the floor with no handover behind it also be
-consumed from where it stands?
+## Q81 · When a purchase order is CANCELLED, does its quantity return to the requisition's balance? — RESOLVED
 
-**Blocks:** nothing today. Changing it would alter where a batch takes its
-stock from, which is a stock figure and a write path, so it is not something
-to adjust as part of a screen change. *Open since 2026-08-31.*
+**Resolved 2026-08-31 by DEC-20260831-004: NO — a cancelled order keeps its
+allowance, provided it was SENT.** A requisition is asked for once and
+answered once; wanting the material again means a new requisition, which is a
+fresh approval. The owner chose this over the shipped default.
 
----
+Answering it needed a THIRD answer that was never filed as its own question,
+and which the same decision records: **a cancelled order counts only if it was
+ever sent.** Q69 and Q70 alone contradict — a draft holds nothing, yet a
+cancelled order counts — so cancelling an abandoned draft would have consumed
+a requisition the draft never held, and a typo could have eaten a requisition
+permanently. The ERP now records `purchase_orders.sent_at` to tell the two
+apart. The wording below is the question as it was asked.
 
-## Resolutions recorded 31-Aug-2026
+The other half of Q69's set, and a separate factory judgement rather than
+the same one restated. Cancel is available on a Draft or a Sent order with
+zero receipts; it writes a reason, an actor and an instant, and — once the
+PO→Tally gate is open — withdraws or dismisses the staged voucher.
 
-**Q69 and Q80 — DEC-20260831-003 and DEC-20260831-004.** Material that came
-out of the store on a Store Issue returns against that exact issue, for open,
-partially returned AND completed issues, while returnable quantity remains.
-The unattributed door is for material with no originating Store Issue and
-nothing else. So the two doors on the merged screen are not rivals after all:
-the handover drawer is THE door for anything a Store Issue put on the floor,
-and the Returns tab's free input is the door for everything else — which on
-the live instance is seven of the nine materials standing in production.
+- **Cancelled releases** (the build's current default). The quantity goes
+  back to Balance to Order and the requisition can be ordered again. Cancel
+  is the release valve that makes "Draft reserves" safe.
+- **Cancelled still counts.** A requisition is asked for once and answered
+  once; a cancelled order has spent the requisition's allowance, and
+  wanting the material again means a new requisition, which is a fresh
+  approval by whoever approves them.
 
-Nothing recorded before this needs unwinding, and that is checkable rather
-than hoped for: `undecidedRefusal` was present in 05c86e1, the same and only
-commit that ever shipped the unattributed door, so the door was never open
-for material an issue was standing on.
+What is known: nothing in the factory record answers this either. The
+second reading is not a strawman — it is how an approval-controlled
+requisition behaves in some factories, and it makes the requisition, not
+the order, the unit of authorisation. The first is how most buyers expect a
+cancel to behave, and the ERP already treats Cancelled as terminal
+everywhere else (no receipt may be booked against it).
 
-The related question the Q69 block raised — whether anything should CHASE an
-overdue return, and against what clock — was not part of this ruling and
-stays open.
+Shipped as **cancelled releases**, in the same constant, under the same
+one-line-change rule as Q80 — but note plainly that this default is the
+PERMISSIVE of its two answers, not the safe one. Releasing lets the
+requisition be ordered again without a fresh approval; the stricter answer
+("cancelled still counts") is the one that cannot be reached by accident.
+It is shipped this way because it is how most buyers expect a cancel to
+behave, not because arithmetic forces it. The two answers are independent:
+the owner may answer either without the other.
 
-**Q81 — DEC-20260831-005.** Yes: material in Production/WIP is available to
-the next production day whatever put it there, and the Store Issue condition
-on `consumptionSource` is gone. One consequence is worth writing down because
-nobody asked for it and it is now true: those materials draw WIP down to zero
-and then continue from the Store, and both movements carry purpose
-`consumption` differing only in `warehouse_id` — so the moment the floor ran
-out is not marked anywhere in the consumption history.
+**Blocks:** nothing on the screen — same as Q80. *Open since 2026-08-30.*
+
+## Q82 · On the merged Store ↔ Production screen there are two doors home for the same material. Which one should a storekeeper be told to use? — RESOLVED (DEC-20260831-005, DEC-20260831-006)
+
+Raised and answered on 31-Aug-2026, in the session that merged Store Issues
+and Production Returns into one screen. Recorded because the reasoning is
+worth keeping, not because anything is still open.
+
+Both tabs of the merged screen can send material back to the store, and they
+did not behave the same way — which was invisible while they were two URLs
+and obvious once they sat one click apart. The handover drawer returns against
+ONE store issue and is attributed by construction. The Returns tab returns by
+MATERIAL, and it is the only door that reaches material a *completed* handover
+is standing on, or that no handover put on the floor at all. A material with an
+open issue was refused by one and accepted by the other, which reads as a bug.
+
+**The answer:** they are not rivals. Material that came out on a Store Issue
+goes home through that issue — the drawer — for as long as returnable quantity
+remains, whatever the issue's status. The Returns tab's free input is for
+material with no Store Issue behind it, which on the live instance is seven of
+the nine materials standing in production.
+
+Collapsing the two doors would have stranded stock: the drawer's button was
+gated on `is_open`, so material a completed handover was standing on would
+have had no door at all while still blocking its own free return. That gate is
+now keyed on what is outstanding.
+
+## Q83 · Does "material stays available for the next production day" cover material no store issue put there? — RESOLVED (DEC-20260831-007)
+
+Also raised and answered on 31-Aug-2026.
+
+DEC-20260831-005 already said material not returned remains available in
+Production/WIP as the next day's opening material. That was honoured when
+netting the next request — but not where a batch actually draws its material
+from: `consumptionSource` additionally required that a Store Issue had put the
+material there, so for the seven live materials with no issue behind them the
+batch drew from the Store while the WIP kilograms sat untouched.
+
+**The answer is yes, including that material**, and the condition is gone.
+
+One consequence nobody asked for, recorded because it is now true: those
+materials draw Production/WIP down to zero and then continue from the Store,
+and both movements carry purpose `consumption` differing only in
+`warehouse_id` — so the moment the floor ran out is not marked anywhere in the
+consumption history.
+
+**Still open, and untouched by this:** whether anything should CHASE an
+overdue return, and against what clock. The Q69 block raised it; no ruling has
+been given.

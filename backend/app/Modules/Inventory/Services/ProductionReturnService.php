@@ -496,8 +496,8 @@ class ProductionReturnService
      * The refusal for material a handover is still standing on. It names the
      * other door, because that door always works.
      *
-     * SETTLED 31-Aug-2026 (DEC-20260831-003 and DEC-20260831-004), and
-     * it used to be an open
+     * SETTLED 31-Aug-2026 (DEC-20260831-005, refined by
+     * DEC-20260831-006), and it used to be an open
      * question. Until then this refusal existed because the owner had not
      * ruled on whether a storekeeper MAY choose to record such a return
      * without naming its handover, and refusing was the conservative

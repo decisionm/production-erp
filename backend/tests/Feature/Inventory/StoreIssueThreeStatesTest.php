@@ -458,7 +458,7 @@ class StoreIssueThreeStatesTest extends TestCase
      * older than this phase and carries rehearsal-era balances, so consuming
      * out of it meant a batch could draw on stock nobody had handed over.
      * Rather than guess, the build required a store issue to have put the
-     * material there and left the question with the owner (Q81).
+     * material there and left the question with the owner.
      *
      * The answer came back that the kilograms are real: "Material remaining
      * in Production/WIP stays available for the next production day,
