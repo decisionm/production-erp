@@ -23,7 +23,12 @@ import {
     poNumber,
     purchasableItemOptions,
     rateCell,
+    nextDueDate,
+    quantitiesByUom,
+    receivableOrderLabel,
     reconcileReceipts,
+    trimQuantity,
+    uomPhrase,
     revisionLines,
     searchParamsFromFilters,
     statusOptions,
@@ -368,6 +373,121 @@ describe('amendFormDefaults', () => {
     });
 });
 
+const uomItem = (uom: string) => ({ id: 1, sku: 'ITEM_A', name: 'ITEM_A', uom }) as PurchaseOrderLine['item'];
+
+describe('quantitiesByUom', () => {
+    it('groups by the item unit and keeps first-seen order', () => {
+        expect(
+            quantitiesByUom([
+                line({ id: 1, item: uomItem('Nos'), quantity: '10.0000', quantity_received: '4.0000' }),
+                line({ id: 2, item: uomItem('Kgs'), quantity: '100.0000', quantity_received: '0.0000' }),
+                line({ id: 3, item: uomItem('Nos'), quantity: '5.0000', quantity_received: '1.0000' }),
+            ]).map((g) => [g.uom, g.ordered, g.received, g.remaining]),
+        ).toEqual([
+            ['Nos', '15.0000', '5.0000', '10.0000'],
+            ['Kgs', '100.0000', '0.0000', '100.0000'],
+        ]);
+    });
+
+    it('an unspelled unit is its OWN group, never folded into a neighbour', () => {
+        const groups = quantitiesByUom([
+            line({ id: 1, item: uomItem('Kgs'), quantity: '10.0000' }),
+            line({ id: 2, item: uomItem(''), quantity: '10.0000' }),
+        ]);
+        expect(groups.map((g) => g.uom)).toEqual(['Kgs', '']);
+    });
+
+    it('a line whose quantity cannot be read is counted in NEITHER total', () => {
+        const groups = quantitiesByUom([
+            line({ id: 1, item: uomItem('Kgs'), quantity: '10.0000', quantity_received: '2.0000' }),
+            line({ id: 2, item: uomItem('Kgs'), quantity: 'n/a' as string, quantity_received: '0.0000' }),
+        ]);
+        // Treating the unreadable line as zero would make a short order look
+        // complete; it is left out, and reconcileReceipts marks its row unknown.
+        expect(groups).toEqual([{ uom: 'Kgs', ordered: '10.0000', received: '2.0000', remaining: '8.0000' }]);
+    });
+
+    it('over-receipt never drives remaining below zero', () => {
+        expect(
+            quantitiesByUom([line({ item: uomItem('Kgs'), quantity: '10.0000', quantity_received: '12.0000' })])[0].remaining,
+        ).toBe('0.0000');
+    });
+});
+
+describe('uomPhrase and trimQuantity', () => {
+    it('joins units with a + that separates rather than adds, and trims the wire zeros', () => {
+        const totals = quantitiesByUom([
+            line({ id: 1, item: uomItem('Kgs'), quantity: '500.0000' }),
+            line({ id: 2, item: uomItem('Nos'), quantity: '40.0000' }),
+        ]);
+        expect(uomPhrase(totals, 'ordered')).toBe('500 Kgs + 40 Nos');
+        expect(uomPhrase(totals, 'received')).toBe('0 Kgs + 0 Nos');
+    });
+
+    it('an unspelled unit prints the bare figure, and nothing at all is a dash', () => {
+        expect(uomPhrase(quantitiesByUom([line({ item: uomItem(''), quantity: '7.5000' })]), 'ordered')).toBe('7.5');
+        expect(uomPhrase([], 'ordered')).toBe('—');
+    });
+
+    it('trims only what it can parse', () => {
+        expect(trimQuantity('500.0000')).toBe('500');
+        expect(trimQuantity('2.5000')).toBe('2.5');
+        expect(trimQuantity('0.0000')).toBe('0');
+        expect(trimQuantity('n/a')).toBe('n/a');
+    });
+});
+
+describe('nextDueDate', () => {
+    const window = (due: string, remaining: string) => ({ id: 1, due_date: due, quantity: '10.0000', quantity_received: '0.0000', remaining, tally_reference: null });
+
+    it('is the earliest window that still expects something, across every line', () => {
+        expect(
+            nextDueDate({
+                expected_date: '2026-12-31',
+                lines: [
+                    line({ id: 1, schedules: [window('2026-10-01', '5.0000')] }),
+                    line({ id: 2, schedules: [window('2026-09-01', '5.0000')] }),
+                ],
+            }),
+        ).toBe('2026-09-01');
+    });
+
+    it('skips a window that has fully arrived — its date is history', () => {
+        expect(
+            nextDueDate({
+                expected_date: null,
+                lines: [line({ schedules: [window('2026-09-01', '0.0000'), window('2026-10-01', '5.0000')] })],
+            }),
+        ).toBe('2026-10-01');
+    });
+
+    it('falls back to the order header only when no window is open, and is null when there is neither', () => {
+        expect(nextDueDate({ expected_date: '2026-12-31', lines: [line({ schedules: [] })] })).toBe('2026-12-31');
+        expect(nextDueDate({ expected_date: null, lines: [] })).toBeNull();
+    });
+});
+
+describe('receivableOrderLabel', () => {
+    it('spells the order, the supplier, the quantities unit-wise and the next due date', () => {
+        expect(
+            receivableOrderLabel({
+                id: 12,
+                vendor: { name: 'Vendor Alpha' },
+                expected_date: '2026-12-31',
+                lines: [
+                    line({ id: 1, item: uomItem('Kgs'), quantity: '500.0000', quantity_received: '200.0000', schedules: [{ id: 1, due_date: '2026-09-12', quantity: '500.0000', quantity_received: '200.0000', remaining: '300.0000', tally_reference: null }] }),
+                    line({ id: 2, item: uomItem('Nos'), quantity: '40.0000', quantity_received: '0.0000' }),
+                ],
+            }),
+        ).toBe('PO-12 — Vendor Alpha · ordered 500 Kgs + 40 Nos · received 200 Kgs + 0 Nos · remaining 300 Kgs + 40 Nos · next due 2026-09-12');
+    });
+
+    it('says so plainly when an order has no due date, and survives a missing vendor', () => {
+        expect(receivableOrderLabel({ id: 3, vendor: null, expected_date: null, lines: [line({ item: uomItem('Kgs'), quantity: '10.0000' })] }))
+            .toBe('PO-3 · ordered 10 Kgs · received 0 Kgs · remaining 10 Kgs · no due date');
+    });
+});
+
 describe('reconcileReceipts', () => {
     it('reads received against ordered per line and names the state', () => {
         const rows = reconcileReceipts([
@@ -391,12 +511,31 @@ describe('reconcileReceipts', () => {
         expect(row.state).toBe('unknown');
     });
 
-    it('sums the order: how many lines are complete, and totals at four places', () => {
+    it('sums the order: how many lines are complete, and quantities BY UNIT — never one total', () => {
         const rows = reconcileReceipts([
             line({ id: 1, quantity: '10.0000', quantity_received: '10.0000' }),
             line({ id: 2, quantity: '5.5000', quantity_received: '1.0000' }),
         ]);
-        expect(rows.summary).toEqual({ lines: 2, complete: 1, ordered: '15.5000', received: '11.0000' });
+        expect(rows.summary).toEqual({
+            lines: 2,
+            complete: 1,
+            by_uom: [{ uom: '', ordered: '15.5000', received: '11.0000', remaining: '4.5000' }],
+        });
+    });
+
+    it('an order in two units reports two groups, and no figure anywhere adds them', () => {
+        const rows = reconcileReceipts([
+            line({ id: 1, item: uomItem('Kgs'), quantity: '500.0000', quantity_received: '200.0000' }),
+            line({ id: 2, item: uomItem('Nos'), quantity: '40.0000', quantity_received: '0.0000' }),
+        ]);
+
+        expect(rows.summary.by_uom).toEqual([
+            { uom: 'Kgs', ordered: '500.0000', received: '200.0000', remaining: '300.0000' },
+            { uom: 'Nos', ordered: '40.0000', received: '0.0000', remaining: '40.0000' },
+        ]);
+        // 540 — kilograms added to pieces — exists nowhere in what this
+        // returns. It is the figure the cell used to print.
+        expect(JSON.stringify(rows.summary)).not.toContain('540');
     });
 });
 

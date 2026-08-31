@@ -5,7 +5,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * INTERNAL QUALITY APPROVAL, RECORDED — DEC-20260831-003.
+ * INTERNAL QUALITY APPROVAL, RECORDED — DEC-20260831-006.
  *
  * The owner's dispatch sequence is: stock fully held → QUALITY APPROVES →
  * Sales dispatches → Sales invoices. Before this, nothing in the ERP recorded

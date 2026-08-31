@@ -23,7 +23,7 @@ export interface DeliveryNotePayload {
  * Delivery Notes, and none of the 177 real Sales vouchers references one. The
  * factory books Sales Order → Sales Invoice with no delivery-note stage.
  *
- * The ERP posts one anyway, by owner decision (DEC-20260831-004), which makes
+ * The ERP posts one anyway, by owner decision (DEC-20260831-007), which makes
  * this the INTRODUCTION of a practice rather than the mirroring of one. The
  * consequence to be honest about: the structure below is reasoned from the
  * Sales voucher's inventory block, not measured from a real Delivery Note, so

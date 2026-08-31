@@ -42,7 +42,7 @@ use Illuminate\Support\Collection;
  *   production.completed  no FK joins a production request to a shift
  *                       production entry; "produced" is inferred from line
  *                       coverage, so completed-against-this-line is unknown.
- * WHAT IS NOW REAL. Internal quality approval IS recorded (DEC-20260831-003)
+ * WHAT IS NOW REAL. Internal quality approval IS recorded (DEC-20260831-006)
  * and gates dispatch, so `quality` carries a true state rather than a
  * confession. There is NO customer-approval step — the owner settled that it
  * does not exist and is not to be built, so the column is gone rather than
@@ -154,7 +154,7 @@ class FulfilmentControlService
         //                   line off, then the approved quantity less what has
         //                   already gone.
         //
-        // Before DEC-20260831-003 a single "dispatch ready" figure showed held
+        // Before DEC-20260831-006 a single "dispatch ready" figure showed held
         // stock and read as permission to ship it. On a factory floor that is
         // the difference between "we have it" and "you may send it".
         $stockHeld = bccomp($reserved, $outstanding, 4) === 1 ? $outstanding : $reserved;
@@ -222,7 +222,7 @@ class FulfilmentControlService
                     .'so completed-against-this-line is not stored.',
             ],
 
-            // ---- THE ONE GATE (DEC-20260831-003). Internal quality approval is
+            // ---- THE ONE GATE (DEC-20260831-006). Internal quality approval is
             // recorded and caps the dispatch. There is deliberately no
             // customer-approval sibling: the owner settled that no such step
             // exists, so none is shown.
@@ -331,7 +331,7 @@ class FulfilmentControlService
 
         // Covered by holds. Whether it MAY leave is now a recorded fact rather
         // than an unknown: Quality signs the line off, and only then is it
-        // Sales' to dispatch. DEC-20260831-003.
+        // Sales' to dispatch. DEC-20260831-006.
         if (! $qualityApproved) {
             return [
                 'code' => 'awaiting_quality_approval',

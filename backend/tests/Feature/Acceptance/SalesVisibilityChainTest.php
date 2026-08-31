@@ -172,7 +172,7 @@ class SalesVisibilityChainTest extends TestCase
             'quantity_delivered' => 0,
         ]);
 
-        // The Delivery Note voucher is FAIL-CLOSED (DEC-20260831-004): it stages
+        // The Delivery Note voucher is FAIL-CLOSED (DEC-20260831-007): it stages
         // nothing unless the customer carries a tally_ledger_name and a godown
         // resolves, so the masters go in HERE — before the dispatch — rather
         // than lower down. The Sales voucher below needs the same set, and both
@@ -302,7 +302,7 @@ class SalesVisibilityChainTest extends TestCase
         $this->assertFalse($statement['mirrored'], 'Tally-side sales are NOT mirrored here');
         $this->assertSame(TallyMirrorStatementService::DECISION, $statement['decision']);
         // TRUE since the Sales voucher was rebuilt against the factory's own 55
-        // real exports (DEC-20260831-004). Still never LIVE-POSTED — that is the
+        // real exports (DEC-20260831-007). Still never LIVE-POSTED — that is the
         // note's job to say, not this flag's.
         $this->assertTrue($statement['erp_invoice_builder']['validated']);
         $this->assertFalse($statement['payments_recorded_here']);

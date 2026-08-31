@@ -114,9 +114,9 @@ class DeliveryNoteLifecycleTest extends PerTypeLifecycleTestCase
     {
         // The two preconditions the dispatch now carries, before the voucher is
         // staged. The masters, because enqueueDelivery() is fail-closed
-        // (DEC-20260831-004): with no tally_ledger_name on the customer it
+        // (DEC-20260831-007): with no tally_ledger_name on the customer it
         // stages NOTHING and there is no payload to read. Then Quality's
-        // dispatch sign-off (DEC-20260831-003), or the POST is refused 422 and
+        // dispatch sign-off (DEC-20260831-006), or the POST is refused 422 and
         // nothing leaves the store. The base's own four tests seed themselves;
         // this one is this class's, so it seeds itself too.
         $this->seedSalesTallyMasterData();
@@ -131,7 +131,7 @@ class DeliveryNoteLifecycleTest extends PerTypeLifecycleTestCase
         // Item, quantity and the stock item's own UOM — the three a stock line
         // names, and STILL nothing else: the whole-array match is what forbids
         // a rate or an amount creeping in beside them. The uom is the shape
-        // DEC-20260831-004's rewrite of enqueueDelivery() now stages.
+        // DEC-20260831-007's rewrite of enqueueDelivery() now stages.
         $this->assertSame([['item' => '500ml PET Bottle', 'quantity' => '2000.0000', 'uom' => 'Nos']], $entry->payload['lines']);
         $this->assertArrayNotHasKey('total_amount', $entry->payload);
 

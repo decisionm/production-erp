@@ -40,7 +40,7 @@ class TallySyncEventServiceProvider extends ServiceProvider
     public function boot(): void
     {
         // An issued ERP invoice → Tally 'Sales' voucher, ON by owner decision
-        // (DEC-20260831-004, superseding DEC-20260809-003: the ERP now
+        // (DEC-20260831-007, superseding DEC-20260809-003: the ERP now
         // ORIGINATES the sale) behind tally-sync.sales_invoices_enabled, and
         // fail-closed — SalesVoucherPayload names its refusals and stages
         // nothing rather than posting a voucher it cannot build correctly.
@@ -54,7 +54,7 @@ class TallySyncEventServiceProvider extends ServiceProvider
                     return;
                 }
 
-                // NEVER LET STAGING BREAK THE SALE — DEC-20260831-004 in as many
+                // NEVER LET STAGING BREAK THE SALE — DEC-20260831-007 in as many
                 // words: "a refusal must never block the factory's own act".
                 // SalesVoucherPayload turns every KNOWN gap into a recorded
                 // reason, but this closure runs inside the invoice's own save,
@@ -98,7 +98,7 @@ class TallySyncEventServiceProvider extends ServiceProvider
         });
 
         // A dispatch → Tally 'Delivery Note', ON by owner decision
-        // (DEC-20260831-004) behind tally-sync.delivery_notes_enabled, and
+        // (DEC-20260831-007) behind tally-sync.delivery_notes_enabled, and
         // fail-closed: enqueueDelivery names its refusals and returns null
         // rather than staging a guessed voucher.
         Event::listen(DeliveryDispatched::class, function (DeliveryDispatched $event) {

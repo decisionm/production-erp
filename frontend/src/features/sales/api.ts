@@ -243,7 +243,7 @@ export async function listFulfilmentControl(): Promise<FulfilmentControlRow[]> {
 }
 
 /**
- * Quality signs a sales order line off for dispatch (DEC-20260831-003). Routed
+ * Quality signs a sales order line off for dispatch (DEC-20260831-006). Routed
  * under the QUALITY module although the record lives on a Sales line: the act
  * is Quality's, and Sales must not be able to approve its own dispatch.
  */

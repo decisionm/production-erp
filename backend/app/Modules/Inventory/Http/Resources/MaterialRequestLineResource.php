@@ -43,7 +43,16 @@ class MaterialRequestLineResource extends JsonResource
                 'display_name' => $line->item->display_name,
                 'uom' => $line->item->uom,
             ] : null,
+            // WHAT IS ASKED OF THE STORE. Unchanged meaning; where the
+            // request netted, it is the balance and the two figures below say
+            // what it was netted from (DEC-20260831-001).
             'quantity' => $line->quantity,
+            // What production needed, and what was already standing on the
+            // floor when the request was raised. NULL — not zero — on a
+            // request that never considered the floor: zero would claim it
+            // was empty.
+            'required_quantity' => $line->required_quantity,
+            'available_in_production' => $line->available_in_production,
             // Snapshotted from the item when the request was raised (FC-03).
             'uom' => $line->uom,
             'issued_quantity' => $line->issued_quantity,

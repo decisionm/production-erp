@@ -225,7 +225,7 @@ return [
     |
     | Whether a dispatch stages a Tally 'Delivery Note' voucher.
     |
-    | ON BY OWNER DECISION, DEC-20260831-004: the ERP posts both Delivery Notes
+    | ON BY OWNER DECISION, DEC-20260831-007: the ERP posts both Delivery Notes
     | and Sales Invoices to Tally. This was OFF while Q70 was open, on the
     | evidence that the factory's own Tally held ZERO Delivery Note vouchers and
     | none of its 177 real Sales vouchers referenced one. That evidence still
@@ -247,7 +247,7 @@ return [
     | Sales Invoice → Tally — ON, and fail-closed
     |--------------------------------------------------------------------------
     |
-    | ON BY OWNER DECISION, DEC-20260831-004: the ERP originates the sale, which
+    | ON BY OWNER DECISION, DEC-20260831-007: the ERP originates the sale, which
     | reverses DEC-20260809-003 (now superseded) and resolves Q71.
     |
     | The fail-closed half is part of the decision, not a caveat. Staging

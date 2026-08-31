@@ -15,6 +15,7 @@ import {
 import type { PurchaseRequisition, PurchaseRequisitionStatus } from '@/features/procurement/types';
 import { apiMessage } from '@/features/procurement/components/apiMessage';
 import { prDrawerTitle, prNumber, requisitionStatusTag } from '@/features/procurement/documentWords';
+import { balanceToOrderWords, coverageStatusTag, hasCoverage, quantityWithUom } from '@/features/procurement/requisitionCoverage';
 import { poNumber } from '@/features/procurement/purchaseOrders';
 import { instant } from '@/features/tally-sync/drawer';
 import { itemLabel } from '@/lib/itemLabel';
@@ -271,11 +272,34 @@ export default function PurchaseRequisitionsPage() {
                                 <Space size={4} wrap>
                                     {(row.purchase_orders ?? []).map((order) => (
                                         <Link key={order.id} to={`/procurement/purchase-orders?po=${order.id}`}>
-                                            {poNumber(order)}
+                                            {order.document_number ?? poNumber(order)}
                                         </Link>
                                     ))}
                                 </Space>
                             ),
+                    },
+                    // HOW MUCH OF THIS REQUISITION IS STILL TO ORDER — the
+                    // question the column beside it could not answer. A list
+                    // of order numbers says that orders exist, not whether
+                    // they cover the ask; a buyer had to open each one and
+                    // add the quantities up. The word is the server's
+                    // roll-up and the line beneath it is what is left,
+                    // UNIT-WISE — a requisition for resin in Kgs and caps in
+                    // Nos has no single balance.
+                    {
+                        title: 'Ordering',
+                        render: (_, row) => {
+                            const tag = coverageStatusTag(row.order_status);
+
+                            return (
+                                <Space direction="vertical" size={0}>
+                                    <Tag color={tag.color}>{tag.label}</Tag>
+                                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                        {balanceToOrderWords(row.lines)}
+                                    </Typography.Text>
+                                </Space>
+                            );
+                        },
                     },
                     {
                         title: 'Actions',
@@ -450,7 +474,13 @@ export default function PurchaseRequisitionsPage() {
                                     <Space size={4} wrap>
                                         {(detailRequisition.purchase_orders ?? []).map((order) => (
                                             <Link key={order.id} to={`/procurement/purchase-orders?po=${order.id}`}>
-                                                {poNumber(order)} ({order.status})
+                                                {order.document_number ?? poNumber(order)} ({order.status}
+                                                {/* Which of these orders the figures above actually
+                                                    counted. An order that holds no quantity — a
+                                                    cancelled one — sits in this list looking exactly
+                                                    like one that does, and the difference is the
+                                                    whole explanation of a balance a buyer disputes. */}
+                                                {order.reserves_quantity === false ? ', not counted' : ''})
                                             </Link>
                                         ))}
                                     </Space>
@@ -469,10 +499,40 @@ export default function PurchaseRequisitionsPage() {
                             scroll={{ x: 'max-content' }}
                             columns={[
                                 { title: 'Item', render: (_, line) => itemLabel(line.item) },
+                                // WHAT WAS ASKED, WHAT IS ON ORDER, WHAT IS
+                                // LEFT — per line and per item, each figure
+                                // carrying its own item's unit. Nothing on
+                                // this table adds two lines together: one
+                                // line is in Kgs and the next in Nos, so a
+                                // column total would be a number in no unit.
                                 {
-                                    title: 'Quantity',
+                                    title: 'Requested Quantity',
                                     align: 'right',
-                                    render: (_, line) => `${line.quantity}${line.item?.uom ? ` ${line.item.uom}` : ''}`,
+                                    render: (_, line) => quantityWithUom(line.quantity, line.item?.uom),
+                                },
+                                {
+                                    title: 'PO Raised Quantity',
+                                    align: 'right',
+                                    // A dash, not a zero, when the server sent
+                                    // no figure: "not computed" and "nothing
+                                    // ordered" are different facts.
+                                    render: (_, line) =>
+                                        hasCoverage(line) ? quantityWithUom(line.ordered_quantity, line.item?.uom) : '—',
+                                },
+                                {
+                                    title: 'Balance to Order',
+                                    align: 'right',
+                                    render: (_, line) =>
+                                        hasCoverage(line) ? quantityWithUom(line.balance_quantity, line.item?.uom) : '—',
+                                },
+                                {
+                                    title: 'Status',
+                                    render: (_, line) => {
+                                        if (!hasCoverage(line)) return <Typography.Text type="secondary">—</Typography.Text>;
+                                        const tag = coverageStatusTag(line.order_status);
+
+                                        return <Tag color={tag.color}>{tag.label}</Tag>;
+                                    },
                                 },
                                 { title: 'Notes', dataIndex: 'notes' },
                             ]}

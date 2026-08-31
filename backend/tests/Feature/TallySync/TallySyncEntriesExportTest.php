@@ -288,7 +288,7 @@ class TallySyncEntriesExportTest extends TestCase
     private function enqueueDelivery(): TallySyncEntry
     {
         $so = new SalesOrder;
-        // The Delivery Note is staged fail-closed (DEC-20260831-004): it posts
+        // The Delivery Note is staged fail-closed (DEC-20260831-007): it posts
         // against the customer's TALLY ledger name, and refuses without one.
         // This customer is in memory, so the name goes on the object itself.
         $customer = new Customer(['name' => 'Sri Aurobindo Beverages', 'gstin' => '33AAACS1234A1Z9']);

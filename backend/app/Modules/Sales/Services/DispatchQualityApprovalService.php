@@ -9,7 +9,7 @@ use App\Modules\Sales\Models\SalesOrderLine;
 use Illuminate\Support\Facades\DB;
 
 /**
- * INTERNAL QUALITY'S SIGN-OFF ON A SALES ORDER LINE — DEC-20260831-003.
+ * INTERNAL QUALITY'S SIGN-OFF ON A SALES ORDER LINE — DEC-20260831-006.
  *
  * The owner's sequence is: stock fully held → QUALITY APPROVES → Sales
  * dispatches → Sales issues the invoice. This service is the second step, and

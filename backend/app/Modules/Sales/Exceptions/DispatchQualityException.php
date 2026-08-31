@@ -6,7 +6,7 @@ use App\Exceptions\DomainException;
 use RuntimeException;
 
 /**
- * The refusals of the internal quality gate (DEC-20260831-003). Each one names
+ * The refusals of the internal quality gate (DEC-20260831-006). Each one names
  * the figure it refused on, because a gate that says only "no" sends the reader
  * to guess which of four things is wrong.
  */

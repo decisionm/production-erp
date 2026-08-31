@@ -207,7 +207,7 @@ class SalesOrderCancelTest extends TestCase
     {
         $this->seedStock();
         $order = $this->confirmedOrder('2000');
-        // Quality signs the dispatch off first (DEC-20260831-003) — for the 500
+        // Quality signs the dispatch off first (DEC-20260831-006) — for the 500
         // that actually ships and no more. The delivery is the fixture here;
         // the gate is DispatchQualityGateTest's subject, not this file's.
         $this->approveQualityForDispatch($order->lines->first()->id, '500');
@@ -225,7 +225,7 @@ class SalesOrderCancelTest extends TestCase
         $this->seedStock();
         $order = $this->confirmedOrder('2000');
         // The whole 2000 ships, so the whole 2000 is what Quality signs off
-        // (DEC-20260831-003) — without it the dispatch is a 422 and the order
+        // (DEC-20260831-006) — without it the dispatch is a 422 and the order
         // never reaches the `completed` this test refuses a cancel from.
         $this->approveQualityForOrder($order->id);
         $this->deliver($order, '2000')->assertSuccessful();

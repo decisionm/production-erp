@@ -348,11 +348,11 @@ class EntryPresenterTest extends TestCase
             $sales['note'],
             'the builder DOES emit GST now — repeating the old gap would be a false warning',
         );
-        // The decision in force. DEC-20260831-004 supersedes DEC-20260809-003:
+        // The decision in force. DEC-20260831-007 supersedes DEC-20260809-003:
         // the ERP now ORIGINATES the sale rather than mirroring Tally's.
-        $this->assertStringContainsString('DEC-20260831-004', $sales['note']);
+        $this->assertStringContainsString('DEC-20260831-007', $sales['note']);
         $this->assertSame('tally-sync-agent/src/tally/voucherBuilders/salesInvoice.ts', $sales['builder']);
-        $this->assertSame('DEC-20260831-004', $sales['decision']);
+        $this->assertSame('DEC-20260831-007', $sales['decision']);
 
         // Receipt Note (receiptNote.ts:17), Delivery Note (deliveryNote.ts:16)
         // and Journal (journalEntry.ts:13) carry the SAME line — each flag
@@ -369,7 +369,7 @@ class EntryPresenterTest extends TestCase
         // worth stating rather than hiding: it CANNOT be validated against a
         // real export, because the factory's Tally contains none of these
         // vouchers at all. The ERP introduces the practice by owner decision
-        // (DEC-20260831-004), so the flag says "never used, cannot be
+        // (DEC-20260831-007), so the flag says "never used, cannot be
         // validated" instead of "not yet validated" — the first is true, the
         // second implies an export exists to check against.
         $delivery = $presenter->flags($this->enqueueDelivery())['unvalidated_builder'];
@@ -377,7 +377,7 @@ class EntryPresenterTest extends TestCase
         $this->assertStringContainsString('A VOUCHER TYPE THIS FACTORY HAS NEVER USED', $delivery['note']);
         $this->assertStringContainsString('first live post is the check', $delivery['note']);
         $this->assertSame('tally-sync-agent/src/tally/voucherBuilders/deliveryNote.ts', $delivery['builder']);
-        $this->assertSame('DEC-20260831-004', $delivery['decision']);
+        $this->assertSame('DEC-20260831-007', $delivery['decision']);
 
         $journal = $presenter->flags(app(TallySyncService::class)->enqueueJournalEntry($this->journal()))['unvalidated_builder'];
         $this->assertStringContainsString($unvalidated, $journal['note']);
@@ -648,7 +648,7 @@ class EntryPresenterTest extends TestCase
     {
         $so = new SalesOrder;
         // The Delivery Note posts against the customer's TALLY ledger, and
-        // refuses without one (DEC-20260831-004's fail-closed half).
+        // refuses without one (DEC-20260831-007's fail-closed half).
         $customer = new Customer(['name' => 'Sri Aurobindo Beverages']);
         $customer->forceFill(['tally_ledger_name' => 'Sri Aurobindo Beverages']);
         $so->setRelation('customer', $customer);

@@ -17,7 +17,7 @@ use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
 
 /**
- * THE INTERNAL QUALITY GATE — DEC-20260831-003.
+ * THE INTERNAL QUALITY GATE — DEC-20260831-006.
  *
  * The owner's sequence: stock fully held → QUALITY APPROVES → Sales dispatches
  * → Sales issues the invoice. Before this, dispatch consulted no quality state

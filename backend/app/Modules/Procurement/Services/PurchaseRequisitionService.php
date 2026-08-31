@@ -12,9 +12,50 @@ use Illuminate\Support\Facades\DB;
 class PurchaseRequisitionService
 {
     /** Loaded on every requisition the list hands back, so the resource never lazy-loads. */
-    private const WITH = ['lines.item', 'requestedBy', 'approvedBy', 'rejectedBy', 'purchaseOrders'];
+    /**
+     * `purchaseOrders.lines` is loaded for the coverage arithmetic (what has
+     * already been ordered against each line): without it
+     * RequisitionCoverageService falls back to a query PER REQUISITION, and
+     * this list is paginated at 20 but served up to the module's ceiling.
+     * `purchaseOrders.lines.item` is NOT loaded — the arithmetic groups by
+     * item_id and needs no item row; only the requisition's OWN lines print
+     * an item.
+     */
+    private const WITH = ['lines.item', 'requestedBy', 'approvedBy', 'rejectedBy', 'purchaseOrders.lines'];
 
-    public function __construct(private readonly ProcurementDocumentQuery $query) {}
+    public function __construct(
+        private readonly ProcurementDocumentQuery $query,
+        private readonly RequisitionCoverageService $coverage,
+    ) {}
+
+    /**
+     * Stamp each requisition's lines with their coverage — the ONE place a
+     * requisition becomes readable, so the list, the create response and
+     * both decisions can never disagree about how much of a line is ordered.
+     * The PurchaseOrderService::decorateMany() pattern, and like it, it runs
+     * on every row this service hands back.
+     *
+     * @param  iterable<int, PurchaseRequisition>  $requisitions
+     */
+    private function decorateMany(iterable $requisitions): void
+    {
+        foreach ($requisitions as $requisition) {
+            $byLine = $this->coverage->byLine($requisition);
+
+            foreach ($requisition->lines as $line) {
+                $line->coverage = $byLine[$line->id] ?? null;
+            }
+        }
+    }
+
+    /** One requisition, loaded and decorated as the list serves them. */
+    private function decorate(PurchaseRequisition $requisition): PurchaseRequisition
+    {
+        $requisition->load(self::WITH);
+        $this->decorateMany([$requisition]);
+
+        return $requisition;
+    }
 
     /**
      * The list, filtered (28-Aug audit finding 8 — the queue had no way in).
@@ -30,7 +71,10 @@ class PurchaseRequisitionService
         $this->applyFilters($query, $filters);
         $this->query->applySort($query, $filters['sort'] ?? null, ['needed_by_date', 'created_at']);
 
-        return $query->paginate($perPage)->withQueryString();
+        $page = $query->paginate($perPage)->withQueryString();
+        $this->decorateMany($page->getCollection());
+
+        return $page;
     }
 
     /**
@@ -105,7 +149,11 @@ class PurchaseRequisitionService
                 ]);
             }
 
-            return $requisition->load(['lines.item', 'requestedBy']);
+            // Decorated like every other row this service returns — a fresh
+            // requisition has no orders yet, so every line reads Not Ordered
+            // with its full quantity still to order. That is a computed
+            // answer, not an assumed one.
+            return $this->decorate($requisition);
         });
     }
 
@@ -148,7 +196,7 @@ class PurchaseRequisitionService
 
             $locked->forceFill(['status' => $target, ...$stamps])->save();
 
-            return $locked->load(['lines.item', 'requestedBy', 'approvedBy', 'rejectedBy', 'purchaseOrders']);
+            return $this->decorate($locked);
         });
     }
 

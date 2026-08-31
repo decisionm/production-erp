@@ -180,7 +180,7 @@ abstract class PerTypeLifecycleTestCase extends TestCase
 
     /**
      * QUALITY SIGNS A LINE OFF BEFORE ANYTHING LEAVES THE STORE
-     * (DEC-20260831-003), so the one type whose domain act is a DISPATCH —
+     * (DEC-20260831-006), so the one type whose domain act is a DISPATCH —
      * the Delivery Note — is refused with a 422 unless its sales order lines
      * carry that sign-off. This suite's subject is the QUEUE, not that gate
      * (DispatchQualityGateTest owns the gate itself and walks its real
@@ -212,7 +212,7 @@ abstract class PerTypeLifecycleTestCase extends TestCase
         // the type made none (two would make the godown ambiguous).
         $this->seedSalesTallyMasterData();
 
-        // And Quality's dispatch sign-off, which DEC-20260831-003 makes a
+        // And Quality's dispatch sign-off, which DEC-20260831-006 makes a
         // precondition of the dispatch that stages a Delivery Note.
         $this->approveQualityOnEveryFixtureLine();
 
@@ -340,7 +340,7 @@ abstract class PerTypeLifecycleTestCase extends TestCase
 
     public function test_a_failed_voucher_can_be_dismissed_and_a_dismissed_one_never_retried(): void
     {
-        // Masters and Quality's dispatch sign-off (DEC-20260831-003) before the
+        // Masters and Quality's dispatch sign-off (DEC-20260831-006) before the
         // domain act, as in the lifecycle test above.
         $this->seedSalesTallyMasterData();
         $this->approveQualityOnEveryFixtureLine();
@@ -400,7 +400,7 @@ abstract class PerTypeLifecycleTestCase extends TestCase
 
     public function test_a_user_without_tally_sync_view_is_refused_on_list_show_and_summary(): void
     {
-        // Masters and Quality's dispatch sign-off (DEC-20260831-003) before the
+        // Masters and Quality's dispatch sign-off (DEC-20260831-006) before the
         // domain act, as in the lifecycle test above.
         $this->seedSalesTallyMasterData();
         $this->approveQualityOnEveryFixtureLine();
@@ -426,7 +426,7 @@ abstract class PerTypeLifecycleTestCase extends TestCase
 
     public function test_enqueueing_the_same_source_twice_leaves_exactly_one_row(): void
     {
-        // Masters and Quality's dispatch sign-off (DEC-20260831-003) before the
+        // Masters and Quality's dispatch sign-off (DEC-20260831-006) before the
         // domain act, as in the lifecycle test above.
         $this->seedSalesTallyMasterData();
         $this->approveQualityOnEveryFixtureLine();

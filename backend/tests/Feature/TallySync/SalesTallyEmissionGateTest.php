@@ -17,7 +17,7 @@ use Tests\TestCase;
 
 /**
  * tally-sync.delivery_notes_enabled and tally-sync.sales_invoices_enabled —
- * both ON by owner decision (DEC-20260831-004), and both FAIL-CLOSED.
+ * both ON by owner decision (DEC-20260831-007), and both FAIL-CLOSED.
  *
  * THEY WERE OFF, and this file used to lock that. The owner has since decided
  * that the ERP originates the sale and posts BOTH vouchers, superseding

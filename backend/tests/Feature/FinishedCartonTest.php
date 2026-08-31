@@ -131,7 +131,7 @@ class FinishedCartonTest extends TestCase
             'unit_price' => '4.50', 'quantity_delivered' => 0,
         ]);
         // Quality signs the line off; without it the dispatch is refused
-        // outright (DEC-20260831-003) and no carton would ever be scanned.
+        // outright (DEC-20260831-006) and no carton would ever be scanned.
         $this->approveQualityForOrder($order->id);
 
         // Two full cartons scanned — 1,200 pieces derived, boxes stamped.
@@ -248,7 +248,7 @@ class FinishedCartonTest extends TestCase
 
         $order = $this->orderFor();
         // The batch is approved on the floor, but dispatch also needs Quality's
-        // sign-off on the LINE (DEC-20260831-003) — "exactly as before" is
+        // sign-off on the LINE (DEC-20260831-006) — "exactly as before" is
         // judged with that precondition met, not without it.
         $this->approveQualityForOrder($order->id);
 

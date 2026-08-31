@@ -23,7 +23,7 @@ class SalesOrderLine extends Model
     }
 
     /**
-     * Has Quality signed this line off for dispatch? DEC-20260831-003.
+     * Has Quality signed this line off for dispatch? DEC-20260831-006.
      *
      * The TIMESTAMP is the fact, not the quantity: a line approved for zero is
      * still a line Quality looked at, and `quality_approved_quantity` is what

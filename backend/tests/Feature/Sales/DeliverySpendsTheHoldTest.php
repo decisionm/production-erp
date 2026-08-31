@@ -31,7 +31,7 @@ use Tests\TestCase;
  * posts too, and the surplus is simply not absorbed by anything. No hold
  * refuses a real dispatch over paperwork.
  *
- * What DOES gate a dispatch is Quality's sign-off (DEC-20260831-003), which
+ * What DOES gate a dispatch is Quality's sign-off (DEC-20260831-006), which
  * is why every dispatch below is preceded by a seeded approval on its line.
  * That gate is DispatchQualityGateTest's subject, never this file's.
  *
@@ -80,7 +80,7 @@ class DeliverySpendsTheHoldTest extends TestCase
         $first = app(StockReservationService::class)->reserve($line, '40', null);
         $second = app(StockReservationService::class)->reserve($line, '60', null);
         // Quality signs the held line off; without it the dispatch is refused
-        // outright (DEC-20260831-003) and nothing below would ever run.
+        // outright (DEC-20260831-006) and nothing below would ever run.
         $this->approveQualityForDispatch($line);
 
         $this->actingWith(['sales.manage']);
@@ -114,7 +114,7 @@ class DeliverySpendsTheHoldTest extends TestCase
         $line = $this->lineOn($order, '100');
         $hold = app(StockReservationService::class)->reserve($line, '100', null);
         // Quality's sign-off is about the LINE, not the warehouse the van
-        // loaded from (DEC-20260831-003) — the mismatch below is still legal.
+        // loaded from (DEC-20260831-006) — the mismatch below is still legal.
         $this->approveQualityForDispatch($line);
 
         $this->actingWith(['sales.manage']);
@@ -164,7 +164,7 @@ class DeliverySpendsTheHoldTest extends TestCase
         // ...and then 40 pieces turn up and are held after all.
         $leftover = app(StockReservationService::class)->reserve($line, '40', null);
         // ONE sign-off for the whole line, covering BOTH dispatches below
-        // (DEC-20260831-003): Quality signs for the line's 100, and the two
+        // (DEC-20260831-006): Quality signs for the line's 100, and the two
         // vans spend 40 then 60 of it. The other line is never dispatched, so
         // it is deliberately left unsigned.
         $this->approveQualityForDispatch($line);
@@ -204,7 +204,7 @@ class DeliverySpendsTheHoldTest extends TestCase
         $order = $this->order();
         $line = $this->lineOn($order, '100');
         // No hold, but still Quality's sign-off — the gate is on the line, not
-        // on the hold (DEC-20260831-003).
+        // on the hold (DEC-20260831-006).
         $this->approveQualityForDispatch($line);
 
         $this->actingWith(['sales.manage']);

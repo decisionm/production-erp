@@ -22,7 +22,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * render the words, never coerce them to 0.
  *
  * `quality` is NOT one of them any more: internal quality approval is recorded
- * (DEC-20260831-003) and reads `approved` or `pending`. There is no
+ * (DEC-20260831-006) and reads `approved` or `pending`. There is no
  * `customer_approval` key at all — the owner settled that no such step exists,
  * and a gate nobody performs must not appear on a screen.
  *

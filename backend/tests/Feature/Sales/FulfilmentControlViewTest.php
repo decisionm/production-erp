@@ -110,7 +110,7 @@ class FulfilmentControlViewTest extends TestCase
      * THE FALSE GREEN, and the column the owner called misleading.
      *
      * Everything the line owes is HELD — and none of it may go, because Quality
-     * has not signed it off (DEC-20260831-003). `stock_held` says what the store
+     * has not signed it off (DEC-20260831-006). `stock_held` says what the store
      * set aside; `dispatch_ready` stays 0. Those are two different facts and a
      * single "dispatch ready" figure conflated them into permission to ship.
      */

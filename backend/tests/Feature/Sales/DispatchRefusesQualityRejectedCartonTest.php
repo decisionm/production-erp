@@ -51,9 +51,9 @@ use Tests\TestCase;
  *     path alike, and leaves nothing behind.
  *
  * TWO PRECONDITIONS THIS FILE ASSUMES RATHER THAN TESTS, both seeded in
- * confirmedOrder(): Quality's sign-off on the order line (DEC-20260831-003 —
+ * confirmedOrder(): Quality's sign-off on the order line (DEC-20260831-006 —
  * DispatchQualityGateTest is that gate's subject), and the Tally master data a
- * Delivery Note is staged against (DEC-20260831-004). Neither is this file's
+ * Delivery Note is staged against (DEC-20260831-007). Neither is this file's
  * subject; the carton's own quality truth is.
  */
 class DispatchRefusesQualityRejectedCartonTest extends TestCase
@@ -128,7 +128,7 @@ class DispatchRefusesQualityRejectedCartonTest extends TestCase
             'unit_price' => '4.50', 'quantity_delivered' => 0,
         ]);
 
-        // DEC-20260831-003: dispatch is gated on Quality's sign-off, so every
+        // DEC-20260831-006: dispatch is gated on Quality's sign-off, so every
         // order this file dispatches from is signed for its WHOLE ordered
         // quantity. That caps nothing any test here leans on — the
         // over-delivery guard is judged first and against the same figure, and
@@ -136,7 +136,7 @@ class DispatchRefusesQualityRejectedCartonTest extends TestCase
         // linesFromCartons — so the sign-off is a precondition, not a subject.
         $this->approveQualityForOrder($order->id);
 
-        // DEC-20260831-004: the Delivery Note is fail-closed and stages nothing
+        // DEC-20260831-007: the Delivery Note is fail-closed and stages nothing
         // unless the customer carries a tally_ledger_name. Called HERE, after
         // the customer row exists, because the trait completes database rows.
         // It adds no second Tally-linked warehouse — setUp() already made one,
@@ -293,7 +293,7 @@ class DispatchRefusesQualityRejectedCartonTest extends TestCase
         $this->assertSame('Aqua Traders', $entry->payload['party_ledger']);
         $this->assertSame('33AAACA1111A1Z5', $entry->payload['party_gstin']);
         $this->assertSame('FG Store', $entry->payload['godown']);
-        // The Delivery Note line carries its UNIT now (DEC-20260831-004): the
+        // The Delivery Note line carries its UNIT now (DEC-20260831-007): the
         // voucher prints "1200.0000 Nos.", and a quantity without its unit is
         // the shape of the tape defect FC-03 records — 229 metres filed as 229
         // Nos is a different number about a different thing.

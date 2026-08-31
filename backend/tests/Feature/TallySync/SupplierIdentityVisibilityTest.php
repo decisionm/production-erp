@@ -380,7 +380,7 @@ class SupplierIdentityVisibilityTest extends TestCase
     {
         $so = new SalesOrder;
         // The Delivery Note posts against the customer's TALLY ledger and
-        // refuses to stage without one (DEC-20260831-004's fail-closed half);
+        // refuses to stage without one (DEC-20260831-007's fail-closed half);
         // this customer lives in memory, so the name is stamped on the object.
         $customer = new Customer(['name' => 'Sri Aurobindo Beverages', 'gstin' => '33AAACS1234A1Z9']);
         $customer->forceFill(['tally_ledger_name' => 'Sri Aurobindo Beverages']);

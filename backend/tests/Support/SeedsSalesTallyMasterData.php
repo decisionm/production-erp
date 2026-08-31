@@ -92,7 +92,7 @@ trait SeedsSalesTallyMasterData
      * STAMP QUALITY'S DISPATCH SIGN-OFF ON A LINE, for tests whose subject is
      * something OTHER than the quality gate.
      *
-     * Dispatch is gated on internal quality approval (DEC-20260831-003), so a
+     * Dispatch is gated on internal quality approval (DEC-20260831-006), so a
      * great many fixtures that dispatch stock in order to test something else —
      * the stock ledger, a Tally voucher, a carton's trace — would otherwise all
      * fail with the same 422. This says "assume Quality signed this off", which

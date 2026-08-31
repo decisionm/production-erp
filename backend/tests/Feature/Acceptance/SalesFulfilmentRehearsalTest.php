@@ -115,7 +115,7 @@ class SalesFulfilmentRehearsalTest extends TestCase
 
         // QUALITY SIGNS THE HELD 600 OFF FIRST — dispatch is gated on internal
         // quality approval and capped at the approved quantity
-        // (DEC-20260831-003). The gate itself is DispatchQualityGateTest's
+        // (DEC-20260831-006). The gate itself is DispatchQualityGateTest's
         // subject; here it is the precondition the owner's sequence puts
         // between the store's hold and Sales' dispatch.
         $this->approveQualityForDispatch($lineId, '600');
@@ -194,7 +194,7 @@ class SalesFulfilmentRehearsalTest extends TestCase
         $lineId = $this->getJson('/api/v1/sales/fulfilment-control')->assertOk()->json('data.0.line_id');
 
         // Quality's dispatch sign-off, for the same reason as above
-        // (DEC-20260831-003): this half's subject is what reaches Tally, not
+        // (DEC-20260831-006): this half's subject is what reaches Tally, not
         // the quality gate, so the sign-off is assumed rather than walked.
         $this->approveQualityForDispatch($lineId, '100');
 

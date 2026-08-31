@@ -315,7 +315,7 @@ class TallySyncHistoryExportTest extends TestCase
     {
         $so = new SalesOrder;
         // The Delivery Note posts against the customer's TALLY ledger and
-        // stages nothing without one (DEC-20260831-004's fail-closed half).
+        // stages nothing without one (DEC-20260831-007's fail-closed half).
         // This customer never reaches the database, so the name goes on the
         // object itself — tally_ledger_name is not fillable.
         $customer = new Customer(['name' => 'Sri Aurobindo Beverages', 'gstin' => '33AAACS1234A1Z9']);

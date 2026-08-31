@@ -24,7 +24,7 @@ use Tests\TestCase;
  * THE HONESTY ENDPOINT — GET /sales/tally-mirror (Phase 3.5).
  *
  * "ALL real sales are invoiced directly in Tally — the ERP Sales module is
- * demo-scale" — SUPERSEDED by DEC-20260831-004, under which the ERP
+ * demo-scale" — SUPERSEDED by DEC-20260831-007, under which the ERP
  * ORIGINATES the sale. The Sales pages therefore show the
  * ERP-originated subset only, and rather than let an empty or short table
  * pass for the truth, the page asks the server what it is looking at. The
@@ -32,7 +32,7 @@ use Tests\TestCase;
  * matter what ERP-side data exists:
  *
  *   mirrored: false            — Tally-side Sales / Sales Order vouchers are NOT here
- *   decision: DEC-20260831-004 — the owner decision behind that
+ *   decision: DEC-20260831-007 — the owner decision behind that
  *   erp_invoice_builder.validated: true — checked against 55 real exports, never live-posted
  *   payments_recorded_here: false — an invoice is never marked paid by this ERP
  *
@@ -94,7 +94,7 @@ class TallyMirrorHonestyTest extends TestCase
         // The two keys the pages branch on, pinned exactly.
         $this->assertArrayHasKey('mirrored', $body);
         $this->assertFalse($body['mirrored'], 'mirrored must be boolean false — not null, not "false", not missing');
-        $this->assertSame('DEC-20260831-004', $body['decision']);
+        $this->assertSame('DEC-20260831-007', $body['decision']);
 
         // The sentences the panel renders — the server's words, per contract.
         $this->assertSame('Sales raised here post to Tally; Tally is not read back', $body['headline']);

@@ -38,6 +38,19 @@ class RequestableMaterialResource extends JsonResource
             // owner-backed refusal (DEC-20260807-006). Conflating them would
             // quietly re-open Q54(a).
             'machine_applies' => ! $this->hasKgUom(),
+            // WHAT IS ALREADY STANDING ON THE FLOOR for this material
+            // (DEC-20260831-001), decorated by MaterialRequestService so the
+            // picker can show total required / already in production /
+            // balance to request without a second round trip per line.
+            //
+            // `available_in_production` is the USABLE figure — a negative
+            // balance and a unit that disagrees with the handover's both
+            // report zero, because neither may be subtracted from what the
+            // floor needs. `production_unit_matches` is false only in the
+            // second case, so the screen can say the quantity is there and
+            // still not net it.
+            'available_in_production' => $this->availableInProduction ?? '0.0000',
+            'production_unit_matches' => $this->productionUnitMatches ?? true,
         ];
     }
 }

@@ -323,7 +323,7 @@ describe('the Supplier Bills entry (permissionModule)', () => {
  * are looked at — so a storekeeper, a supervisor or a quality user who was
  * perfectly entitled to open it was shown no path to it at all.
  *
- * That went from untidy to load-bearing with DEC-20260831-003: Quality now has
+ * That went from untidy to load-bearing with DEC-20260831-006: Quality now has
  * to sign a line off before anything can be dispatched, and a gate nobody can
  * navigate to is a gate that gets worked around.
  *

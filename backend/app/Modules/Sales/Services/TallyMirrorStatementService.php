@@ -6,7 +6,7 @@ namespace App\Modules\Sales\Services;
  * THE HONESTY STATEMENT the Sales pages render (Phase 3.5, GET
  * /sales/tally-mirror): what these pages are NOT.
  *
- * DEC-20260831-004 (owner, 31-Aug-2026) REVERSED THE DIRECTION THIS PAGE USED
+ * DEC-20260831-007 (owner, 31-Aug-2026) REVERSED THE DIRECTION THIS PAGE USED
  * TO STATE. It supersedes DEC-20260809-003 ("ALL real sales are invoiced
  * directly in Tally — the ERP Sales module is demo-scale"): the ERP now
  * ORIGINATES the sale and posts both Delivery Notes and Sales Invoices.
@@ -27,7 +27,7 @@ namespace App\Modules\Sales\Services;
  */
 class TallyMirrorStatementService
 {
-    public const DECISION = 'DEC-20260831-004';
+    public const DECISION = 'DEC-20260831-007';
 
     /**
      * @return array{

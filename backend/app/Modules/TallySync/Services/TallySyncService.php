@@ -529,7 +529,7 @@ class TallySyncService
     /**
      * Finished goods dispatched to a customer → Tally 'Delivery Note'.
      *
-     * ON by owner decision (DEC-20260831-004) and FAIL-CLOSED, the same posture
+     * ON by owner decision (DEC-20260831-007) and FAIL-CLOSED, the same posture
      * the Sales voucher takes: a named refusal rather than a guessed voucher,
      * and a refusal NEVER blocks the dispatch. The goods have physically gone;
      * Tally is bookkeeping that follows, and bookkeeping does not get a veto

@@ -9,7 +9,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
 /**
- * QUALITY'S SIGN-OFF ON A SALES ORDER LINE — DEC-20260831-003.
+ * QUALITY'S SIGN-OFF ON A SALES ORDER LINE — DEC-20260831-006.
  *
  * Routed under the QUALITY module although the record lives on a Sales model,
  * because the act is Quality's: the same two-sided shape the material request

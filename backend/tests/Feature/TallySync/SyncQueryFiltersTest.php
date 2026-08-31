@@ -497,7 +497,7 @@ class SyncQueryFiltersTest extends TestCase
     private function delivery(int $id, string $date, string $customer): Delivery
     {
         $so = new SalesOrder;
-        // The Delivery Note is fail-closed too now (DEC-20260831-004): it names
+        // The Delivery Note is fail-closed too now (DEC-20260831-007): it names
         // the customer's TALLY ledger and stages NOTHING without one. This
         // customer stays in-memory — the masters seeding completes rows, not
         // objects — so the ledger is stamped here, and forceFill because

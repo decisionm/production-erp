@@ -676,7 +676,7 @@ Route::prefix('v1')->group(function () {
             Route::get('instruments/{instrument}/calibrations', [CalibrationRecordController::class, 'index']);
             Route::post('instruments/{instrument}/calibrations', [CalibrationRecordController::class, 'store']);
 
-            // QUALITY'S DISPATCH SIGN-OFF (DEC-20260831-003). The record lives
+            // QUALITY'S DISPATCH SIGN-OFF (DEC-20260831-006). The record lives
             // on a Sales order line; the ACT is Quality's, so it is gated here
             // — Sales must not be able to approve its own dispatch. The
             // dispatch itself then refuses in DeliveryService on the quantity

@@ -171,7 +171,7 @@ class DeliveryService
                     throw OverDeliveryException::forLine($soLine->id, $remaining, (string) $lineData['quantity']);
                 }
 
-                // THE INTERNAL QUALITY GATE — DEC-20260831-003, and the reason
+                // THE INTERNAL QUALITY GATE — DEC-20260831-006, and the reason
                 // the owner's sequence reads "Quality approves, THEN Sales
                 // dispatches". Judged inside the same transaction and under the
                 // same line lock as the over-delivery cap above, so a

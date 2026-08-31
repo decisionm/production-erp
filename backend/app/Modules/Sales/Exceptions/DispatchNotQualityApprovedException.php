@@ -7,7 +7,7 @@ use RuntimeException;
 
 /**
  * Dispatch refused because internal Quality has not signed the line off, or has
- * not signed off this much of it — DEC-20260831-003.
+ * not signed off this much of it — DEC-20260831-006.
  *
  * Separate from DispatchQualityException, which refuses the APPROVAL act. This
  * one refuses the DISPATCH, and it is the gate the owner's sequence names.

@@ -590,7 +590,7 @@ export interface FulfilmentControlRow {
         completed_detail: string;
     };
     /**
-     * THE ONE DISPATCH GATE (DEC-20260831-003). Internal quality approval is
+     * THE ONE DISPATCH GATE (DEC-20260831-006). Internal quality approval is
      * recorded, so this is a real state — never 'not_recorded'. There is no
      * customer-approval sibling: the owner settled that no such step exists.
      */
