@@ -84,4 +84,21 @@ export const ADOPTED_MODULES = new Set([
     // day and supersedes that clause in practice; the record needs a
     // superseding DEC to say so on paper.
     'crm',
+    // FINANCE — adopted because Client Outstanding gives it its first screen
+    // with real content in it: what every client owes and how late it is, read
+    // from the position the agent mirrors out of Tally, which is where this
+    // factory actually raises its sales.
+    //
+    // It was hidden on a row count (journal entries 0) and on the manager's
+    // 05-Aug complaint, which named finance directly. That reasoning has not
+    // changed for the BOOKS screens — Chart of Accounts, Journal Entries and
+    // Reports are still empty, and adopting the module surfaces them too. That
+    // is the known cost of this line, and it is the owner's to weigh: the
+    // alternative is to hang Client Outstanding off an adopted group with
+    // `permissionModule: 'finance'`, exactly as Supplier Bills and Tally Vendor
+    // Review hang off Procurement today, and leave Finance hidden.
+    //
+    // Adopted here rather than that, on the instruction to make it a Finance
+    // page (31-Aug-2026).
+    'finance',
 ]);

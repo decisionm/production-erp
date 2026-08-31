@@ -105,6 +105,34 @@ describe('the sidebar', () => {
     });
 });
 
+describe('the Finance menu', () => {
+    /**
+     * THE REGRESSION THIS PINS, which cost a round trip to spot.
+     *
+     * Client Outstanding was moved out of CRM and into Finance so it would sit
+     * behind `module:finance` with the rest of the debtor book. Every suite
+     * stayed green and the entry vanished from the sidebar: `crm` is on the
+     * adoption list and `finance` was not, and buildNavItems drops a whole
+     * group whose module is unadopted. The page was reachable only by typing
+     * its URL.
+     *
+     * Configuration alone therefore proves nothing here — what matters is what
+     * a real login RENDERS, so that is what is asserted.
+     */
+    it('shows Client Outstanding to a login that holds finance', () => {
+        const finance = buildNavItems(administrator()).find((item) => item?.label === 'Finance');
+
+        expect(finance).toBeDefined();
+        expect(
+            (finance as { children?: { label?: string }[] } | undefined)?.children?.map((c) => c.label),
+        ).toContain('Client Outstanding');
+    });
+
+    it('is adopted, or the group it lives in cannot render at all', () => {
+        expect(ADOPTED_MODULES.has('finance')).toBe(true);
+    });
+});
+
 describe('the Inventory menu', () => {
     const inventory = allNavItems.find((item) => item.key === 'inventory');
 
