@@ -30,6 +30,18 @@ class PurchaseOrderLine extends Model
         return $this->belongsTo(Item::class);
     }
 
+    /**
+     * The arrivals booked against THIS line. The inverse of
+     * GoodsReceiptNoteLine::purchaseOrderLine, added so the requisition's
+     * coverage can ask what a closed order actually delivered — the owner's
+     * rule counts material received AND ACCEPTED BY QUALITY, and Quality's
+     * verdict hangs off the receipt line, not off this one.
+     */
+    public function goodsReceiptNoteLines(): HasMany
+    {
+        return $this->hasMany(GoodsReceiptNoteLine::class, 'purchase_order_line_id');
+    }
+
     /** Item/due-date delivery windows, oldest due first — the GRN allocation order. */
     public function schedules(): HasMany
     {

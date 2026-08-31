@@ -14,9 +14,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'vendor_id', 'purchase_requisition_id', 'status',
     'order_date', 'expected_date', 'notes', 'created_by',
     'source', 'tally_order_no',
-    // When the order reached the vendor — null while it is a Draft, and the
-    // fact that decides whether a CANCELLED order still counts against its
-    // requisition (RequisitionCoverageService::reserves()).
+    // When the order reached the vendor — null while it is a Draft. A
+    // lifecycle fact only: the requisition's coverage no longer consults it
+    // (DEC-20260831-006 counts material received and accepted by Quality,
+    // and an unsent order received nothing whatever its status says).
     'sent_at',
     // Phase 6 lifecycle record — written once each by close() / cancel();
     // tally_staging only through PurchaseOrderService::recordTallyStaging.

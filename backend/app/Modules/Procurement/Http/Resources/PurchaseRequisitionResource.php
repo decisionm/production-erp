@@ -39,13 +39,14 @@ class PurchaseRequisitionResource extends JsonResource
                     // other screen names it, without composing the string
                     // itself in three places.
                     'document_number' => $order->documentNumber(),
-                    // Whether THIS order is one of those holding quantity
-                    // against the requisition. The reader gets the ANSWER
-                    // rather than the rule to apply — the rule is a
-                    // predicate, not a status (a cancelled order counts only
-                    // if it was ever sent), and re-deriving it on the screen
-                    // is how the two come to disagree.
-                    'reserves_quantity' => RequisitionCoverageService::reserves($order),
+                    // Whether THIS order still holds any quantity against
+                    // the requisition. Under the owner's rule that is not a
+                    // property of the STATUS: a closed order holds only what
+                    // Quality accepted, so one that delivered nothing holds
+                    // nothing while another closed order holds plenty. The
+                    // reader gets the answer, never the rule.
+                    'reserves_quantity' => $order->relationLoaded('lines')
+                        && app(RequisitionCoverageService::class)->heldByItem($order) !== [],
                 ])
                 ->values()
                 ->all()),

@@ -519,8 +519,8 @@ class PurchaseOrderService
      *
      * A requisition may be answered by as many purchase orders as the buyer
      * needs — split across vendors, or ordered in tranches — but the
-     * combined quantity of every order that HOLDS quantity against it
-     * (RequisitionCoverageService::reserves()) may not exceed what it asked
+     * combined quantity every order HOLDS against it
+     * (RequisitionCoverageService::heldByItem()) may not exceed what it asked
      * for, per item. Not in a FormRequest: a request can only see the one
      * order being typed, and the rule is about all of them together.
      *

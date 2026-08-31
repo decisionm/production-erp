@@ -4,6 +4,7 @@ namespace App\Modules\Procurement\Services;
 
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
 use App\Modules\Procurement\Models\PurchaseOrder;
+use App\Modules\Procurement\Models\PurchaseOrderLine;
 use App\Modules\Procurement\Models\PurchaseRequisition;
 use App\Modules\Procurement\Models\PurchaseRequisitionLine;
 use Illuminate\Database\Eloquent\Builder;
@@ -52,77 +53,109 @@ class RequisitionCoverageService
     private const SCALE = 4;
 
     /**
-     * WHICH ORDERS HOLD QUANTITY AGAINST THEIR REQUISITION — the owner's rule,
-     * in one predicate, and the only place it is decided.
+     * HOW MUCH THIS ORDER HOLDS against its requisition, per item — the
+     * owner's rule (DEC-20260831-006), in one place.
      *
-     * Settled by the owner on 2026-08-31, answering the two questions this
-     * build shipped defaults for (docs/factory/CURRENT-DECISIONS.md; named
-     * here in words because the questions file re-mints numbers at merge):
+     *   Draft                          holds NOTHING. Nothing is reserved
+     *                                  until the order goes to the vendor.
+     *   Sent | PartiallyReceived       holds its FULL ORDERED quantity. The
+     *                                  vendor is expected to deliver all of
+     *                                  it, so all of it is spoken for.
+     *   Closed | Cancelled             holds only what was RECEIVED AND
+     *                                  ACCEPTED BY QUALITY. The order is
+     *                                  over; whatever never arrived, or
+     *                                  arrived and was rejected, was never
+     *                                  delivered and goes back to the
+     *                                  requisition's Balance to Order.
      *
-     *   "Does a DRAFT purchase order already reserve quantity?" — NO. Nothing
-     *   is held until the order goes to the vendor. A draft is a buyer
-     *   thinking, not a commitment, and the ERP does not spend a requisition
-     *   on a thought.
+     * THE HOLD FOLLOWS THE MATERIAL, NOT THE PAPERWORK. That one sentence
+     * is the whole rule, and it is why Balance to Order can RISE when an
+     * order closes short — a vendor's shortfall costs the factory no
+     * requisition. This SUPERSEDES the earlier rule (DEC-20260831-002) under
+     * which a sent-and-cancelled order kept its full allowance.
      *
-     *   "When a purchase order is CANCELLED, does its quantity return?" — NO.
-     *   A requisition is asked for once and answered once; an order that
-     *   reached the vendor has spent its allowance, and wanting the material
-     *   again means a NEW requisition, which is a fresh approval.
+     * `purchase_orders.sent_at` is no longer consulted here. It was
+     * load-bearing under the superseded rule, which had to tell a cancelled
+     * draft from a cancelled sent order; this rule reaches the same answer
+     * for a better reason — an unsent order received nothing, so it holds
+     * nothing, whatever its status says. The column stays as the lifecycle
+     * fact it is and is simply not part of this arithmetic any more.
      *
-     *   ...AND THE TWO TOGETHER NEEDED A THIRD ANSWER, because alone they
-     *   contradict: a draft holds nothing, yet a cancelled order counts — so
-     *   cancelling an abandoned draft would consume a requisition the draft
-     *   never held, and a typo could eat a requisition permanently. The owner
-     *   settled it: a cancelled order counts ONLY IF IT WAS SENT. Cancelling
-     *   an unsent draft releases nothing because it was holding nothing.
-     *
-     * Hence a predicate and not a status list. Cancelled is CONDITIONAL, and
-     * a flat list cannot say so — the three readers below would each have had
-     * to bolt the same special case on, and that is how two of them
-     * eventually disagree. Everything asking "does this order hold quantity?"
-     * comes through reserves() or its SQL twin scopeReserving().
+     * @return array<int, string> [item_id => quantity]
      */
-    public static function reserves(PurchaseOrder $order): bool
+    public function heldByItem(PurchaseOrder $order): array
     {
-        return match ($order->status) {
-            PurchaseOrderStatus::Sent,
-            PurchaseOrderStatus::PartiallyReceived,
-            // Received, or short-closed after the vendor had it. Not a
-            // judgement call: releasing it would invite ordering the same
-            // material twice.
-            PurchaseOrderStatus::Closed => true,
-            // Withdrawn — and it counts only if the vendor ever held it.
-            PurchaseOrderStatus::Cancelled => $order->sent_at !== null,
-            // A draft is not with the vendor. Nothing is held.
-            PurchaseOrderStatus::Draft => false,
-        };
+        // The rule stated outright, and a fast path — not a load-bearing
+        // branch. Removing it gives the same answer today, because a draft
+        // cannot have receipts (GoodsReceiptService books only against Sent |
+        // PartiallyReceived) so the accepted-quantity path below returns zero
+        // for one anyway. It stays because "a draft holds nothing" is the
+        // owner's rule and should be legible as a rule, and because it saves
+        // walking a draft's receipts to prove there are none.
+        if ($order->status === PurchaseOrderStatus::Draft) {
+            return [];
+        }
+
+        $open = in_array($order->status, [PurchaseOrderStatus::Sent, PurchaseOrderStatus::PartiallyReceived], true);
+        $held = [];
+
+        foreach ($order->lines as $line) {
+            $quantity = $open ? (string) $line->quantity : $this->acceptedOnLine($line);
+            $itemId = (int) $line->item_id;
+            $held[$itemId] = bcadd($held[$itemId] ?? '0', $quantity, self::SCALE);
+        }
+
+        return $held;
     }
 
     /**
-     * reserves() as SQL — the SAME rule for a query that cannot load models.
-     * Kept beside its twin so the two are read and edited together; the
-     * boundary test asserts a cancelled-but-sent order is counted identically
-     * whichever path reaches it.
+     * What Quality ACCEPTED against one purchase-order line, across every
+     * arrival booked to it.
      *
-     * Takes a Builder OR a Relation (the requisition's own hasMany), because
-     * both callers exist and both spell `where` the same way.
+     * A receipt line that has NOT been inspected counts as accepted in full,
+     * and that is deliberate rather than an oversight: the material is
+     * physically in the store and on the books, so the requisition has been
+     * answered by it. Treating uninspected stock as un-delivered would hand
+     * the buyer back balance for material they are standing next to. Where an
+     * inspection DOES exist its verdict governs, and a line inspected more
+     * than once (a re-inspection after rework) sums its accepted quantities —
+     * incomingInspections is a hasMany and nothing constrains it to one.
+     */
+    private function acceptedOnLine(PurchaseOrderLine $line): string
+    {
+        $accepted = '0';
+
+        foreach ($line->goodsReceiptNoteLines as $receiptLine) {
+            $inspections = $receiptLine->incomingInspections;
+
+            if ($inspections->isEmpty()) {
+                $accepted = bcadd($accepted, (string) $receiptLine->quantity, self::SCALE);
+
+                continue;
+            }
+
+            foreach ($inspections as $inspection) {
+                $accepted = bcadd($accepted, (string) $inspection->accepted_quantity, self::SCALE);
+            }
+        }
+
+        return $accepted;
+    }
+
+    /**
+     * The orders whose hold is worth computing — everything but a Draft.
+     * Draft is excluded in SQL because it can never contribute, so the query
+     * need not load its receipts; every other status is loaded and asked
+     * heldByItem(), which is the only place the amounts are decided.
      *
      * @template TQuery of Builder<PurchaseOrder>|Relation<PurchaseOrder, PurchaseRequisition, *>
      *
      * @param  TQuery  $query
      * @return TQuery
      */
-    public static function scopeReserving(Builder|Relation $query): Builder|Relation
+    public static function scopeHolding(Builder|Relation $query): Builder|Relation
     {
-        return $query->where(function (Builder $holds) {
-            $holds->whereIn('status', [
-                PurchaseOrderStatus::Sent->value,
-                PurchaseOrderStatus::PartiallyReceived->value,
-                PurchaseOrderStatus::Closed->value,
-            ])->orWhere(fn (Builder $withdrawn) => $withdrawn
-                ->where('status', PurchaseOrderStatus::Cancelled->value)
-                ->whereNotNull('sent_at'));
-        });
+        return $query->where('status', '!=', PurchaseOrderStatus::Draft->value);
     }
 
     /** The three words a requisition line's coverage is reported in. */
@@ -149,14 +182,9 @@ class RequisitionCoverageService
     {
         $ordered = [];
 
-        foreach ($this->reservingOrders($requisition) as $order) {
-            foreach ($order->lines as $line) {
-                $itemId = (int) $line->item_id;
-                $ordered[$itemId] = bcadd(
-                    $ordered[$itemId] ?? '0',
-                    (string) $line->quantity,
-                    self::SCALE,
-                );
+        foreach ($this->holdingOrders($requisition) as $order) {
+            foreach ($this->heldByItem($order) as $itemId => $quantity) {
+                $ordered[$itemId] = bcadd($ordered[$itemId] ?? '0', $quantity, self::SCALE);
             }
         }
 
@@ -323,14 +351,21 @@ class RequisitionCoverageService
      *
      * @return iterable<int, PurchaseOrder>
      */
-    private function reservingOrders(PurchaseRequisition $requisition): iterable
+    private function holdingOrders(PurchaseRequisition $requisition): iterable
     {
-        if ($requisition->relationLoaded('purchaseOrders')
-            && $requisition->purchaseOrders->every(fn ($order) => $order->relationLoaded('lines'))) {
-            return $requisition->purchaseOrders->filter(fn (PurchaseOrder $order) => self::reserves($order));
+        // What heldByItem() needs to reach Quality's verdict on a terminal
+        // order. Loaded in one nested eager load rather than per order.
+        $needed = ['lines.goodsReceiptNoteLines.incomingInspections'];
+
+        if ($requisition->relationLoaded('purchaseOrders')) {
+            $loaded = $requisition->purchaseOrders
+                ->filter(fn (PurchaseOrder $order) => $order->status !== PurchaseOrderStatus::Draft);
+            $loaded->loadMissing($needed);
+
+            return $loaded;
         }
 
-        return self::scopeReserving($requisition->purchaseOrders()->with('lines'))->get();
+        return self::scopeHolding($requisition->purchaseOrders()->with(['lines', ...$needed]))->get();
     }
 
     /** @return iterable<int, PurchaseRequisitionLine> */

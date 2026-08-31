@@ -4,12 +4,14 @@ namespace Tests\Feature\Procurement;
 
 use App\Models\User;
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
 use App\Modules\Procurement\Models\Enums\PurchaseRequisitionStatus;
+use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Procurement\Models\PurchaseOrder;
 use App\Modules\Procurement\Models\PurchaseRequisition;
 use App\Modules\Procurement\Models\Vendor;
-use App\Modules\Procurement\Services\RequisitionCoverageService;
+use App\Modules\Quality\Models\IncomingInspection;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
@@ -50,6 +52,8 @@ class RequisitionCoverageTest extends TestCase
 
     private Vendor $vendor;
 
+    private Warehouse $warehouse;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -62,6 +66,7 @@ class RequisitionCoverageTest extends TestCase
         Sanctum::actingAs($this->desk);
 
         $this->vendor = Vendor::create(['code' => 'VND-A', 'name' => 'Vendor Alpha', 'is_active' => true]);
+        $this->warehouse = Warehouse::create(['code' => 'ST-1', 'name' => 'Store', 'is_active' => true]);
     }
 
     // ---- 1. the four figures and the word ---------------------------------
@@ -302,60 +307,97 @@ class RequisitionCoverageTest extends TestCase
     // ---- 5. which orders hold quantity, and the lock ------------------------
 
     /**
-     * THE OWNER'S RULE, made load-bearing. Every order here is identical but
-     * for its STATUS and whether it was ever sent, so this test says exactly
-     * one thing: which orders hold quantity against a requisition.
+     * THE OWNER'S RULE, made load-bearing (DEC-20260831-006). Every order
+     * here is identical but for its STATUS and what Quality made of it, so
+     * this test says exactly one thing: how much an order holds against its
+     * requisition.
      *
-     * Cancelled appears TWICE, because that is the case the rule exists for:
-     * cancelled-after-sending spent the requisition's allowance, and
-     * cancelled-while-still-a-draft never held anything to spend. A flat
-     * status list cannot tell them apart, which is why reserves() is a
-     * predicate.
+     * The hold follows the MATERIAL, not the paperwork — an open order holds
+     * everything it ordered, a finished one holds only what was received and
+     * accepted.
      */
-    public function test_which_orders_hold_quantity_and_which_hand_it_back(): void
+    public function test_how_much_each_order_state_holds_against_its_requisition(): void
     {
-        $expected = [
-            // label                     status                  sent?  reserves?
-            'draft' => [PurchaseOrderStatus::Draft, false, false],
-            'sent' => [PurchaseOrderStatus::Sent, true, true],
-            'partially_received' => [PurchaseOrderStatus::PartiallyReceived, true, true],
-            'closed' => [PurchaseOrderStatus::Closed, true, true],
-            // The two faces of Cancelled — the reason this is a predicate.
-            'cancelled after being sent' => [PurchaseOrderStatus::Cancelled, true, true],
-            'cancelled while still a draft' => [PurchaseOrderStatus::Cancelled, false, false],
+        // ordered 200 of a 500 ask; received 120; Quality accepted 100.
+        $cases = [
+            'draft holds nothing' => [PurchaseOrderStatus::Draft, '0.0000'],
+            'sent holds all it ordered' => [PurchaseOrderStatus::Sent, '200.0000'],
+            'partially received holds all it ordered' => [PurchaseOrderStatus::PartiallyReceived, '200.0000'],
+            'closed holds only what Quality accepted' => [PurchaseOrderStatus::Closed, '100.0000'],
+            'cancelled holds only what Quality accepted' => [PurchaseOrderStatus::Cancelled, '100.0000'],
         ];
 
-        // Every case of the enum is decided here: a new status cannot join
-        // the lifecycle without this test forcing an answer for it.
         $this->assertSame(
             array_map(fn (PurchaseOrderStatus $c) => $c->value, PurchaseOrderStatus::cases()),
-            array_values(array_unique(array_map(fn (array $case) => $case[0]->value, $expected))),
+            array_values(array_unique(array_map(fn (array $c) => $c[0]->value, $cases))),
+            'a new order status must decide here what it holds',
         );
 
-        foreach ($expected as $label => [$status, $wasSent, $reserves]) {
-            $item = $this->item('RES-BOUND-'.md5($label), 'Kgs');
+        foreach ($cases as $label => [$status, $expected]) {
+            $item = $this->item('RES-HOLD-'.md5($label), 'Kgs');
             $requisition = $this->requisition([[$item, '500.0000']]);
-            $order = $this->order($requisition, [[$item, '200.0000']], $status, $wasSent ? '2026-08-29 10:00:00' : null);
+            $order = $this->order($requisition, [[$item, '200.0000']], $status);
+            $this->receiveAndInspect($order, received: '120.0000', accepted: '100.0000');
 
-            $line = $this->lineRow($requisition, $item);
-            $this->assertSame($reserves ? '200.0000' : '0.0000', $line['ordered_quantity'], $label);
-            $this->assertSame($reserves ? 'partially_ordered' : 'not_ordered', $line['order_status'], $label);
-
-            // The predicate, the SQL twin, and what the screen is told must
-            // give one answer. Three readers of one rule is how two of them
-            // eventually disagree.
-            $this->assertSame($reserves, RequisitionCoverageService::reserves($order->fresh()), "reserves(): {$label}");
-            $this->assertSame(
-                $reserves,
-                RequisitionCoverageService::scopeReserving(PurchaseOrder::query()->whereKey($order->id))->exists(),
-                "scopeReserving(): {$label}",
-            );
-            $this->assertSame(
-                $reserves,
-                collect($this->requisitionRow($requisition)['purchase_orders'])->firstWhere('id', $order->id)['reserves_quantity'],
-                "reserves_quantity on the wire: {$label}",
-            );
+            $this->assertSame($expected, $this->lineRow($requisition, $item)['ordered_quantity'], $label);
         }
+    }
+
+    /**
+     * THE HEART OF THE RULE: closing short GIVES THE BALANCE BACK. Under the
+     * superseded rule a vendor's shortfall cost the factory a requisition —
+     * 500 ordered, 300 delivered, and the other 200 was unorderable without
+     * raising a new requisition.
+     */
+    public function test_closing_short_returns_the_undelivered_quantity_to_the_requisition(): void
+    {
+        $resin = $this->item('RES-SHORT', 'Kgs');
+        $requisition = $this->requisition([[$resin, '500.0000']]);
+
+        $order = $this->order($requisition, [[$resin, '500.0000']], PurchaseOrderStatus::Sent);
+        $this->assertSame('0.0000', $this->lineRow($requisition, $resin)['balance_quantity'], 'an open order holds it all');
+
+        // 300 arrives and passes Quality; the vendor cannot supply the rest.
+        $this->receiveAndInspect($order, received: '300.0000', accepted: '300.0000');
+        $order->update(['status' => PurchaseOrderStatus::Closed]);
+
+        $line = $this->lineRow($requisition, $resin);
+        $this->assertSame('300.0000', $line['ordered_quantity'], 'only the delivered material stays consumed');
+        $this->assertSame('200.0000', $line['balance_quantity'], 'the undelivered 200 comes back');
+        $this->assertSame('partially_ordered', $line['order_status']);
+    }
+
+    /** Material Quality REJECTED was never delivered, so it comes back too. */
+    public function test_a_quality_rejection_returns_its_quantity_when_the_order_finishes(): void
+    {
+        $resin = $this->item('RES-REJ', 'Kgs');
+        $requisition = $this->requisition([[$resin, '500.0000']]);
+
+        $order = $this->order($requisition, [[$resin, '500.0000']], PurchaseOrderStatus::Sent);
+        // All 500 physically arrived, but Quality accepted only 450.
+        $this->receiveAndInspect($order, received: '500.0000', accepted: '450.0000');
+        $order->update(['status' => PurchaseOrderStatus::Closed]);
+
+        $line = $this->lineRow($requisition, $resin);
+        $this->assertSame('450.0000', $line['ordered_quantity']);
+        $this->assertSame('50.0000', $line['balance_quantity'], 'the rejected 50 is re-orderable');
+    }
+
+    /**
+     * UNINSPECTED STOCK IS NOT UNDELIVERED. A receipt Quality has not looked
+     * at yet counts in full: the material is in the store and on the books,
+     * and handing back balance for it would invite ordering it twice.
+     */
+    public function test_material_received_but_not_yet_inspected_counts_in_full(): void
+    {
+        $resin = $this->item('RES-UNINSP', 'Kgs');
+        $requisition = $this->requisition([[$resin, '500.0000']]);
+
+        $order = $this->order($requisition, [[$resin, '500.0000']], PurchaseOrderStatus::Sent);
+        $this->receiveAndInspect($order, received: '400.0000', accepted: null);
+        $order->update(['status' => PurchaseOrderStatus::Closed]);
+
+        $this->assertSame('400.0000', $this->lineRow($requisition, $resin)['ordered_quantity']);
     }
 
     /**
@@ -364,44 +406,28 @@ class RequisitionCoverageTest extends TestCase
      * alone those two contradict, and cancelling an abandoned draft would eat
      * a requisition the draft never held.
      */
-    public function test_cancelling_an_unsent_draft_leaves_the_balance_untouched_but_cancelling_a_sent_order_spends_it(): void
+    public function test_cancelling_an_order_that_delivered_nothing_returns_the_whole_quantity(): void
     {
-        $resin = $this->item('RES-14', 'Kgs');
+        $resin = $this->item('RES-CANCEL', 'Kgs');
+        $requisition = $this->requisition([[$resin, '500.0000']]);
 
-        // (a) typed, never sent, cancelled — the requisition is untouched.
-        $abandoned = $this->requisition([[$resin, '500.0000']]);
-        $draft = $this->postJson('/api/v1/procurement/purchase-orders', [
-            'vendor_id' => $this->vendor->id,
-            'purchase_requisition_id' => $abandoned->id,
-            'order_date' => '2026-08-30',
-            'lines' => [['item_id' => $resin->id, 'quantity' => '500.0000', 'unit_price' => '92.0000']],
-        ])->assertCreated()->json('data');
-        $this->assertSame('500.0000', $this->lineRow($abandoned, $resin)['balance_quantity'], 'a draft must hold nothing');
+        $draft = $this->draft($requisition, [[$resin, '500.0000']]);
+        $this->assertSame('500.0000', $this->lineRow($requisition, $resin)['balance_quantity'], 'a draft holds nothing');
 
-        $this->postJson("/api/v1/procurement/purchase-orders/{$draft['id']}/cancel", ['reason' => 'Typed by mistake.'])->assertOk();
-        $this->assertSame('500.0000', $this->lineRow($abandoned, $resin)['balance_quantity'], 'cancelling an unsent draft must release nothing, because it held nothing');
-        $this->assertSame('not_ordered', $this->lineRow($abandoned, $resin)['order_status']);
+        $this->postJson("/api/v1/procurement/purchase-orders/{$draft['id']}/send")->assertOk();
+        $this->assertSame('0.0000', $this->lineRow($requisition, $resin)['balance_quantity'], 'a sent order holds it all');
 
-        // (b) typed, SENT, then cancelled — the allowance is spent and stays spent.
-        $spent = $this->requisition([[$resin, '500.0000']]);
-        $order = $this->postJson('/api/v1/procurement/purchase-orders', [
-            'vendor_id' => $this->vendor->id,
-            'purchase_requisition_id' => $spent->id,
-            'order_date' => '2026-08-30',
-            'lines' => [['item_id' => $resin->id, 'quantity' => '500.0000', 'unit_price' => '92.0000']],
-        ])->assertCreated()->json('data');
-        $this->postJson("/api/v1/procurement/purchase-orders/{$order['id']}/send")->assertOk();
-        $this->assertSame('fully_ordered', $this->lineRow($spent, $resin)['order_status']);
+        $this->postJson("/api/v1/procurement/purchase-orders/{$draft['id']}/cancel", ['reason' => 'The vendor cannot supply.'])->assertOk();
 
-        $this->postJson("/api/v1/procurement/purchase-orders/{$order['id']}/cancel", ['reason' => 'The vendor cannot supply.'])->assertOk();
-        $this->assertSame('0.0000', $this->lineRow($spent, $resin)['balance_quantity'], 'a cancelled order that reached the vendor keeps its allowance');
-        $this->assertSame('fully_ordered', $this->lineRow($spent, $resin)['order_status']);
+        // Nothing was ever delivered, so nothing stays consumed — and the
+        // requisition can be ordered again WITHOUT raising a new one.
+        $line = $this->lineRow($requisition, $resin);
+        $this->assertSame('0.0000', $line['ordered_quantity']);
+        $this->assertSame('500.0000', $line['balance_quantity']);
+        $this->assertSame('not_ordered', $line['order_status']);
 
-        // Wanting the material again means a NEW requisition, not a re-order
-        // against this one — which is exactly what the owner chose. The
-        // DRAFT is allowed (drafts hold nothing); the SEND is refused.
-        $retry = $this->draft($spent, [[$resin, '500.0000']]);
-        $this->postJson("/api/v1/procurement/purchase-orders/{$retry['id']}/send")->assertStatus(422);
+        $retry = $this->draft($requisition, [[$resin, '500.0000']]);
+        $this->postJson("/api/v1/procurement/purchase-orders/{$retry['id']}/send")->assertOk();
     }
 
     /**
@@ -536,6 +562,52 @@ class RequisitionCoverageTest extends TestCase
         }
 
         return $order;
+    }
+
+    /**
+     * Book an arrival against the order's FIRST line and, optionally, record
+     * Quality's verdict on it — written straight to the tables.
+     *
+     * Deliberately not through GoodsReceiptService: that posts stock, creates
+     * lots and bags and drives the incoming-QC hold, all of which
+     * PurchaseChainContractTest already walks end to end. What THIS file is
+     * about is the arithmetic that reads the result, so the rows it reads are
+     * what gets built.
+     *
+     * `accepted: null` leaves the receipt UNINSPECTED, which is its own case:
+     * uninspected material counts in full.
+     */
+    private function receiveAndInspect(PurchaseOrder $order, string $received, ?string $accepted): void
+    {
+        $line = $order->lines()->orderBy('id')->firstOrFail();
+
+        $note = GoodsReceiptNote::create([
+            'purchase_order_id' => $order->id,
+            'warehouse_id' => $this->warehouse->id,
+            'received_date' => '2026-08-30',
+            'receipt_key' => 'test-'.$order->id.'-'.uniqid(),
+        ]);
+
+        $receiptLine = $note->lines()->create([
+            'purchase_order_line_id' => $line->id,
+            'item_id' => $line->item_id,
+            'quantity' => $received,
+            'unit_cost' => '92.0000',
+        ]);
+
+        $line->update(['quantity_received' => $received]);
+
+        if ($accepted !== null) {
+            IncomingInspection::create([
+                'goods_receipt_note_line_id' => $receiptLine->id,
+                'item_id' => $line->item_id,
+                'inspected_quantity' => $received,
+                'accepted_quantity' => $accepted,
+                'rejected_quantity' => bcsub($received, $accepted, 4),
+                'result' => bccomp($accepted, $received, 4) === 0 ? 'pass' : 'partial',
+                'inspection_date' => '2026-08-30',
+            ]);
+        }
     }
 
     /**

@@ -6,6 +6,7 @@ use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Procurement\Models\Enums\SupplierBillStatus;
 use App\Modules\Procurement\Models\GoodsReceiptNoteLine;
 use App\Modules\Procurement\Models\SupplierBill;
+use App\Modules\Procurement\Models\SupplierBillLine;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
@@ -343,6 +344,78 @@ class SupplierBillService
                     "lines.{$index}.goods_receipt_note_line_id" => 'That receipt line belongs to a different purchase order than this bill names.',
                 ]);
             }
+
+            $this->guardBilledOnce($grnLine, $index, $data['id'] ?? null);
+            $this->guardWithinAccepted($grnLine, (string) $line['quantity'], $index);
+        }
+    }
+
+    /**
+     * ONE BILL PER RECEIPT LINE (DEC-20260831-008).
+     *
+     * Nothing stopped the same arrival being billed twice — two bills, or two
+     * lines of one bill, could both point at one receipt line and the ERP
+     * recorded both without complaint. On a matching column that exists to
+     * stop a vendor being paid for material once, that was the gap with money
+     * in it.
+     *
+     * Enforced in the service and not by a unique index, because
+     * goods_receipt_note_line_id is nullable (an unmatched bill is legitimate
+     * — a bill for something never on a purchase order stays recordable) and
+     * a unique index over a nullable column would let a second NULL through
+     * while giving a misleading error for the real case.
+     */
+    private function guardBilledOnce(GoodsReceiptNoteLine $grnLine, int|string $index, ?int $editingBillId): void
+    {
+        $already = SupplierBillLine::query()
+            ->where('goods_receipt_note_line_id', $grnLine->id)
+            // An edit of the bill that already holds this line is not a
+            // duplicate of itself.
+            ->when($editingBillId !== null, fn ($q) => $q->where('supplier_bill_id', '!=', $editingBillId))
+            ->with('supplierBill')
+            ->first();
+
+        if ($already !== null) {
+            $bill = $already->supplierBill?->bill_number ?? 'another bill';
+
+            throw ValidationException::withMessages([
+                "lines.{$index}.goods_receipt_note_line_id" => "That receipt line has already been billed on {$bill}. Each goods receipt line is billed once.",
+            ]);
+        }
+    }
+
+    /**
+     * A BILL MAY CHARGE ONLY FOR WHAT QUALITY ACCEPTED (DEC-20260831-008).
+     *
+     * The billable quantity of a receipt line is its QC-ACCEPTED quantity,
+     * not what physically arrived — material rejected at incoming inspection
+     * is never paid for. Before this, item, vendor and purchase order were
+     * all checked and the QUANTITY was not, so a bill for 600 against 500
+     * received recorded cleanly.
+     *
+     * A receipt line Quality has not inspected yet is billable in full, the
+     * same reading RequisitionCoverageService takes of uninspected stock: the
+     * material is in the store and on the books. Blocking the invoice until
+     * QC has run would stop Accounts recording a bill that has genuinely
+     * arrived, which is a worse failure than the one this prevents — and the
+     * rejected quantity, when it comes, has its own remedy (a debit note).
+     */
+    private function guardWithinAccepted(GoodsReceiptNoteLine $grnLine, string $billed, int|string $index): void
+    {
+        $inspections = $grnLine->incomingInspections()->get();
+
+        $billable = $inspections->isEmpty()
+            ? (string) $grnLine->quantity
+            : $inspections->reduce(fn (string $sum, $i) => bcadd($sum, (string) $i->accepted_quantity, 4), '0');
+
+        if (bccomp($billed, $billable, 4) > 0) {
+            $note = $inspections->isEmpty()
+                ? "that receipt line received {$billable}"
+                : "Quality accepted {$billable} of the {$grnLine->quantity} received";
+
+            throw ValidationException::withMessages([
+                "lines.{$index}.quantity" => "This line bills {$billed}, but {$note}. A bill may charge only for the quantity Quality accepted.",
+            ]);
         }
     }
 
