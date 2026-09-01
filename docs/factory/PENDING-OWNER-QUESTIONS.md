@@ -2549,7 +2549,14 @@ reason and an authorised user recorded against it.
 `RunConsumableOptionsService::NOT_AN_INPUT` on the day it is answered.
 *Open since 2026-09-01.*
 
-## Q91 · Who holds `consumption-substitute.manage`?
+## Q91 · Who holds `consumption-substitute.manage`? — RESOLVED (DEC-20260901-007)
+
+**Answered 01-Sep-2026: Plant Manager and Accounts.** The owner's words:
+"grant consumption-substitute.manage to Plant Manager and Accounts". Recorded
+as DEC-20260901-007 and implemented in `PermissionSeeder`'s office tier; the
+Supervisor role is deliberately not given it. The original question is kept
+below for the reasoning it carries.
+
 
 Recording a consumption line the run was NOT planned on now needs
 `consumption-substitute.manage`, a new catalog permission. `PermissionSeeder`

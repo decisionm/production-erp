@@ -13,10 +13,12 @@ use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
 use App\Modules\Production\Services\FactoryWarehouseResolver;
 use Database\Seeders\CanonicalMachineSeeder;
+use Database\Seeders\PermissionSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
 /**
@@ -274,6 +276,53 @@ class AddedConsumptionLineTest extends TestCase
 
         $this->getJson("/api/v1/production/shift-production-entries/{$entry->id}/consumable-materials")
             ->assertOk()->assertJsonPath('data.may_add_unplanned', false);
+    }
+
+    // ---- who the factory gave the authority to -----------------------------
+
+    /**
+     * THE SEEDED GRANT, under test rather than assumed.
+     *
+     * The owner's answer, 01-Sep-2026, to the question this permission's first
+     * state posed by granting it to nobody but himself: Plant Manager and
+     * Accounts hold it. Those are the same two roles the approval chain
+     * already checks by name, and the same two DEC-20260810-001 named for the
+     * internal carton tier — the office, not the floor.
+     *
+     * Pinned here because a seeder is exactly the kind of file a later change
+     * edits without noticing what it carries, and a silently dropped grant
+     * fails as "the supervisor cannot complete the batch", days later, on a
+     * shift that has already packed.
+     */
+    public function test_the_seeder_gives_the_authority_to_the_plant_manager_and_accounts(): void
+    {
+        $this->seed(PermissionSeeder::class);
+
+        foreach (['Plant Manager', 'Accounts', 'Administrator'] as $roleName) {
+            $user = User::factory()->create(['is_active' => true]);
+            $user->assignRole(Role::findByName($roleName, 'web'));
+
+            $this->assertTrue(
+                $user->fresh()->can('consumption-substitute.manage'),
+                "{$roleName} should be able to record a line the run was not planned on.",
+            );
+        }
+    }
+
+    /** And the floor is not given it by the seeder — this is the office's call. */
+    public function test_the_seeder_does_not_give_the_authority_to_a_supervisor(): void
+    {
+        $this->seed(PermissionSeeder::class);
+
+        $supervisor = User::factory()->create(['is_active' => true]);
+        foreach (['production.view', 'production.manage', 'quality.manage'] as $permission) {
+            $supervisor->givePermissionTo(Permission::findOrCreate($permission, 'web'));
+        }
+
+        $this->assertFalse(
+            $supervisor->fresh()->can('consumption-substitute.manage'),
+            'production.manage completes a batch; it does not authorise a material the run was not planned on.',
+        );
     }
 
     // ---- helpers -----------------------------------------------------------

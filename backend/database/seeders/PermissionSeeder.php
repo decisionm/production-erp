@@ -29,22 +29,43 @@ class PermissionSeeder extends Seeder
         $administrator = Role::findOrCreate('Administrator', 'web');
         $administrator->syncPermissions($permissions);
 
-        // THE INTERNAL CARTON TRACE TIER (DEC-20260810-001): visible to
-        // Owner, Plant Manager and Accounts logins ONLY — never Supervisor.
-        // The owner logs in as Administrator (which the sync above already
-        // hands every permission); Plant Manager and Accounts are the two
-        // named roles the approval chain already checks by exactly these
-        // strings (ShiftProductionEntryController), so the grant lands on
-        // the same identities that hold PM/Accountant approval today.
+        // THE OFFICE TIER — what Plant Manager and Accounts hold beyond their
+        // own modules. The owner logs in as Administrator (which the sync
+        // above already hands every permission); these two are the named
+        // roles the approval chain checks by exactly these strings
+        // (ShiftProductionEntryController), so a grant here lands on the same
+        // identities that already hold PM and accountant approval.
         //
-        // givePermissionTo, NOT syncPermissions: these roles carry
-        // permissions configured through the Roles UI on the live instance,
-        // and this seeder re-runs on every deploy — it must only ever ADD
-        // its one permission, never rewrite what an administrator granted.
-        $cartonTrace = $permissions->firstWhere('name', 'carton-trace.view');
+        //   carton-trace.view          the INTERNAL carton scan tier
+        //                              (DEC-20260810-001): completion
+        //                              datetime, day-bin lot attribution and
+        //                              the batch's costing rate — never
+        //                              Supervisor, never public.
+        //   consumption-substitute.manage
+        //                              recording a consumption line the run
+        //                              was NOT planned on. Completing a batch
+        //                              is every supervisor's job; booking a
+        //                              material that stood in for another one
+        //                              is the office's, by the owner's word
+        //                              (01-Sep-2026, answering the question
+        //                              this seeder's previous state posed by
+        //                              granting it to nobody but the owner).
+        //
+        // givePermissionTo, NOT syncPermissions: these roles carry permissions
+        // configured through the Roles UI on the live instance, and this
+        // seeder re-runs on every deploy — it must only ever ADD these, never
+        // rewrite what an administrator granted.
+        //
+        // `.manage` and not `.view` for the substitution tier: the `.view`
+        // half is the vestigial twin the catalog shape forces (it gates no
+        // route), exactly as carton-trace's `.manage` is.
+        $officeTier = $permissions->whereIn('name', [
+            'carton-trace.view',
+            'consumption-substitute.manage',
+        ])->values();
 
         foreach (['Plant Manager', 'Accounts'] as $roleName) {
-            Role::findOrCreate($roleName, 'web')->givePermissionTo($cartonTrace);
+            Role::findOrCreate($roleName, 'web')->givePermissionTo($officeTier->all());
         }
     }
 }
