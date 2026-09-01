@@ -117,6 +117,14 @@ class ItemService
             DependencyCheck::table('day_bin_movements', 'item_id')->label('day bin movement'),
             DependencyCheck::table('material_request_lines', 'item_id')->label('material request line'),
             DependencyCheck::table('store_issue_lines', 'item_id')->label('store issue line'),
+            // An item named as the one a SUBSTITUTION stood in for
+            // (DEC-20260901-004). A different column from the line above and a
+            // genuinely different reference: this item was not handed over on
+            // that line, it is the material the line replaced. Deleting it
+            // would leave a substitution unable to say what it substituted
+            // for, which is half the record the decision requires.
+            DependencyCheck::table('store_issue_lines', 'substitutes_item_id')
+                ->label('material replaced by a substitution'),
             // A BASE PRODUCT WITH VARIANTS STILL POINTING AT IT
             // (DEC-20260821-001). The column RESTRICTs, so the database
             // would refuse — but as a QueryException inside the delete
