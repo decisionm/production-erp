@@ -10,6 +10,7 @@ use App\Modules\Production\Models\ProductionStandardPackaging;
 use App\Modules\Production\Models\WorkCenter;
 use App\Modules\Production\Services\BomService;
 use App\Modules\Production\Services\ProductionConfigurationService;
+use App\Modules\Production\Services\ProductStandardsWorkspaceService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\Sanctum;
@@ -682,7 +683,7 @@ class ProductStandardsWorkspaceTest extends TestCase
      */
     public function test_the_list_is_capped_and_the_count_stays_honest(): void
     {
-        $limit = \App\Modules\Production\Services\ProductStandardsWorkspaceService::UNCONFIGURED_ITEM_LIMIT;
+        $limit = ProductStandardsWorkspaceService::UNCONFIGURED_ITEM_LIMIT;
 
         foreach (range(1, $limit + 6) as $n) {
             $this->item(sprintf('B.100 Ml Emcure Amber Variant %02d', $n), ['category' => 'finished_good']);
