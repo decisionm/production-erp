@@ -100,6 +100,12 @@ class StoreStoreIssueRequest extends FormRequest
             'lines.*.quantity' => ['required', 'numeric', 'max:99999999999', new PlainDecimal],
             'lines.*.uom' => ['nullable', 'string', 'max:16'],
             'lines.*.notes' => ['nullable', 'string', 'max:500'],
+            // WHY an alternate material went out in place of the one the
+            // request asked for (DEC-20260901-001). Only meaningful on a line
+            // whose item differs from its requirement's; withValidator below
+            // is where it becomes required, because only there is the
+            // requirement's own item known.
+            'lines.*.substitution_reason' => ['nullable', 'string', 'max:500'],
         ];
     }
 
@@ -242,11 +248,31 @@ class StoreStoreIssueRequest extends FormRequest
                         continue;
                     }
 
+                    // A DIFFERENT MATERIAL IS A SUBSTITUTION, AND A SUBSTITUTION
+                    // MUST SAY WHY (DEC-20260901-001).
+                    //
+                    // This used to be a flat refusal, and the flat refusal was
+                    // the problem: the floor genuinely does run out and reach
+                    // for an alternate, and with no way to record that against
+                    // the requirement the handover was either not booked or
+                    // booked against nothing, losing the link to what was
+                    // required. The door now opens — but only for a line that
+                    // names its reason. Without one this refuses exactly as
+                    // before, so a mis-picked item is still caught; what has
+                    // changed is that a deliberate substitution now has a way
+                    // through, and the message says which.
                     if ((int) $asked->item_id !== $itemId) {
-                        $validator->errors()->add(
-                            "lines.{$index}.item_id",
-                            'This line hands over a different material from the one the request asked for.',
-                        );
+                        $reason = trim((string) ($line['substitution_reason'] ?? ''));
+
+                        if ($reason === '') {
+                            $validator->errors()->add(
+                                "lines.{$index}.item_id",
+                                'This line hands over a different material from the one the request asked for. '
+                                    .'If that is a deliberate substitution, record why — it is then filed as a '
+                                    .'substitution against this requirement, and the original material keeps '
+                                    .'whatever quantity actually went out.',
+                            );
+                        }
                     }
 
                     continue;

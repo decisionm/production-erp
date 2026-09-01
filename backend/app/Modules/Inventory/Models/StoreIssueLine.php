@@ -19,11 +19,26 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 #[Fillable([
     'store_issue_id', 'material_request_line_id', 'quantity_requested', 'item_id',
+    'substitutes_item_id', 'substitution_reason',
     'from_warehouse_id', 'to_warehouse_id', 'quantity_issued', 'quantity_returned',
     'uom', 'notes',
 ])]
 class StoreIssueLine extends Model
 {
+    /**
+     * Whether this line was handed over IN PLACE OF a different material
+     * (DEC-20260901-001).
+     *
+     * Derived from the column rather than stored twice: a line is a
+     * substitution exactly when it names the item it stands in for. Nothing
+     * else — not a differing item_id on its own, not a reason on its own —
+     * makes it one, because the decision requires both halves to be recorded.
+     */
+    public function isSubstitution(): bool
+    {
+        return $this->substitutes_item_id !== null;
+    }
+
     protected function casts(): array
     {
         return [

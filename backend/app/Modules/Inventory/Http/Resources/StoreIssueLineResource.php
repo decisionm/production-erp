@@ -41,6 +41,17 @@ class StoreIssueLineResource extends JsonResource
             'quantity_returned' => (string) $this->quantity_returned,
             'quantity_outstanding' => $this->quantityOutstanding(),
             'quantity_remaining_on_request' => $this->quantityRemainingOnRequest(),
+            // WAS THIS HANDED OVER IN PLACE OF SOMETHING ELSE
+            // (DEC-20260901-001). Both halves ride together or neither does:
+            // a substitution that shows the alternate without saying what it
+            // replaced, or without why, is the state the decision forbids.
+            //
+            // `is_substitution` is the model's own predicate, not a second
+            // reading of the columns, so a screen and the record cannot
+            // disagree about whether a line is a substitution.
+            'is_substitution' => $this->isSubstitution(),
+            'substitutes_item_id' => $this->substitutes_item_id,
+            'substitution_reason' => $this->substitution_reason,
             'notes' => $this->notes,
         ];
     }

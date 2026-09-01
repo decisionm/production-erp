@@ -7,6 +7,7 @@ use App\Modules\Inventory\Models\Enums\StockMovementType;
 use App\Modules\Inventory\Models\Enums\StoreIssueStatus;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialRequest;
+use App\Modules\Inventory\Models\MaterialRequestLine;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\StoreIssue;
@@ -1013,6 +1014,76 @@ class StoreIssueService
     /**
      * @param  array<string, mixed>  $line
      */
+    /**
+     * IS THIS LINE STANDING IN FOR A DIFFERENT MATERIAL, AND MAY IT?
+     *
+     * DEC-20260901-001. The floor could not get all of what was required, so
+     * an alternate went out in its place. The owner's worked example is the
+     * shape: required 6, original actually used 5, alternate used 1, total
+     * actual 6 — recorded as TWO lines against the one requirement, never as
+     * one line edited up to 6. Nothing here touches the original line; it
+     * keeps its 5, and StoreIssueService already sums both against the
+     * requirement (see the $deltas accumulation in issue()), so 5 + 1 closes
+     * a requirement for 6 without any new arithmetic.
+     *
+     * A LINE IS A SUBSTITUTION WHEN ITS ITEM IS NOT ITS REQUIREMENT'S ITEM.
+     * That is detected from the request line rather than trusted from the
+     * payload, because "which item did this requirement ask for" is a fact
+     * the request already holds and a caller should not be able to contradict.
+     *
+     * THE REFUSAL IS THE CONTROL. Such a line was already possible before
+     * this decision — `addLine` never compared the two items — and it was
+     * recorded as nothing at all: an ordinary issue of some other material,
+     * indistinguishable afterwards from a mis-picked line. So a differing
+     * item with no reason is now refused outright rather than accepted and
+     * quietly filed. What "controlled" costs is a reason and an actor, not an
+     * approval workflow: the decision expressly does not build one, and
+     * expressly creates no substitution master saying which item may replace
+     * which.
+     *
+     * A line with no requirement behind it (`material_request_line_id` null —
+     * an unsolicited handover, which this service allows) cannot substitute
+     * for anything, because there is nothing it was supposed to be. A reason
+     * sent on such a line is ignored rather than refused: it is a note, and
+     * the line's own `notes` is where a note belongs.
+     *
+     * @param  array<string, mixed>  $line
+     * @return array{substitutes_item_id: int|null, substitution_reason: string|null}
+     */
+    private function resolveSubstitution(array $line, int $itemId, string $field): array
+    {
+        $none = ['substitutes_item_id' => null, 'substitution_reason' => null];
+
+        $requestLineId = $line['material_request_line_id'] ?? null;
+
+        if ($requestLineId === null) {
+            return $none;
+        }
+
+        $requiredItemId = MaterialRequestLine::query()
+            ->whereKey($requestLineId)
+            ->value('item_id');
+
+        if ($requiredItemId === null || (int) $requiredItemId === $itemId) {
+            return $none;
+        }
+
+        $reason = trim((string) ($line['substitution_reason'] ?? ''));
+
+        if ($reason === '') {
+            throw ValidationException::withMessages([
+                $field => 'This line hands over a different material from the one the request asked for. '
+                    .'A substitution has to say why — record the reason, and it is filed as a substitution '
+                    .'rather than as an ordinary issue.',
+            ]);
+        }
+
+        return [
+            'substitutes_item_id' => (int) $requiredItemId,
+            'substitution_reason' => $reason,
+        ];
+    }
+
     private function addLine(StoreIssue $issue, Warehouse $wip, array $line, string $field): StoreIssueLine
     {
         $itemId = (int) $line['item_id'];
@@ -1031,10 +1102,14 @@ class StoreIssueService
         $this->assertNotIntoItself($from, $wip, $field);
         $this->assertNotHeldByIncomingQc($itemId, $from, $quantity, $field);
 
+        $substitution = $this->resolveSubstitution($line, $itemId, $field);
+
         $created = $issue->lines()->create([
             'material_request_line_id' => $line['material_request_line_id'] ?? null,
             'quantity_requested' => $line['quantity_requested'] ?? null,
             'item_id' => $itemId,
+            'substitutes_item_id' => $substitution['substitutes_item_id'],
+            'substitution_reason' => $substitution['substitution_reason'],
             'from_warehouse_id' => $from,
             'to_warehouse_id' => $wip->id,
             'quantity_issued' => $quantity,
