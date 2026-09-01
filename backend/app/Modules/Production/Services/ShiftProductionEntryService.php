@@ -688,7 +688,7 @@ class ShiftProductionEntryService
             return false;
         }
 
-        return User::find($userId)?->can('production.substitute-material') ?? false;
+        return User::find($userId)?->can('material-substitution.manage') ?? false;
     }
 
     public function completeBatch(ShiftProductionEntry $entry, array $data, ?int $completedBy): ShiftProductionEntry

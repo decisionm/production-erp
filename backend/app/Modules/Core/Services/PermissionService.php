@@ -65,6 +65,27 @@ class PermissionService
         // Administrator role every catalog permission, which is how the owner
         // receives this one; no other role does unless a human grants it.
         'configuration-delete' => 'Configuration Hard Delete',
+        // RECORDING AN OFF-PLAN CONSUMPTION LINE (DEC-20260901-001): when a
+        // packing or consumption material runs short mid-run, saying what was
+        // ACTUALLY used instead is an authorised act, not a floor
+        // convenience — the owner's rule is that the ERP must never silently
+        // substitute one item for another, and an unrestricted floor is how
+        // "silently" happens.
+        //
+        // Its own catalog entry for the same mechanical reason as the two
+        // above, and it is the reason this is not `production.substitute-
+        // material`: RoleService intersects every grant with this list, so a
+        // permission that is not here is stripped from every role the next
+        // time somebody saves through the Roles screen — the grant would work
+        // until an unrelated role edit quietly removed it. (production.
+        // override-fifo sits outside the catalog today and carries that
+        // latent problem; it is not copied here.)
+        //
+        // The half that is REAL is `material-substitution.manage` — recording
+        // one is a write. `.view` is the vestigial twin, as carton-trace's
+        // `.manage` is: it gates nothing, because the dropdown of what may be
+        // substituted is shown only to somebody who may actually record one.
+        'material-substitution' => 'Material Substitution',
         'sales' => 'Sales',
         'finance' => 'Finance',
         'quality' => 'Quality',

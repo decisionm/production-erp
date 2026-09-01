@@ -27,11 +27,23 @@ use Spatie\Permission\Models\Permission;
  * WHO is already answered: shift_material_consumptions.created_by has carried
  * the completing user since the table was created.
  *
- * The permission is the gate. production.substitute-material follows the
- * production.override-fifo precedent exactly (2026_07_28_200005): a scoped
- * permission plus an explicit per-line flag, so the substitution is a
- * recorded decision and never an accident. findOrCreate keeps it idempotent
- * and re-runnable on an instance that already has it.
+ * The permission is the gate: a scoped permission plus an explicit per-line
+ * flag, so the substitution is a recorded decision and never an accident —
+ * the shape production.override-fifo established (2026_07_28_200005).
+ *
+ * IT IS NAMED material-substitution.manage, NOT production.substitute-material,
+ * and the difference is load-bearing. RoleService intersects every grant with
+ * PermissionService::MODULES, so a permission absent from that catalog is
+ * stripped from every role the next time anybody saves through the Roles
+ * screen — the grant would work until an unrelated role edit silently removed
+ * it, and the floor would then be refused with no visible cause.
+ * material-substitution is a catalog module for that reason, following
+ * carton-trace and configuration-delete. (override-fifo sits outside the
+ * catalog and carries that latent problem; it was not copied.)
+ *
+ * findOrCreate here as well as in PermissionSeeder is deliberate: the
+ * migration must leave the permission existing on an instance that has not
+ * re-seeded yet, and both calls are idempotent.
  *
  * NOTHING IS BACKFILLED. Existing rows get is_substitution = false, which is
  * the honest answer: nobody recorded a substitution on them, and inferring
@@ -46,7 +58,7 @@ return new class extends Migration
             $table->string('substitution_reason', 255)->nullable()->after('is_substitution');
         });
 
-        Permission::findOrCreate('production.substitute-material', 'web');
+        Permission::findOrCreate('material-substitution.manage', 'web');
     }
 
     public function down(): void

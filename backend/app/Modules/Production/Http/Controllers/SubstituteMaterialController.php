@@ -25,9 +25,9 @@ class SubstituteMaterialController extends Controller
         // for production.override-fifo, so both scoped permissions are
         // checked one way across the module.
         abort_unless(
-            $request->user()?->can('production.substitute-material') ?? false,
+            $request->user()?->can('material-substitution.manage') ?? false,
             403,
-            'Recording a substituted material requires the production.substitute-material permission.',
+            'Recording a substituted material requires the material-substitution.manage permission.',
         );
 
         return JsonResource::collection(

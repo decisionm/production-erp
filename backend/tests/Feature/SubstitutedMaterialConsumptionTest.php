@@ -31,7 +31,7 @@ use Tests\TestCase;
  * "Never silently" is the load-bearing half, and it has three parts, each
  * pinned below:
  *
- *   NOT BY ANYONE   the flag needs production.substitute-material, on the
+ *   NOT BY ANYONE   the flag needs material-substitution.manage, on the
  *                   same shape as production.override-fifo — a scoped
  *                   permission plus an explicit per-line flag, so the swap is
  *                   a recorded decision and not an accident.
@@ -196,7 +196,7 @@ class SubstitutedMaterialConsumptionTest extends TestCase
 
     public function test_an_authorised_user_records_the_substituted_line(): void
     {
-        $this->user = $this->actAsSupervisor(['production.substitute-material']);
+        $this->user = $this->actAsSupervisor(['material-substitution.manage']);
         $entryId = $this->startBatch();
 
         $this->completeWithSubstitution($entryId)->assertOk();
@@ -218,7 +218,7 @@ class SubstitutedMaterialConsumptionTest extends TestCase
 
     public function test_a_substituted_line_without_a_reason_is_refused(): void
     {
-        $this->actAsSupervisor(['production.substitute-material']);
+        $this->actAsSupervisor(['material-substitution.manage']);
         $entryId = $this->startBatch();
 
         $this->completeWithSubstitution($entryId, ['substitution_reason' => null])
@@ -228,7 +228,7 @@ class SubstitutedMaterialConsumptionTest extends TestCase
 
     public function test_the_flag_and_the_reason_reach_the_api_resource(): void
     {
-        $this->actAsSupervisor(['production.substitute-material']);
+        $this->actAsSupervisor(['material-substitution.manage']);
         $entryId = $this->startBatch();
         $this->completeWithSubstitution($entryId)->assertOk();
 
@@ -274,7 +274,7 @@ class SubstitutedMaterialConsumptionTest extends TestCase
 
     public function test_the_substituted_line_is_stored_beside_the_short_one_never_folded_into_it(): void
     {
-        $this->actAsSupervisor(['production.substitute-material']);
+        $this->actAsSupervisor(['material-substitution.manage']);
         $entryId = $this->startBatch();
         $this->completeWithSubstitution($entryId)->assertOk();
 
@@ -291,7 +291,7 @@ class SubstitutedMaterialConsumptionTest extends TestCase
     {
         config(['tally-sync.voucher_granularity' => 'batch']);
 
-        $this->user = $this->actAsSupervisor(['production.substitute-material']);
+        $this->user = $this->actAsSupervisor(['material-substitution.manage']);
         $entryId = $this->startBatch();
         $this->completeWithSubstitution($entryId)->assertOk();
 
@@ -330,7 +330,7 @@ class SubstitutedMaterialConsumptionTest extends TestCase
 
     public function test_the_dropdown_offers_only_material_actually_standing_in_production(): void
     {
-        $this->actAsSupervisor(['production.substitute-material']);
+        $this->actAsSupervisor(['material-substitution.manage']);
 
         // Only the brute tray is on the floor.
         StockBalance::create([
@@ -361,7 +361,7 @@ class SubstitutedMaterialConsumptionTest extends TestCase
 
     public function test_a_negative_wip_balance_is_a_discrepancy_and_is_never_offered(): void
     {
-        $this->actAsSupervisor(['production.substitute-material']);
+        $this->actAsSupervisor(['material-substitution.manage']);
 
         // DEC-20260831-005: a negative balance is not stock, it is a
         // discrepancy, and it nets as zero rather than as a quantity.

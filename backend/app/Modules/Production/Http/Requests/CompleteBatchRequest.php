@@ -124,7 +124,7 @@ class CompleteBatchRequest extends FormRequest
             // actually reached for — but never as a line that looks planned.
             // The flag makes it visibly distinct and the reason says why, in
             // the person's own words; the service refuses the flag without
-            // the production.substitute-material permission. Absent means
+            // the material-substitution.manage permission. Absent means
             // false, so every existing caller is unchanged.
             'material_consumptions.*.is_substitution' => ['sometimes', 'boolean'],
             'material_consumptions.*.substitution_reason' => [

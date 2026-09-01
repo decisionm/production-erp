@@ -7,7 +7,7 @@ use RuntimeException;
 
 /**
  * Adding a consumption line the run did not plan for is an AUTHORISED act,
- * not a floor convenience: it needs production.substitute-material AND the
+ * not a floor convenience: it needs material-substitution.manage AND the
  * explicit per-line flag, exactly as an out-of-order bag needs
  * production.override-fifo with override_fifo set (FifoPolicyException).
  *
@@ -20,7 +20,7 @@ class SubstitutionNotPermittedException extends RuntimeException implements Doma
     {
         return new self(
             "{$itemName} was not planned for this run — adding it as consumed ".
-            'requires the production.substitute-material permission.'
+            'requires the material-substitution.manage permission.'
         );
     }
 
