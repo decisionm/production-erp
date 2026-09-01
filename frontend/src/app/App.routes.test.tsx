@@ -71,6 +71,7 @@ const ROUTE_TABLE = [
     '/production/reports',
     '/production/rework-orders',
     '/procurement/vendors',
+    // Still a route, now a redirect into the Vendors page's review tab.
     '/procurement/tally-vendor-review',
     '/procurement/purchase-requisitions',
     '/procurement/purchase-orders',
@@ -120,8 +121,10 @@ const ROUTE_TABLE = [
 
 /**
  * The routes whose element is a bare <Navigate>, not a page: the retired
- * Work Centers URL and the catch-all. Named so a redirect quietly becoming
- * a page (or a page quietly becoming a redirect) is a diff someone reads.
+ * Work Centers URL, the retired Tally Vendor Review URL (the review is a tab
+ * of the vendor master now — one vendor master, one menu entry), and the
+ * catch-all. Named so a redirect quietly becoming a page (or a page quietly
+ * becoming a redirect) is a diff someone reads.
  *
  * FOUR retired URLs are deliberately NOT here — /production/standards,
  * /production/scrap-reasons, /production/molds and /production/shifts. Each
@@ -131,7 +134,7 @@ const ROUTE_TABLE = [
  * they actually redirect to is pinned separately, in "the retired production
  * configuration URLs".
  */
-const REDIRECT_ROUTES = ['/production/work-centers', '*'];
+const REDIRECT_ROUTES = ['/production/work-centers', '/procurement/tally-vendor-review', '*'];
 
 /**
  * The retired URLs that now land on a Production Configuration tab, and the

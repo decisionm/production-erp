@@ -370,9 +370,12 @@ describe('the finance-gated Procurement entries (permissionModule)', () => {
         const procurement = items.find((item) => item.key === 'procurement');
 
         // Both halves of FC-06: the rates (Supplier Bills) and the supplier
-        // identity (Tally Vendor Review). Nothing else in the group.
+        // identity (the Tally review, now a tab of Vendors). Nothing else in
+        // the group. Vendors appears for this login because it carries the
+        // finance half; the page itself opens on the review tab, since the
+        // master list this login cannot read is not offered to it.
         expect(procurement?.children?.map((child) => child.key)).toEqual([
-            '/procurement/tally-vendor-review',
+            '/procurement/vendors',
             '/procurement/supplier-bills',
         ]);
     });

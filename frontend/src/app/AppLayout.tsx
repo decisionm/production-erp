@@ -138,12 +138,17 @@ export const allNavItems: readonly NavGroup[] = [
         label: 'Procurement',
         module: 'procurement',
         children: [
-            { key: '/procurement/vendors', label: 'Vendors' },
-            // Owner/Accounts only, on the same footing as Supplier Bills
-            // below and for the same reason: supplier identity is FC-06, so
-            // the API gates on module:finance while the Finance MODULE itself
-            // stays unadopted and must not become visible through a child.
-            { key: '/procurement/tally-vendor-review', label: 'Tally Vendor Review', permissionModule: 'finance' },
+            // ONE vendor entry, not two. The Tally vendor review is a TAB of
+            // this page (?tab=tally-review), gated inside it on the same
+            // finance predicate the separate entry used — supplier identity
+            // is FC-06, and the API keeps refusing everyone else regardless.
+            //
+            // The list is an OR because the page is now two modules' surfaces
+            // under one key, and it must match the OR the ROUTES grant or the
+            // menu and the server disagree about who may look: a finance-only
+            // Accounts login still needs a sidebar path to the review, which
+            // is the very regression the comment above this group records.
+            { key: '/procurement/vendors', label: 'Vendors', permissionModule: ['procurement', 'finance'] },
             { key: '/procurement/purchase-requisitions', label: 'Purchase Requisitions' },
             { key: '/procurement/purchase-orders', label: 'Purchase Orders' },
             { key: '/procurement/goods-receipts', label: 'Goods Receipts' },
