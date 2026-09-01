@@ -380,6 +380,15 @@ describe('the finance-gated Procurement entries (permissionModule)', () => {
         ]);
     });
 
+    // The vendor entry is now an OR of two modules, so the login holding
+    // NEITHER is a case worth pinning: an OR is only safe while it still
+    // excludes everyone outside both halves.
+    it('shows no Procurement group at all to a login holding neither module', () => {
+        const items = buildNavItems(user(['production.view', 'production.manage']));
+
+        expect(items.find((item) => item.key === 'procurement')).toBeUndefined();
+    });
+
     it('hides the finance-gated entries from a procurement-only login, whose other entries are untouched', () => {
         const items = buildNavItems(user(['procurement.view', 'procurement.manage']));
         const procurement = items.find((item) => item.key === 'procurement');

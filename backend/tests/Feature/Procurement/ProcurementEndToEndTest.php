@@ -60,6 +60,8 @@ class ProcurementEndToEndTest extends TestCase
     {
         parent::setUp();
 
+        config(['production.traceability_enabled' => true]);
+
         $this->desk = User::factory()->create(['name' => 'Procurement Desk', 'is_active' => true]);
         foreach ([
             'procurement.view', 'procurement.manage',
@@ -150,9 +152,12 @@ class ProcurementEndToEndTest extends TestCase
 
         // ---- 5. More than the balance is refused, and writes nothing ------
         $receiptsBefore = GoodsReceiptNote::count();
+        // Refused for the QUANTITY and named as such — not for a malformed
+        // manifest, which would make the rest of this step prove nothing.
         $this->postJson('/api/v1/procurement/goods-receipts', $this->receiptPayload(
             $orderId, $orderLineId, '700.0000', 'arrival-too-big', 'BILL-B/2026-27',
-        ))->assertStatus(422);
+        ))->assertStatus(422)
+            ->assertJsonPath('message', "Cannot receive more than the remaining ordered quantity for purchase order line #{$orderLineId}: remaining 600.0000, requested 700.0000.");
 
         $this->assertSame($receiptsBefore, GoodsReceiptNote::count());
         $this->assertSame('400.0000', $this->orderLine($orderId)['quantity_received']);
@@ -177,7 +182,7 @@ class ProcurementEndToEndTest extends TestCase
         // ---- 7. A closed order takes nothing more -------------------------
         $receiptsBefore = GoodsReceiptNote::count();
         $this->postJson('/api/v1/procurement/goods-receipts', $this->receiptPayload(
-            $orderId, $orderLineId, '1.0000', 'arrival-3', 'BILL-D/2026-27',
+            $orderId, $orderLineId, '25.0000', 'arrival-3', 'BILL-D/2026-27',
         ))->assertStatus(422);
         $this->assertSame($receiptsBefore, GoodsReceiptNote::count());
     }
@@ -305,7 +310,22 @@ class ProcurementEndToEndTest extends TestCase
         )->assertSuccessful()->json('data');
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * An arrival of `$quantity` kg in 25 kg bags, one lot, keyed for replay.
+     *
+     * THE BAG MANIFEST IS NOT OPTIONAL, and this test would be walking a
+     * shape the factory never produces without it: `production.traceability_enabled`
+     * defaults to TRUE, and a weighed material is counted at the gate, so a
+     * receipt line with no lots is refused before it reaches the service. The
+     * config is pinned ON in setUp() rather than left to the environment for
+     * exactly that reason — with it off, every quantity rule below would be
+     * proved against a request live would have rejected first.
+     *
+     * Every quantity here is a whole number of 25 kg bags so the manifest and
+     * the line always agree.
+     *
+     * @return array<string, mixed>
+     */
     private function receiptPayload(int $orderId, int $lineId, string $quantity, string $key, string $billReference): array
     {
         return [
@@ -318,6 +338,11 @@ class ProcurementEndToEndTest extends TestCase
             'lines' => [[
                 'purchase_order_line_id' => $lineId,
                 'quantity' => $quantity,
+                'lots' => [[
+                    'supplier_lot_no' => 'LOT-'.$key,
+                    'bag_count' => (int) ((float) $quantity / 25),
+                    'bag_weight_kg' => '25',
+                ]],
             ]],
         ];
     }
