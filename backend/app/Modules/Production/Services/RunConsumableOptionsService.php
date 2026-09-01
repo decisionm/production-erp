@@ -41,11 +41,12 @@ use Illuminate\Support\Facades\DB;
  * answering Q59 by accident, on a screen, in the owner's absence.
  *
  * So the refusal is narrowed to the one thing the task states outright and the
- * factory's own vouchers confirm: a product is not its own input. Across the 34
- * Stock Journals in `tests/fixtures/tally/production-stock-journals.xml`, no
- * bottle appears on an OUT line, ever. Whether spares, tooling and unclassified
- * masters should also be refused is Q59's to answer, and widening this list is
- * a one-line change on the day it is.
+ * factory's own vouchers confirm: a product is not its own input. In the two
+ * Stock Journals held in `tests/fixtures/tally/production-stock-journals.xml`
+ * no bottle appears on an OUT line — that is the extent of what was checked,
+ * two vouchers of a 34-voucher export, not all 34. Whether spares, tooling and
+ * unclassified masters should also be refused is Q59's and Q90's to answer,
+ * and widening this list is a one-line change on the day it is.
  *
  * A line naming an ALLOWED-but-not-EXPECTED material is an ADDED line: the
  * 100 ml cartons ran out and today's run goes in a 90 ml box. It is recorded
