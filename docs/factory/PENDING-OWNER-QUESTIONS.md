@@ -2447,7 +2447,23 @@ the answer becomes a new record superseding it.
 **Blocked:** any end-of-day enforcement — which is now settled as: there is
 none to build.
 
-## Q89 · What should the Store do with damaged RAW MATERIAL, PACKING MATERIAL or CONSUMABLES returned from Production?
+## Q89 · What should the Store do with damaged RAW MATERIAL, PACKING MATERIAL or CONSUMABLES returned from Production? — RESOLVED
+
+**Resolved 2026-09-01 by DEC-20260901-003: a damaged return goes to QUALITY
+INSPECTION, never to usable stock, and only after Quality CONFIRMS the damage
+does it become Scrap.** Quality hold is an internal location of the one Store,
+so held material is out of the issuable balance by construction; where none is
+configured the damaged return is REFUSED rather than falling back to the
+store. Scrap is an issue out of stock, following the route incoming QC already
+uses for material it rejects — no item identity changes and no Tally master is
+named. Was open for less than a day: raised, narrowed and answered 2026-09-01.
+
+**Still open, and named by that decision:** what Tally should receive when
+returned material is scrapped (the sibling of the clause DEC-20260825-001
+already leaves open for QA rejection at arrival). The RELEASE path — Quality
+looks and does not confirm damage — is built as the agent's reading of the
+word "directly", and is withdrawn on a word if that reading is wrong.
+
 
 **Narrowed 2026-09-01.** The finished-goods half of this question is answered
 and is no longer asked here: damaged FINISHED GOODS become Scrap
@@ -2486,6 +2502,5 @@ Recording it without acting on it is the conservative direction: the evidence
 is being kept from today, so whichever answer comes back can be applied to
 what was written down. Guessing a hold would have answered this question.
 
-**Blocks:** any behaviour attached to the damaged state for these three
-categories. Nothing that works today is waiting on it. *Open since
-2026-09-01, narrowed the same day.*
+**Blocked:** any behaviour attached to the damaged state for these three
+categories — now built. What remains open is the Tally half above.

@@ -335,3 +335,49 @@ export async function returnBatchToProduction(
     });
     return data.data;
 }
+
+/**
+ * MATERIAL THAT CAME BACK FROM PRODUCTION DAMAGED (DEC-20260901-003).
+ *
+ * The store marks a return damaged; the server puts it in quality hold rather
+ * than into issuable stock, and these three calls are this desk's end of it —
+ * see what is waiting, confirm the damage (it becomes Scrap and leaves stock),
+ * or release it back to a store because it is not damaged after all.
+ *
+ * Registered under /quality and gated on quality.manage: the store may mark a
+ * line damaged, and only this desk may say what becomes of it.
+ */
+export interface ReturnedMaterialHold {
+    item_id: number;
+    item_name: string | null;
+    item_sku: string | null;
+    uom: string | null;
+    item_is_active: boolean;
+    quantity: string;
+    warehouse_id: number;
+}
+
+export async function listReturnedMaterialHolds(): Promise<ReturnedMaterialHold[]> {
+    const { data } = await api.get<{ data: ReturnedMaterialHold[] }>('/quality/returned-material-holds');
+    return data.data;
+}
+
+export interface ReturnedMaterialDispositionLine {
+    item_id: number;
+    quantity: number;
+}
+
+export async function confirmReturnedMaterialDamage(payload: {
+    lines: ReturnedMaterialDispositionLine[];
+    notes?: string | null;
+}): Promise<void> {
+    await api.post('/quality/returned-material-holds/confirm-damage', payload);
+}
+
+export async function releaseReturnedMaterial(payload: {
+    to_warehouse_id: number;
+    lines: ReturnedMaterialDispositionLine[];
+    notes?: string | null;
+}): Promise<void> {
+    await api.post('/quality/returned-material-holds/release', payload);
+}

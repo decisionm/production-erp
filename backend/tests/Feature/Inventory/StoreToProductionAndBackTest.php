@@ -12,6 +12,7 @@ use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\StoreIssue;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\ProductionWipLocationResolver;
+use App\Modules\Inventory\Services\QualityHoldLocationResolver;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Services\FactoryWarehouseResolver;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -73,6 +74,8 @@ class StoreToProductionAndBackTest extends TestCase
 
     private Warehouse $wip;
 
+    private Warehouse $qualityHold;
+
     private User $storeKeeper;
 
     private User $supervisor;
@@ -92,7 +95,13 @@ class StoreToProductionAndBackTest extends TestCase
             'sku' => 'PET-RESIN', 'name' => 'PET Resin', 'uom' => 'Kgs.', 'is_production_input' => true,
         ]);
 
+        // A THIRD INTERNAL LOCATION of the same godown (DEC-20260901-003):
+        // where a damaged return waits for Quality. Configured here because
+        // the flow REFUSES without it — which is its own test, below.
+        $this->qualityHold = Warehouse::create(['code' => 'QC-HOLD', 'name' => 'Quality Hold', 'is_active' => true]);
+
         app(ProductionWipLocationResolver::class)->setWarehouseId($this->wip->id);
+        app(QualityHoldLocationResolver::class)->setWarehouseId($this->qualityHold->id);
         app(FactoryWarehouseResolver::class)->setRawMaterialWarehouseId($this->store->id);
 
         $this->storeKeeper = $this->userWith(['inventory.manage', 'production.manage']);
@@ -232,48 +241,6 @@ class StoreToProductionAndBackTest extends TestCase
     }
 
     /**
-     * THE ATTRIBUTED DOOR CARRIES THE CONDITION TOO — the half that is easy
-     * to lose, and did not work when this was first written.
-     *
-     * An attributed return does not reach the ledger the way an unattributed
-     * one does: the payload is grouped by store issue line, merged, locked
-     * and re-shaped before it reaches StoreIssueService::returnUnused, and
-     * the grouping copied named keys. `quality_state` was dropped there and
-     * every line came out `good`.
-     *
-     * NOTHING CAUGHT IT, and the reason is worth keeping: a test that returns
-     * GOOD material through this door passes whether the value arrived or was
-     * dropped, because a dropped value reads as `good`. Only `damaged` can
-     * tell the two apart, so this test asserts on damaged deliberately.
-     */
-    public function test_a_return_against_a_store_issue_records_the_condition_it_names(): void
-    {
-        $this->stockIn($this->store, '100');
-
-        $issue = $this->postJson('/api/v1/inventory/store-issues', [
-            'received_by' => $this->supervisor->id,
-            'lines' => [['item_id' => $this->resin->id, 'quantity' => '100']],
-        ])->assertCreated()->json('data');
-
-        $this->postJson('/api/v1/inventory/production-returns', [
-            'to_warehouse_id' => $this->store->id,
-            'lines' => [[
-                'store_issue_line_id' => $issue['lines'][0]['id'],
-                'quantity' => '40',
-                'quality_state' => ReturnedQualityState::Damaged->value,
-            ]],
-        ])->assertCreated();
-
-        $movement = StockMovement::query()
-            ->where('purpose', StockMovementPurpose::ReturnFromProduction->value)
-            ->where('type', StockMovementType::TransferIn->value)
-            ->firstOrFail();
-
-        $this->assertSame(ReturnedQualityState::Damaged, $movement->quality_state);
-        $this->assertSame('40.0000', bcadd((string) $movement->quantity, '0', 4));
-    }
-
-    /**
      * ONE LINE, ONE CONDITION. Two asks against the same handover line are
      * ADDED UP — right for a quantity, wrong for a condition: 30 kg good and
      * 20 kg damaged is not 50 kg of anything, and either answer puts a state
@@ -313,22 +280,130 @@ class StoreToProductionAndBackTest extends TestCase
         ])->assertCreated();
 
         $this->assertSame('50.0000', $this->balance($this->wip));
+        // The merged 50 went to quality hold, not to the store — one
+        // destination for one merged line, decided by the one condition.
+        $this->assertSame('50.0000', $this->balance($this->qualityHold));
+        $this->assertSame('0.0000', $this->balance($this->store));
     }
 
     /**
-     * THE CONDITION IS RECORDED, AND IT CHANGES NOTHING ELSE — the boundary
-     * the enum's docblock states, pinned so a later change to it is a
-     * deliberate one rather than a side effect.
+     * A DAMAGED RETURN GOES TO QUALITY, NEVER TO USABLE STOCK
+     * (DEC-20260901-003).
      *
-     * A damaged return moves the same quantity to the same place as a good
-     * one. What the factory should then DO with damaged raw material, packing
-     * material or consumables is an open owner question (Q89, narrowed
-     * 01-Sep-2026); a test that asserted a hold here would have answered it.
-     * The settled half — damaged FINISHED GOODS become Scrap,
-     * DEC-20260901-002 — does not reach this door and is not asserted here.
+     * This test REPLACES one that asserted the opposite — that a damaged
+     * return moved exactly what a good one moved — which was the correct
+     * boundary while the disposition was an open question and is wrong now
+     * that the owner has answered it. The old assertion is not weakened here,
+     * it is reversed, and the store's balance is asserted at ZERO to say so.
      */
-    public function test_a_damaged_return_is_recorded_as_damaged_and_moves_exactly_what_a_good_one_moves(): void
+    public function test_a_damaged_return_lands_in_quality_hold_and_never_in_the_store(): void
     {
+        $this->stockIn($this->wip, '100');
+
+        $this->postJson('/api/v1/inventory/production-returns', [
+            // The storekeeper picks the store, exactly as for a good line.
+            'to_warehouse_id' => $this->store->id,
+            'lines' => [[
+                'item_id' => $this->resin->id,
+                'quantity' => '40',
+                'quality_state' => ReturnedQualityState::Damaged->value,
+            ]],
+        ])->assertCreated();
+
+        // THE PICKED STORE IS NOT WHERE IT WENT. A person's choice must not
+        // be able to put damaged material into issuable stock, so the
+        // destination is decided by the condition and the dropdown is
+        // ignored for this line.
+        $this->assertSame('0.0000', $this->balance($this->store));
+        $this->assertSame('40.0000', $this->balance($this->qualityHold));
+        $this->assertSame('60.0000', $this->balance($this->wip));
+
+        $movement = StockMovement::query()
+            ->where('purpose', StockMovementPurpose::ReturnFromProduction->value)
+            ->where('type', StockMovementType::TransferIn->value)
+            ->firstOrFail();
+
+        $this->assertSame(ReturnedQualityState::Damaged, $movement->quality_state);
+        $this->assertSame($this->qualityHold->id, $movement->warehouse_id);
+
+        $this->assertLedgerMatchesBalances('after a damaged return');
+    }
+
+    /**
+     * AND SO DOES A DAMAGED RETURN AGAINST A STORE ISSUE — the second door,
+     * which reaches the ledger by a completely different route.
+     *
+     * An attributed return does not use the destination on the request at
+     * all: StoreIssueService::returnUnused sends material back to the store
+     * the handover ISSUED from, a fact about the original handover. That is
+     * the correct default and it is exactly the wrong destination for a
+     * damaged line, so the override is a SECOND edit in a second place — and
+     * a test that only checked `quality_state` would pass while the material
+     * sat in the store.
+     */
+    public function test_a_damaged_return_against_a_store_issue_also_lands_in_quality_hold(): void
+    {
+        $this->stockIn($this->store, '100');
+
+        $issue = $this->postJson('/api/v1/inventory/store-issues', [
+            'received_by' => $this->supervisor->id,
+            'lines' => [['item_id' => $this->resin->id, 'quantity' => '100']],
+        ])->assertCreated()->json('data');
+
+        $lineId = $issue['lines'][0]['id'];
+
+        $this->postJson('/api/v1/inventory/production-returns', [
+            'to_warehouse_id' => $this->store->id,
+            'lines' => [[
+                'store_issue_line_id' => $lineId,
+                'quantity' => '40',
+                'quality_state' => ReturnedQualityState::Damaged->value,
+            ]],
+        ])->assertCreated();
+
+        $this->assertSame('0.0000', $this->balance($this->store));
+        $this->assertSame('40.0000', $this->balance($this->qualityHold));
+
+        $movement = StockMovement::query()
+            ->where('purpose', StockMovementPurpose::ReturnFromProduction->value)
+            ->where('type', StockMovementType::TransferIn->value)
+            ->firstOrFail();
+
+        $this->assertSame($this->qualityHold->id, $movement->warehouse_id);
+        $this->assertSame(ReturnedQualityState::Damaged, $movement->quality_state);
+
+        // THE HANDOVER STILL CLOSES ITS OWN QUANTITY. The material did leave
+        // production, so the floor no longer holds it; whether it is USABLE
+        // is a separate fact and is carried by the location it sits in.
+        // Withholding this would leave the issue open against material
+        // nobody can return again.
+        $storeIssue = StoreIssue::query()->whereKey($issue['id'])->firstOrFail();
+        $issueLine = $storeIssue->lines()->whereKey($lineId)->firstOrFail();
+
+        $this->assertSame('40.0000', bcadd((string) $issueLine->quantity_returned, '0', 4));
+        $this->assertSame('60.0000', bcadd($issueLine->quantityOutstanding(), '0', 4));
+
+        $this->assertLedgerMatchesBalances('after a damaged attributed return');
+    }
+
+    /**
+     * NO QUALITY HOLD CONFIGURED MEANS THE DAMAGED LINE IS REFUSED — it does
+     * NOT fall back to the store.
+     *
+     * Every other location resolver in this system has a fallback. This one
+     * must not, because a fallback here produces the single outcome the rule
+     * forbids, silently, on the happy path, in exactly the situation where
+     * nobody has configured anything. Refusing a return is recoverable in a
+     * minute; material quietly back on the issuable shelf is not.
+     *
+     * This is also the LIVE state today: no warehouse carries the code
+     * QC-HOLD, so damaged returns refuse until a person names the row.
+     */
+    public function test_a_damaged_return_is_refused_when_no_quality_hold_is_configured(): void
+    {
+        app(QualityHoldLocationResolver::class)->setWarehouseId(null);
+        $this->qualityHold->update(['code' => 'NOT-THE-HOLD']);
+
         $this->stockIn($this->wip, '100');
 
         $this->postJson('/api/v1/inventory/production-returns', [
@@ -338,19 +413,20 @@ class StoreToProductionAndBackTest extends TestCase
                 'quantity' => '40',
                 'quality_state' => ReturnedQualityState::Damaged->value,
             ]],
+        ])->assertUnprocessable();
+
+        // NOTHING MOVED — not to the store, not anywhere.
+        $this->assertSame('100.0000', $this->balance($this->wip));
+        $this->assertSame('0.0000', $this->balance($this->store));
+
+        // And a GOOD return still works: the refusal is about the damaged
+        // line, not about the door.
+        $this->postJson('/api/v1/inventory/production-returns', [
+            'to_warehouse_id' => $this->store->id,
+            'lines' => [['item_id' => $this->resin->id, 'quantity' => '40']],
         ])->assertCreated();
 
         $this->assertSame('40.0000', $this->balance($this->store));
-        $this->assertSame('60.0000', $this->balance($this->wip));
-
-        $movement = StockMovement::query()
-            ->where('purpose', StockMovementPurpose::ReturnFromProduction->value)
-            ->where('type', StockMovementType::TransferIn->value)
-            ->firstOrFail();
-
-        $this->assertSame(ReturnedQualityState::Damaged, $movement->quality_state);
-
-        $this->assertLedgerMatchesBalances('after a damaged return');
     }
 
     /**

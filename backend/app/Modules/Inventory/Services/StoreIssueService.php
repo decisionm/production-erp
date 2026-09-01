@@ -420,10 +420,26 @@ class StoreIssueService
 
                 $budgets[$budgetKey] = bcsub($unconsumed, $quantity, 4);
 
+                // WHERE IT GOES BACK TO. The default is the store this
+                // handover ISSUED from, which is what a return means and what
+                // this door has always done. A caller may name a different
+                // destination, and exactly one does: a DAMAGED return goes to
+                // quality hold instead of into issuable stock
+                // (DEC-20260901-003), resolved and refused by
+                // ProductionReturnService before this transaction opens.
+                //
+                // NOT RE-DERIVED FROM THE CONDITION HERE, deliberately. Two
+                // places deciding the same destination is how they come to
+                // disagree; this one obeys, and the caller that resolved it
+                // owns the rule.
+                $destination = isset($requested['to_warehouse_id'])
+                    ? (int) $requested['to_warehouse_id']
+                    : (int) $line->from_warehouse_id;
+
                 $this->stock->recordTransfer(
                     itemId: (int) $line->item_id,
                     fromWarehouseId: (int) $line->to_warehouse_id,
-                    toWarehouseId: (int) $line->from_warehouse_id,
+                    toWarehouseId: $destination,
                     quantity: $quantity,
                     reference: "Store issue {$issue->issue_number} — return",
                     notes: $notes,
@@ -437,6 +453,16 @@ class StoreIssueService
                     qualityState: ReturnedQualityState::fromNullable($requested['quality_state'] ?? null),
                 );
 
+                // THE HANDOVER CLOSES EVEN WHEN THE MATERIAL IS DAMAGED, and
+                // that is a decision rather than an oversight
+                // (DEC-20260901-003). This figure is about the FLOOR — how
+                // much of what was handed over is still standing there — and
+                // damaged material has genuinely left production. Withholding
+                // it would leave the issue permanently open against material
+                // nobody can return again, which is the stranded-material
+                // failure this door exists to prevent. Whether the material is
+                // USABLE is a separate fact, and it is carried by the location
+                // it now sits in.
                 $line->quantity_returned = bcadd((string) $line->quantity_returned, $quantity, 4);
                 $line->save();
             }

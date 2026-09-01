@@ -58,6 +58,26 @@ enum StockMovementPurpose: string
     /** A deliberate correction that is neither of the above (a count, a write-off, a manual fix). */
     case Adjustment = 'adjustment';
 
+    /**
+     * Material scrapped after Quality CONFIRMED it was damaged
+     * (DEC-20260901-003) — it leaves usable stock and does not come back.
+     *
+     * ITS OWN PURPOSE RATHER THAN `adjustment`, and the distinction earns the
+     * enum case: an adjustment is somebody correcting the books, a scrap is
+     * the factory losing material. Filed under `adjustment` they would be
+     * indistinguishable on the one screen that exists to tell a person what
+     * happened to their stock, and "how much did we scrap in August" would be
+     * unanswerable without reading reference strings.
+     *
+     * It rides an ISSUE, not a transfer, and that follows the route incoming
+     * QC already uses for material it rejects (its Rejections Out issue):
+     * scrapped material leaves the balance rather than moving to a scrap
+     * location. This ERP has no scrap-item mapping for a purchased input, and
+     * DEC-20260901-002 expressly leaves which Scrap item undecided, so
+     * nothing here changes an item's identity or names a Tally master.
+     */
+    case Scrap = 'scrap';
+
     /** The ERP matched to Tally's closing position — a reconcile run. */
     case Reconcile = 'reconcile';
 

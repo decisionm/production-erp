@@ -78,6 +78,7 @@ const PURPOSE_TEXT: Record<string, string> = {
     output: 'Output',
     dispatch: 'Dispatch',
     adjustment: 'Adjustment',
+    scrap: 'Scrap',
     reconcile: 'Reconcile',
     unknown: 'Not stated',
 };
@@ -91,6 +92,7 @@ const PURPOSE_TONE: Record<string, string> = {
     output: 'cyan',
     dispatch: 'magenta',
     adjustment: 'gold',
+    scrap: 'red',
     reconcile: 'blue',
     unknown: 'default',
 };
