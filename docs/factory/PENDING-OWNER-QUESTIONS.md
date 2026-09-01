@@ -2545,6 +2545,38 @@ CATEGORY — specifically, may it refuse spares, tooling and unclassified
 masters as consumption inputs? Today an off-plan spare is accepted, with a
 reason and an authorised user recorded against it.
 
+**In plain words:** when a supervisor finishes a batch, they list what the run
+actually used. Should the system STOP them typing a spanner, a mould, a pen
+drive or anything nobody has classified yet into that list — or should it let
+them, as long as they say why and the office signs it off? Right now it lets
+them, and it only ever blocks a finished bottle.
+
+**The agent's recommendation: LET IT, and do not add a category block.**
+Three reasons, in the order they matter.
+
+1. *A wrong block costs a shift; a wrong allow costs a correction.* If the
+   system refuses a material at 2 a.m., the batch is packed and cannot be
+   booked, and nobody in the building can override it. If it accepts one it
+   should not have, the line is on the batch with a reason and a named
+   authoriser, and the accountant fixes it before the voucher posts.
+2. *The block would fire mostly on innocent rows.* Twelve live masters carry
+   no category at all, meaning "nobody has said yet", not "not a material" —
+   so a category rule refuses them on a silence, not on a fact.
+3. *The real protection is already in.* The material must come off a
+   controlled list, a material the run was not planned on needs a written
+   reason, and only Plant Manager or Accounts may record one
+   (DEC-20260901-007). A spare part booked into a run is visible, attributed
+   and answerable today.
+
+**When to revisit:** if a real run books a real spare into a real voucher and
+the accountant has to unpick it. That is evidence, and it would change this
+recommendation. Until then the block is a guess about a thing that has not
+happened.
+
+**What the owner would be giving up by blocking:** the ability to record, at
+completion, a consumable the catalogue has not classified yet — which is most
+of the twelve.
+
 **Blocks:** nothing that works today. It is a one-line widening of
 `RunConsumableOptionsService::NOT_AN_INPUT` on the day it is answered.
 *Open since 2026-09-01.*
