@@ -220,7 +220,7 @@ export const allNavItems: readonly NavGroup[] = [
             // moved straight back when review found that (Cursor, ac56e12).
             // Neither screen moves stock and neither gates dispatch (Q27).
             { key: '/inventory/fulfilment', label: 'Store Fulfilment' },
-            { key: '/inventory/planning', label: 'Fulfilment Planning' },
+            { key: '/inventory/planning', label: 'Production Planning' },
             // WAREHOUSES IS SETUP AND SITS LAST, which is what this group's
             // own header already said it should ("daily-use first, masters
             // after") — it was sitting between Store ↔ Production and Stock
@@ -344,7 +344,15 @@ export const allNavItems: readonly NavGroup[] = [
         children: [
             { key: '/sales/customers', label: 'Customers' },
             { key: '/sales/sales-orders', label: 'Sales Orders' },
-            { key: '/sales/deliveries', label: 'Deliveries' },
+            {
+                key: '/sales/deliveries',
+                label: 'Deliveries',
+                // The STORE dispatches, Sales only reads (DEC-20260901-005).
+                // Both therefore need the screen, so it is shown to either —
+                // mirroring the route, which is `module:sales,inventory` to
+                // read and `module:inventory` to post.
+                permissionModule: ['sales', 'inventory'],
+            },
             { key: '/sales/invoices', label: 'Invoices' },
             {
                 key: '/sales/fulfilment-control',

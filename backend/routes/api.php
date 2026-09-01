@@ -669,10 +669,39 @@ Route::prefix('v1')->group(function () {
             // only where an approved batch really stands behind it. Read-only.
             Route::get('sales-orders/{sales_order}/cost-insight', [SalesCostInsightController::class, 'show']);
 
-            Route::apiResource('deliveries', DeliveryController::class)->only(['index', 'store', 'show']);
-
             Route::apiResource('invoices', InvoiceController::class)->only(['index', 'store', 'show']);
             Route::post('invoices/{invoice}/issue', [InvoiceController::class, 'issue']);
+        });
+
+        /*
+         * DELIVERIES — READ by Sales or the Store; DISPATCHED by the Store alone.
+         *
+         * DEC-20260901-001 (resolving Q78): the STORE performs the final
+         * dispatch action and Sales does not. So the resource is split rather
+         * than moved wholesale, because the two halves belong to different
+         * teams:
+         *
+         *   index/show  `module:sales,inventory` — OR, so the desk that sold
+         *               the goods can still trace what left against its order
+         *               and the store can see what it dispatched. Reading is
+         *               not dispatching.
+         *   store       `module:inventory` ALONE — the act. A sales.manage
+         *               login now gets 403 here, which is the decision's
+         *               whole point.
+         *
+         * The Store is NOT given sales.manage to obtain this. It dispatches on
+         * its OWN inventory permission, so nothing about sales orders,
+         * customers or invoices is unlocked by being able to dispatch — the
+         * exact separation Q78 asked for. This mirrors Quality's dispatch
+         * sign-off above: the record lives on a Sales model, the act is gated
+         * to the team that performs it.
+         */
+        Route::prefix('sales')->middleware('module:sales,inventory')->group(function () {
+            Route::apiResource('deliveries', DeliveryController::class)->only(['index', 'show']);
+        });
+
+        Route::prefix('sales')->middleware('module:inventory')->group(function () {
+            Route::apiResource('deliveries', DeliveryController::class)->only(['store']);
         });
 
         Route::prefix('finance')->middleware('module:finance')->group(function () {

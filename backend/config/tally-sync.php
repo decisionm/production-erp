@@ -238,17 +238,32 @@ return [
     | blocks the dispatch: the goods have gone, and Tally is bookkeeping that
     | follows.
     |
+    | OFF BY OWNER DECISION, DEC-20260831-012, which REVERSES DEC-20260831-007
+    | the same day: the ERP sends NO Sales Order, NO Delivery Note and NO Sales
+    | Invoice to Tally. The sales integration is INBOUND ONLY — Tally creates
+    | the Sales Invoice, the e-invoice (IRN) and the e-way details, and the ERP
+    | IMPORTS that voucher and matches it to its own Sales Order.
+    |
+    | The builder below it is left in the tree, dormant. A superseded decision's
+    | code is history, not litter, and the next reversal must not be rewritten
+    | from nothing. The flag is not the rule, though — the rule is pinned by
+    | TallySalesDirectionTest, which asserts that dispatching a delivery and
+    | issuing an invoice stage NOTHING at the shipped defaults.
+    |
     */
 
-    'delivery_notes_enabled' => (bool) env('TALLY_SYNC_DELIVERY_NOTES_ENABLED', true),
+    'delivery_notes_enabled' => (bool) env('TALLY_SYNC_DELIVERY_NOTES_ENABLED', false),
 
     /*
     |--------------------------------------------------------------------------
-    | Sales Invoice → Tally — ON, and fail-closed
+    | Sales Invoice → Tally — OFF: Tally originates the accounting document
     |--------------------------------------------------------------------------
     |
-    | ON BY OWNER DECISION, DEC-20260831-007: the ERP originates the sale, which
-    | reverses DEC-20260809-003 (now superseded) and resolves Q71.
+    | OFF BY OWNER DECISION, DEC-20260831-012, superseding DEC-20260831-007.
+    | Tally creates the Sales Invoice, the e-invoice and the e-way details; the
+    | ERP never posts one and never fabricates an IRN. What the ERP does instead
+    | is IMPORT Tally's Sales voucher and match it to the ERP Sales Order on
+    | (customer + customer_po_reference) — see TallySalesInvoiceImporter.
     |
     | The fail-closed half is part of the decision, not a caveat. Staging
     | refuses with a NAMED reason when the customer's Tally ledger, an item's
@@ -263,7 +278,7 @@ return [
     |
     */
 
-    'sales_invoices_enabled' => (bool) env('TALLY_SYNC_SALES_INVOICES_ENABLED', true),
+    'sales_invoices_enabled' => (bool) env('TALLY_SYNC_SALES_INVOICES_ENABLED', false),
 
     /*
     |--------------------------------------------------------------------------

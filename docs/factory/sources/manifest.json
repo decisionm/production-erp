@@ -148,6 +148,26 @@
     "type": "tally-journal",
     "verified_at": "2026-08-12"
   },
+  "tally-sales-invoice-vouchers-fixture": {
+    "name": "Tally Sales vouchers, 3 lifted verbatim from the 31-Aug export (test fixture)",
+    "notes": "Government identifiers REDACTED (IRN, IRN ack no, QR code, GSTINs, e-way bill numbers); party names, order references, items, quantities and amounts untouched because they are what the importer matches on. Pinned by TallySalesInvoiceImportTest. The FULL 55-voucher export it was cut from is ~/Downloads/sales_voucher.xml and is EXTERNAL and at risk.",
+    "path": "backend/tests/Fixtures/tally/sales-invoices.xml",
+    "scope": "Real UTF-16LE Tally output: BOM, no XML declaration, full e-way/IRN scaffolding, Tally's raw 0x05 control byte in ORDERNO. Vouchers 696/26-27 (no order reference), 699/26-27 (numeric reference 480), 701/26-27 (free-text customer PO string).",
+    "sha256": "97469ce59b01518d55ef20a9555a6f096066a8611b5d27ba303daaefdc3b9529",
+    "status": "present",
+    "type": "tally-export",
+    "verified_at": "2026-08-31"
+  },
+  "tally-sales-order-vouchers-fixture": {
+    "name": "Tally Sales ORDER vouchers, 2 lifted verbatim from the 31-Aug export (test fixture)",
+    "notes": "Held so the importer can be proven to IGNORE Sales Order vouchers (the ERP emits none — DEC-20260831-008). Same redaction as its sibling. Full 34-voucher export: ~/Downloads/test2_sales_order.xml, EXTERNAL.",
+    "path": "backend/tests/Fixtures/tally/sales-orders.xml",
+    "scope": "Sales Order voucher shape — evidence for the match key: ORDERNO/REFERENCE carry the customer's own PO string, the identical string the Sales voucher carries in BASICPURCHASEORDERNO.",
+    "sha256": "aa82a067b0899a98f62d9257c03ca977ed97e25a36174d846ba569e388483c67",
+    "status": "present",
+    "type": "tally-export",
+    "verified_at": "2026-08-31"
+  },
   "tally-statistics-20260812": {
     "name": "Tally Statistics screen — voucher and master counts",
     "notes": "Screenshot of the live Tally Statistics screen, 1-Apr-26 to 10-Aug-26, taken 12-Aug-2026. Counts only, no rates, but held with the rest of the 12-Aug set for provenance. Payment 925, Receipt 553, Journal 418, Purchase 351, Purchase Order 92 (1 cancelled), Contra 60, Credit Note 17, Debit Note 5; total 3,811. Masters: 1,742 ledgers, 624 stock items, 83 groups, 27 voucher types, 6 units, 5 employee groups and 3 EMPLOYEES — which is why Tally is not a source for the factory's staff list.",

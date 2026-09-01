@@ -59,7 +59,10 @@ class SalesOrderCancelTest extends TestCase
     {
         parent::setUp();
 
-        $this->salesDesk = $this->userWith('Sales Desk', ['sales.view', 'sales.manage']);
+        // `inventory.manage` rides along because this fixture also DISPATCHES, and
+        // dispatch is the Store's act (DEC-20260901-005). Cancellation itself is
+        // still Sales' and is asserted as such in test_cancel_needs_sales_manage.
+        $this->salesDesk = $this->userWith('Sales Desk', ['sales.view', 'sales.manage', 'inventory.manage']);
         Sanctum::actingAs($this->salesDesk);
 
         $this->bottle = Item::create(['sku' => 'BTL-500', 'name' => '500ml PET Bottle', 'uom' => 'Nos', 'tally_stock_item_guid' => 'itm-bottle']);

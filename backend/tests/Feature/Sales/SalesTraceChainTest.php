@@ -63,6 +63,14 @@ class SalesTraceChainTest extends TestCase
 
     private User $salesDesk;
 
+    /**
+     * The STORE dispatches (DEC-20260901-005, resolving Q78). It holds
+     * `inventory.manage` and NO Sales permission, so the two dispatch helpers
+     * below act as it and hand the session back to the Sales desk afterwards —
+     * which is also what the real chain looks like.
+     */
+    private User $storeDesk;
+
     private ?string $agentToken = null;
 
     protected function setUp(): void
@@ -70,6 +78,7 @@ class SalesTraceChainTest extends TestCase
         parent::setUp();
 
         $this->salesDesk = $this->userWith('Sales Desk', ['production.view', 'production.manage', 'sales.view', 'sales.manage']);
+        $this->storeDesk = $this->userWith('Store Desk', ['production.view', 'inventory.manage']);
         $this->asUser($this->salesDesk);
 
         $this->bottle = Item::create(['sku' => 'BTL-500', 'name' => '500ml PET Bottle', 'uom' => 'Nos', 'tally_stock_item_guid' => 'itm-bottle']);
@@ -182,24 +191,36 @@ class SalesTraceChainTest extends TestCase
     /** @param  list<string>  $cartons */
     private function dispatchByScan(SalesOrder $order, array $cartons): int
     {
-        return $this->postJson('/api/v1/sales/deliveries', [
+        $this->asUser($this->storeDesk);
+
+        $response = $this->postJson('/api/v1/sales/deliveries', [
             'sales_order_id' => $order->id,
             'warehouse_id' => $this->fg->id,
             'delivered_date' => '2026-08-10',
             'reference' => 'LR-1001',
             'carton_codes' => $cartons,
-        ])->assertSuccessful()->json('data.id');
+        ]);
+
+        $this->asUser($this->salesDesk);
+
+        return $response->assertSuccessful()->json('data.id');
     }
 
     private function dispatchTyped(SalesOrder $order, string $quantity): int
     {
-        return $this->postJson('/api/v1/sales/deliveries', [
+        $this->asUser($this->storeDesk);
+
+        $response = $this->postJson('/api/v1/sales/deliveries', [
             'sales_order_id' => $order->id,
             'warehouse_id' => $this->fg->id,
             'delivered_date' => '2026-08-11',
             'reference' => 'LR-1002',
             'lines' => [['sales_order_line_id' => $order->lines->first()->id, 'quantity' => $quantity]],
-        ])->assertSuccessful()->json('data.id');
+        ]);
+
+        $this->asUser($this->salesDesk);
+
+        return $response->assertSuccessful()->json('data.id');
     }
 
     private function draftInvoice(SalesOrder $order, string $quantity): int

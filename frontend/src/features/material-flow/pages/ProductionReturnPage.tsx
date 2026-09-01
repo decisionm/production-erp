@@ -229,7 +229,7 @@ export default function ProductionReturnPage({ embedded = false }: { embedded?: 
                     step={permitsFractions(row.uom) ? 0.001 : 1}
                     // A material a handover is standing on goes home through
                     // ITS line, in the expanded row — the owner settled on
-                    // 31-Aug-2026 (DEC-20260831-005, DEC-20260831-008) that
+                    // 31-Aug-2026 (DEC-20260831-005, DEC-20260831-012) that
                     // material which came out on a store issue returns
                     // against that exact issue, for open, partially returned
                     // and completed issues alike. The

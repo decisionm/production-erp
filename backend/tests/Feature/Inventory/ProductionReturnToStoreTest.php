@@ -162,7 +162,7 @@ class ProductionReturnToStoreTest extends TestCase
     // ---- (3) the bound: a handover's material is not residue ---------------
 
     /**
-     * SETTLED BY THE OWNER, 31-Aug-2026 (DEC-20260831-005, DEC-20260831-008).
+     * SETTLED BY THE OWNER, 31-Aug-2026 (DEC-20260831-005, DEC-20260831-012).
      * This refusal used to be a placeholder for Q69 — the build refused
      * because nobody had ruled, and refusing was the direction that could be
      * undone. The ruling went the same way: material that came out on a store
@@ -218,7 +218,7 @@ class ProductionReturnToStoreTest extends TestCase
     }
 
     /**
-     * COMPLETED IS NOT FINISHED — the half of DEC-20260831-008 that is easiest
+     * COMPLETED IS NOT FINISHED — the half of DEC-20260831-012 that is easiest
      * to lose. Completing a store issue moves no stock, so an issue marked
      * complete with quantity still outstanding is STILL holding material on
      * the floor, and that material still belongs to that document.

@@ -133,7 +133,7 @@ class FulfilmentControlViewTest extends TestCase
             ->assertJsonPath('data.0.blocker.team', 'Quality');
     }
 
-    /** Once Quality signs, the held stock becomes genuinely dispatchable and the ball moves to Sales. */
+    /** Once Quality signs, the held stock becomes genuinely dispatchable and the ball moves to the Store. */
     public function test_quality_approval_turns_held_stock_into_dispatchable_stock(): void
     {
         $this->seedStock('500');
@@ -150,7 +150,7 @@ class FulfilmentControlViewTest extends TestCase
             ->assertJsonPath('data.0.quality.state', 'approved')
             ->assertJsonPath('data.0.quality.approved_quantity', '200.0000')
             ->assertJsonPath('data.0.blocker.code', 'ready_to_dispatch')
-            ->assertJsonPath('data.0.blocker.team', 'Sales');
+            ->assertJsonPath('data.0.blocker.team', 'Store');
     }
 
     /** The gate the owner removed must be gone from the wire, not shown as unknown. */
