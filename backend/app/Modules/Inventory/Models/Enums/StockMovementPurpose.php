@@ -78,6 +78,30 @@ enum StockMovementPurpose: string
      */
     case Scrap = 'scrap';
 
+    /**
+     * Material Quality LOOKED AT and found undamaged, going from the quality
+     * hold back to a store as usable stock (DEC-20260901-003).
+     *
+     * The other half of the damaged return, and it needs its own name for the
+     * same reason its sibling does. Left as `unknown` — which is what it wrote
+     * until this case existed — the one movement that says "Quality cleared
+     * this" was indistinguishable from any untyped transfer, so the obvious
+     * question about the new hold ("what came out of it, and did Quality clear
+     * it or scrap it?") was answerable only by reading reference strings.
+     *
+     * NOT `return_from_production`, which is the nearest existing case and the
+     * wrong one twice over: this material is not coming from production, it is
+     * coming from the hold, and borrowing that purpose would put these rows
+     * inside every read of what the floor sent back — including the damaged
+     * one, which is the read the hold exists to serve.
+     *
+     * It rides a TRANSFER, not an issue, and that is the real difference from
+     * Scrap: released material is still the factory's and is still on the
+     * books, it has simply moved to where it can be issued from. Scrapped
+     * material leaves the balance.
+     */
+    case QualityRelease = 'quality_release';
+
     /** The ERP matched to Tally's closing position — a reconcile run. */
     case Reconcile = 'reconcile';
 

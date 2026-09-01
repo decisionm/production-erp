@@ -154,6 +154,26 @@ class DamagedReturnReachesQualityTest extends TestCase
         $this->assertSame('25.0000', $this->balance($this->store));
         $this->assertSame('15.0000', $this->balance($this->qualityHold));
 
+        // AND THE LEDGER SAYS WHY IT MOVED. The confirm branch beside this one
+        // stamps `scrap`; this one wrote `unknown` until the purpose existed,
+        // which left the single movement meaning "Quality cleared this"
+        // indistinguishable from any untyped transfer — on the one new
+        // location whose whole point is that somebody asks what came out of it.
+        $released = StockMovement::query()
+            ->where('item_id', $this->resin->id)
+            ->where('warehouse_id', $this->store->id)
+            ->where('type', StockMovementType::TransferIn->value)
+            ->orderByDesc('id')
+            ->firstOrFail();
+
+        $this->assertSame(StockMovementPurpose::QualityRelease, $released->purpose);
+        $this->assertSame('25.0000', bcadd((string) $released->quantity, '0', 4));
+
+        // It is NOT filed as a production return: that read is what the hold
+        // exists to serve, and these rows are not the floor sending anything
+        // back.
+        $this->assertNotSame(StockMovementPurpose::ReturnFromProduction, $released->purpose);
+
         $this->assertLedgerMatchesBalances('after releasing from quality hold');
     }
 

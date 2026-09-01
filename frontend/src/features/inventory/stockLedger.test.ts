@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
     movementPurposeLabel,
+    PURPOSE_TEXT,
+    PURPOSE_TONE,
     movementTypeTone,
     purchaseOrderIdIn,
     stockLedgerParams,
@@ -104,5 +106,37 @@ describe('the reference', () => {
     it('does not read a bare number as an order', () => {
         expect(purchaseOrderIdIn('PO 4')).toBeNull();
         expect(purchaseOrderIdIn('SPO #4')).toBeNull();
+    });
+
+    /**
+     * EVERY PURPOSE THE SERVER CAN SEND HAS AN EXPLICIT ENTRY HERE.
+     *
+     * ASSERTED ON THE MAPS, NOT ON THE RENDERED LABEL, and the difference is
+     * the whole test. `movementPurposeLabel` falls back to
+     * `purpose.replaceAll('_', ' ')`, so an unmapped purpose renders as
+     * "quality release" in the default grey — readable enough that a test on
+     * the OUTPUT passes while the entry is missing. (It did: the first version
+     * of this test asserted the text was not the raw enum value and went green
+     * against a map that had never heard of `quality_release`.) What is
+     * actually lost is the factory's own word for the act and its tone, so the
+     * keys are what get checked.
+     *
+     * The fallback stays — an ERP served by a newer backend must not lose an
+     * answer it was given — this pins that we do not RELY on it.
+     *
+     * Kept as a literal list rather than derived from the maps, so adding a
+     * purpose to a map cannot silently satisfy its own test.
+     */
+    it('has an explicit word and tone for every purpose the server sends', () => {
+        const serverPurposes = [
+            'opening', 'receipt', 'issue_to_production', 'return_from_production',
+            'consumption', 'output', 'dispatch', 'adjustment', 'scrap',
+            'quality_release', 'reconcile', 'unknown',
+        ];
+
+        for (const purpose of serverPurposes) {
+            expect(PURPOSE_TEXT, `no word for "${purpose}"`).toHaveProperty(purpose);
+            expect(PURPOSE_TONE, `no tone for "${purpose}"`).toHaveProperty(purpose);
+        }
     });
 });

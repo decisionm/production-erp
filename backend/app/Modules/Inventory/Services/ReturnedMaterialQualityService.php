@@ -157,6 +157,11 @@ class ReturnedMaterialQualityService
                     reference: 'Released from quality hold — not damaged',
                     notes: $notes,
                     createdBy: $recordedBy,
+                    // SAID OUT LOUD, like the confirm branch above it. Omitted,
+                    // recordTransfer files it as `unknown` and the ledger
+                    // cannot say why material left the hold — on the one new
+                    // location whose whole point is that somebody asks.
+                    purpose: StockMovementPurpose::QualityRelease,
                 );
             },
         );
