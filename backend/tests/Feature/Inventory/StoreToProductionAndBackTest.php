@@ -51,7 +51,13 @@ use Tests\TestCase;
  *     as a full one, which is the half of DEC-20260831-005 most easily lost.
  *  5. WHAT IS NOT RETURNED STAYS ON THE FLOOR. It is not consumed, not
  *     written off, and not moved by the day ending — and the NEXT request
- *     nets against it, which closes the lap back onto (1).
+ *     nets against it, which closes the lap back onto (1). Reaffirmed by the
+ *     owner as DEC-20260901-001: a partial return and a full one are BOTH
+ *     allowed, a full return is NOT mandatory, and the ERP must neither
+ *     require Production/WIP to be empty at the end of a shift nor flag a
+ *     floor for being non-empty. The partial return below is what that
+ *     permission looks like in arithmetic — 50 of the 80 stay out on the
+ *     floor and nothing refuses them.
  *
  * NOTHING HERE CREATES A BATCH OR POSTS A VOUCHER. The consumption leg asks
  * the resolver WHERE a batch would draw from; it does not run one. That is
@@ -315,8 +321,11 @@ class StoreToProductionAndBackTest extends TestCase
      * deliberate one rather than a side effect.
      *
      * A damaged return moves the same quantity to the same place as a good
-     * one. What the factory should then DO with damaged material is an open
-     * owner question; a test that asserted a hold here would have answered it.
+     * one. What the factory should then DO with damaged raw material, packing
+     * material or consumables is an open owner question (Q89, narrowed
+     * 01-Sep-2026); a test that asserted a hold here would have answered it.
+     * The settled half — damaged FINISHED GOODS become Scrap,
+     * DEC-20260901-002 — does not reach this door and is not asserted here.
      */
     public function test_a_damaged_return_is_recorded_as_damaged_and_moves_exactly_what_a_good_one_moves(): void
     {

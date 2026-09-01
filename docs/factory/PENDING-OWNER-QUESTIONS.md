@@ -2410,7 +2410,15 @@ stock ledger and into Tally.
 works today is waiting on it — resin and masterbatch are counted at the gate
 now, and packaging arrives exactly as it did. *Open since 2026-08-31.*
 
-## Q88 · Must unused material be returned to the Store every evening, or may it stay on the floor?
+## Q88 · Must unused material be returned to the Store every evening, or may it stay on the floor? — RESOLVED
+
+**Resolved 2026-09-01 by DEC-20260901-001: BOTH are allowed and a full
+return is NOT mandatory. The Store may return part or all; what is not
+returned stays in Production/WIP and carries forward as the next day's
+material on the floor.** The carry-forward reading below was the shipped
+behaviour and remains it, so nothing was built or withdrawn to satisfy the
+answer. Was open for less than a day — raised and answered 2026-09-01.
+
 
 The instruction of 31-Aug-2026 that opened the store/inventory workflow reads
 as a MANDATORY end-of-day return: unused material goes back to the Store at
@@ -2436,10 +2444,15 @@ an agent may not reverse a decision in force by reading a later message as one
 (AGENTS.md: discussion is not a decision). If you meant to change the rule,
 the answer becomes a new record superseding it.
 
-**Blocks:** any end-of-day enforcement. Nothing that works today is waiting on
-it. *Open since 2026-09-01.*
+**Blocked:** any end-of-day enforcement — which is now settled as: there is
+none to build.
 
-## Q89 · What should the Store do with material returned DAMAGED?
+## Q89 · What should the Store do with damaged RAW MATERIAL, PACKING MATERIAL or CONSUMABLES returned from Production?
+
+**Narrowed 2026-09-01.** The finished-goods half of this question is answered
+and is no longer asked here: damaged FINISHED GOODS become Scrap
+(DEC-20260901-002). What follows is the remainder, and the owner has said
+expressly that it is not decided and is not to be guessed.
 
 A production return now records the condition it came back in — `good` or
 `damaged`, per line, beside the quantity, the unit and the Store Issue it came
@@ -2452,7 +2465,8 @@ afterwards. The condition is recorded on the stock movement and shown; no
 balance, hold or refusal hangs off it. That is the same shape DEC-20260831-002
 took for the stock screen — record and show the fact, change no write path.
 
-**What is asked:** when a storekeeper takes back material marked damaged,
+**What is asked**, for damaged raw material, packing material and consumables
+coming back off the floor:
 
   · may the Store issue it again as it stands, or
   · should it be held from issue until Quality looks at it (the machinery
@@ -2461,9 +2475,17 @@ took for the stock screen — record and show the fact, change no write path.
   · should it leave stock altogether as a write-off, which is a Tally
     consequence and not only an ERP one?
 
+**THE FINISHED-GOODS ANSWER DOES NOT CARRY ACROSS.** Scrap is a produced
+output this factory already books inward per colour (FC-02); a wet sack of
+resin or a crushed carton is a purchased INPUT, and nothing says a damaged
+input becomes the same thing a damaged output does. DEC-20260901-002 says so
+in its own words. Reading it across would be exactly the guess the owner
+ruled out.
+
 Recording it without acting on it is the conservative direction: the evidence
 is being kept from today, so whichever answer comes back can be applied to
 what was written down. Guessing a hold would have answered this question.
 
-**Blocks:** any behaviour attached to the damaged state. Nothing that works
-today is waiting on it. *Open since 2026-09-01.*
+**Blocks:** any behaviour attached to the damaged state for these three
+categories. Nothing that works today is waiting on it. *Open since
+2026-09-01, narrowed the same day.*

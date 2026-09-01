@@ -34,7 +34,17 @@ namespace App\Modules\Inventory\Models\Enums;
  * identical. What happens NEXT to damaged material — whether the Store may
  * re-issue it, whether it waits for QA, whether it is written off — is a
  * factory decision about what this factory permits, and no agent may pick
- * one. It is asked in PENDING-OWNER-QUESTIONS.md.
+ * one. It is asked, narrowed, as Q89 in PENDING-OWNER-QUESTIONS.md.
+ *
+ * WHAT *IS* SETTLED IS THE OTHER CATEGORY, AND IT DOES NOT REACH THIS DOOR.
+ * Damaged FINISHED GOODS become Scrap (DEC-20260901-002). This enum is on the
+ * production-RETURN path, which carries raw material, packing material and
+ * consumables coming back off the floor — and the owner narrowed Q89 to
+ * exactly those three, expressly leaving them undecided. Scrap is a produced
+ * OUTPUT this factory books inward per colour (FC-02); a wet sack of resin is
+ * a purchased INPUT, and nothing says the two share a disposition. Reading
+ * the finished-goods answer across onto a return is the guess that was ruled
+ * out, so `damaged` still does nothing here.
  *
  * This is the same shape DEC-20260831-002 took for the stock screen: record
  * and show the fact, change no write path, and let the owner decide what the

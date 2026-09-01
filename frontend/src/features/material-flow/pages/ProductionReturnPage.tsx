@@ -41,9 +41,15 @@ import { formatQuantity, permitsFractions } from '../words';
  *
  * DAMAGED CHANGES NO ARITHMETIC TODAY, deliberately: the quantity moves to
  * the same store either way, and what the factory should then DO with damaged
- * material is an open owner question. So no warning, no refusal and no
- * disabled Return button hangs off this choice — a screen that acted on an
- * answer nobody has given would be picking one.
+ * raw material, packing material or consumables is an open owner question
+ * (Q89). So no warning, no refusal and no disabled Return button hangs off
+ * this choice — a screen that acted on an answer nobody has given would be
+ * picking one.
+ *
+ * Damaged FINISHED GOODS are settled — they become Scrap
+ * (DEC-20260901-002) — and that is deliberately NOT reflected here: finished
+ * goods do not come back through this door, and no scrap conversion flow
+ * exists to send them to.
  */
 const CONDITION_OPTIONS: { value: ReturnedQualityState; label: string }[] = [
     { value: 'good', label: 'Good' },
