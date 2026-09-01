@@ -24,6 +24,11 @@ class StockMovementResource extends JsonResource
             // Why it moved (StockMovementPurpose) — 'unknown' when the writer
             // did not say; null only on a row the backfill has not reached.
             'purpose' => $this->purpose?->value,
+            // NULL ON ALMOST EVERY ROW, and it stays null rather than
+            // becoming 'good': only a production return is asked what
+            // condition the material was in, and answering for a receipt or
+            // a consumption would make the ledger's damaged filter a lie.
+            'quality_state' => $this->quality_state?->value,
             'item' => ItemResource::make($this->whenLoaded('item')),
             'warehouse' => WarehouseResource::make($this->whenLoaded('warehouse')),
             'batch' => BatchResource::make($this->whenLoaded('batch')),

@@ -8,6 +8,7 @@ use App\Modules\Inventory\Http\Requests\UpdateWarehouseRequest;
 use App\Modules\Inventory\Http\Resources\WarehouseResource;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\ProductionWipLocationResolver;
+use App\Modules\Inventory\Services\QualityHoldLocationResolver;
 use App\Modules\Inventory\Services\WarehouseService;
 use App\Support\Configuration\Concerns\ServesConfigurationLifecycle;
 use App\Support\Configuration\Http\ConfigurationReasonRequest;
@@ -52,6 +53,15 @@ class WarehouseController extends Controller
                 // this is the same rule offered before the mistake instead
                 // of after it. Null when nothing resolves.
                 'production_wip_warehouse_id' => app(ProductionWipLocationResolver::class)->warehouseId(),
+                // AND WHICH ROW IS QUALITY HOLD (DEC-20260901-003), for the
+                // same two reasons: the returns screen keeps it out of the
+                // destination picker (a good return may never be sent to the
+                // hold), and names it as the destination of a damaged line so
+                // the row says where its material is actually going. Null when
+                // nothing resolves — which on live is the state today, and the
+                // screen must read that as "not configured" rather than
+                // printing an id.
+                'quality_hold_warehouse_id' => app(QualityHoldLocationResolver::class)->warehouseId(),
             ],
         ]);
     }

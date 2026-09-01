@@ -4,6 +4,7 @@ namespace App\Modules\Inventory\Models;
 
 use App\Models\User;
 use App\Modules\Inventory\Exceptions\StockLedgerAppendOnlyException;
+use App\Modules\Inventory\Models\Enums\ReturnedQualityState;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Enums\StockMovementType;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -25,7 +26,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * and it is meant to. Nothing in a request path may.
  */
 #[Fillable([
-    'item_id', 'warehouse_id', 'batch_id', 'serial_number_id', 'type', 'purpose', 'quantity', 'unit_cost',
+    'item_id', 'warehouse_id', 'batch_id', 'serial_number_id', 'type', 'purpose', 'quality_state',
+    'quantity', 'unit_cost',
     'reference', 'transfer_group', 'movement_date', 'notes', 'created_by',
 ])]
 class StockMovement extends Model
@@ -46,6 +48,11 @@ class StockMovement extends Model
         return [
             'type' => StockMovementType::class,
             'purpose' => StockMovementPurpose::class,
+            // Nullable on purpose and NOT defaulted here: a receipt or a
+            // consumption is not being asked this question, and casting a
+            // null to `good` would answer for them. Only the return path
+            // reads it, through ReturnedQualityState::fromNullable().
+            'quality_state' => ReturnedQualityState::class,
             'quantity' => 'decimal:4',
             'unit_cost' => 'decimal:4',
             'movement_date' => 'datetime',

@@ -41,6 +41,10 @@ class ProductionReturnController extends Controller
                         ? (int) $line['store_issue_line_id']
                         : null,
                     'quantity' => (string) $line['quantity'],
+                    // Raw, null included — ReturnedQualityState::fromNullable()
+                    // in the service is the single place a missing state
+                    // becomes `good`.
+                    'quality_state' => $line['quality_state'] ?? null,
                 ],
                 $data['lines'],
             ),

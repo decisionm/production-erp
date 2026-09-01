@@ -8,6 +8,7 @@ use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Services\ProductionWipLocationResolver;
+use App\Modules\Inventory\Services\QualityHoldLocationResolver;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\TallySync\Models\TallyStockSnapshot;
 use Illuminate\Support\Facades\DB;
@@ -106,6 +107,13 @@ class TallyStockReconcileService
         // and which godown it posts under. Read only, through Inventory's own
         // service — never its warehouse rows.
         private readonly ProductionWipLocationResolver $wip,
+        // AND WHERE MATERIAL RETURNED DAMAGED IS WAITING (DEC-20260901-003).
+        // A SECOND internal location of the same physical godown, and the
+        // same trap as Production/WIP: Tally never saw that material leave
+        // the store, so a naive comparison reads the hold as store drift and
+        // receipts a second copy of it back in. Read only, through
+        // Inventory's own service.
+        private readonly QualityHoldLocationResolver $qualityHold,
     ) {}
 
     /** The reference every movement of one reconcile carries. */
@@ -158,6 +166,13 @@ class TallyStockReconcileService
             // and nothing is folded anywhere.
             $wipIsItsOwnGodown = $wipWarehouse !== null && $wipGodown !== null && $wipGodown->id === $wipWarehouse->id;
 
+            // WHAT IS WAITING FOR QUALITY, read the same way and used
+            // differently — see the skip below for why it is not folded.
+            $qualityHoldWarehouse = $this->qualityHold->warehouse();
+            $held = $qualityHoldWarehouse === null
+                ? []
+                : $this->standingInProduction($qualityHoldWarehouse->id);
+
             $standing = $wipWarehouse === null || $wipIsItsOwnGodown
                 ? []
                 : $this->standingInProduction($wipWarehouse->id);
@@ -208,6 +223,36 @@ class TallyStockReconcileService
                         ->lockForUpdate()
                         ->value('quantity') ?? '0'
                 );
+
+                // MATERIAL WAITING FOR QUALITY IS NOT DRIFT EITHER, and it is
+                // SKIPPED rather than folded (DEC-20260901-003).
+                //
+                // Folding is what Production/WIP gets, and it is the better
+                // answer — but it is built for exactly ONE extra location:
+                // one `standing` map, one godown, one foldable line, one
+                // report block. Folding a second location correctly means
+                // reworking all four, and getting it wrong here does not
+                // fail loudly — it silently receipts a second copy of real
+                // material into the store, which is the exact bug the WIP
+                // fold exists to prevent.
+                //
+                // So this takes the direction this service already states for
+                // material it cannot place: report it with the quantity
+                // named, match nothing, move no stock. An item with material
+                // in quality hold is not reconciled until the hold is
+                // dispositioned, which for a factory that scraps or releases
+                // within the day is a short wait. Folding it properly is a
+                // deliberate follow-up, not something to reach by widening a
+                // condition.
+                $inQualityHold = $held[(int) $itemId] ?? '0.0000';
+
+                if (bccomp($inQualityHold, '0', 4) !== 0) {
+                    $skipped[] = $label.' — '.$inQualityHold.' is waiting for Quality in "'
+                        .($qualityHoldWarehouse?->name ?? '?').'" after coming back from production damaged. '
+                        .'Not matched: that difference is material the factory still holds, not store drift.';
+
+                    continue;
+                }
 
                 // MATERIAL ON THE FLOOR IS NOT DRIFT. Whatever this item has
                 // standing in Production/WIP under this godown belongs on the

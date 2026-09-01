@@ -77,6 +77,7 @@ describe('the movement purpose', () => {
         ['output', 'Output'],
         ['dispatch', 'Dispatch'],
         ['adjustment', 'Adjustment'],
+        ['scrap', 'Scrap'],
         ['reconcile', 'Reconcile'],
     ])('reads %s as "%s"', (purpose, text) => {
         expect(movementPurposeLabel(purpose)?.text).toBe(text);

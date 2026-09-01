@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
     CATEGORY_FACET_ALL,
+    CATEGORY_FACET_MATERIALS,
     catalogueEmptyText,
     CATEGORY_FACET_UNCLASSIFIED,
     categoryFacets,
@@ -60,6 +61,8 @@ describe('categoryFacets', () => {
         ).map((f) => f.key);
 
         expect(keys).toEqual([
+            // Materials leads: it is where the screen opens.
+            CATEGORY_FACET_MATERIALS,
             CATEGORY_FACET_ALL,
             'finished_good',
             'raw_material',
@@ -174,22 +177,45 @@ describe('remembering the category', () => {
         expect(readRememberedFacet()).toBe('packing_material');
     });
 
-    it('opens on All when nothing has been chosen', () => {
+    /**
+     * THE DEFAULT IS MATERIALS, NOT ALL — the item master opens without
+     * finished goods in it. That is the whole of the finished-goods change on
+     * this screen: nothing is archived or deleted, and "Finished goods" is
+     * still a facet one click away with its count on it.
+     */
+    it('opens on Materials when nothing has been chosen', () => {
         vi.stubGlobal('localStorage', fakeStorage());
 
-        expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
+        expect(readRememberedFacet()).toBe(CATEGORY_FACET_MATERIALS);
     });
 
-    it('forgets rather than stores when All is chosen', () => {
+    it('forgets rather than stores when the default is chosen', () => {
         const storage = fakeStorage();
         vi.stubGlobal('localStorage', storage);
 
         rememberFacet('raw_material');
+        rememberFacet(CATEGORY_FACET_MATERIALS);
+
+        // A browser that never chose and one that chose the default must
+        // behave alike. Storing the literal value would read back as a
+        // preference, not as null.
+        expect(storage.getItem(KEY)).toBeNull();
+        expect(readRememberedFacet()).toBe(CATEGORY_FACET_MATERIALS);
+    });
+
+    /**
+     * AND "ALL" IS NOW A STORED CHOICE. It was the sentinel for "no
+     * preference" only because it was the default; leaving it that way would
+     * mean a storekeeper who deliberately picked All found themselves back on
+     * Materials next time — the screen overruling them.
+     */
+    it('remembers All as a deliberate choice rather than forgetting it', () => {
+        const storage = fakeStorage();
+        vi.stubGlobal('localStorage', storage);
+
         rememberFacet(CATEGORY_FACET_ALL);
 
-        // A browser that never chose and one that chose All must behave alike.
-        // Storing the literal 'all' would read back as 'all', not as null.
-        expect(storage.getItem(KEY)).toBeNull();
+        expect(storage.getItem(KEY)).toBe(CATEGORY_FACET_ALL);
         expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
     });
 
@@ -200,7 +226,7 @@ describe('remembering the category', () => {
         storage.seed(KEY, 'obsolete_category');
         vi.stubGlobal('localStorage', storage);
 
-        expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
+        expect(readRememberedFacet()).toBe(CATEGORY_FACET_MATERIALS);
     });
 
     it('survives a browser that refuses storage entirely', () => {
@@ -218,7 +244,7 @@ describe('remembering the category', () => {
             },
         });
 
-        expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
+        expect(readRememberedFacet()).toBe(CATEGORY_FACET_MATERIALS);
         expect(() => rememberFacet('packing_material')).not.toThrow();
     });
 
@@ -236,7 +262,7 @@ describe('remembering the category', () => {
         });
 
         try {
-            expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
+            expect(readRememberedFacet()).toBe(CATEGORY_FACET_MATERIALS);
             expect(() => rememberFacet('packing_material')).not.toThrow();
         } finally {
             if (original !== undefined) {
@@ -250,7 +276,7 @@ describe('remembering the category', () => {
     it('survives a browser with no storage at all', () => {
         vi.stubGlobal('localStorage', undefined);
 
-        expect(readRememberedFacet()).toBe(CATEGORY_FACET_ALL);
+        expect(readRememberedFacet()).toBe(CATEGORY_FACET_MATERIALS);
         expect(() => rememberFacet('packing_material')).not.toThrow();
     });
 });

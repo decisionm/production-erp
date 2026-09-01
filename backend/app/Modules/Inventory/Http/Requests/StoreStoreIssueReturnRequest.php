@@ -3,10 +3,12 @@
 namespace App\Modules\Inventory\Http\Requests;
 
 use App\Modules\Inventory\Models\Enums\MeasurementType;
+use App\Modules\Inventory\Models\Enums\ReturnedQualityState;
 use App\Rules\PlainDecimal;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 /**
  * Unused material coming back from production to the store.
@@ -36,6 +38,13 @@ class StoreStoreIssueReturnRequest extends FormRequest
             'lines' => ['required', 'array', 'min:1'],
             'lines.*.store_issue_line_id' => ['required', 'integer', 'exists:store_issue_lines,id'],
             'lines.*.quantity' => ['required', 'numeric', 'max:99999999999', new PlainDecimal],
+
+            // WHAT CONDITION IT CAME BACK IN. Optional, and a missing value
+            // reads as `good` rather than being refused: every caller written
+            // before this column existed is recording a return of usable
+            // material, and refusing them would close the return door over a
+            // field the factory has only just been asked for.
+            'lines.*.quality_state' => ['nullable', 'string', Rule::in(ReturnedQualityState::values())],
         ];
     }
 
