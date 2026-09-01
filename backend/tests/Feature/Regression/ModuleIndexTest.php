@@ -244,6 +244,25 @@ class ModuleIndexTest extends TestCase
         $this->getJson('/api/v1/exports/runs')->assertOk();
     }
 
+    /**
+     * Reads that are DELIBERATELY open to more than one module, so the wall
+     * below cannot expect a 403 on them.
+     *
+     * `sales/deliveries`: the STORE performs the final dispatch action and
+     * Sales does not (DEC-20260901-001, resolving Q78). Both teams therefore
+     * need to READ deliveries — Sales to trace what left against its orders,
+     * the Store to see what it dispatched — so the read is
+     * `module:sales,inventory` while the POST is `module:inventory` alone.
+     *
+     * Skipping a URI here weakens the wall, so each one is re-asserted
+     * positively below rather than merely excused.
+     *
+     * @var array<string, string>
+     */
+    private const SHARED_READS = [
+        'sales/deliveries' => 'inventory',
+    ];
+
     // ---- the permission wall -----------------------------------------------
 
     #[DataProvider('modules')]
@@ -255,6 +274,10 @@ class ModuleIndexTest extends TestCase
 
         $notRefused = [];
         foreach (array_keys($lists) as $uri) {
+            if (isset(self::SHARED_READS[$uri])) {
+                continue;
+            }
+
             $status = $this->getJson('/api/v1/'.$uri)->getStatusCode();
             if ($status !== 403) {
                 $notRefused[] = "{$uri} => {$status}";
@@ -262,6 +285,23 @@ class ModuleIndexTest extends TestCase
         }
 
         $this->assertSame([], $notRefused, "{$module}: not refused without {$permissionModule}.view/.manage: ".implode(', ', $notRefused));
+    }
+
+    /**
+     * The other half of SHARED_READS: each skipped URI really IS readable by
+     * the module it was skipped for, and really is refused to someone holding
+     * neither. Without this, adding a URI to that list would be a way to
+     * switch a permission wall off silently.
+     */
+    public function test_a_deliberately_shared_read_is_open_to_its_other_module_and_shut_to_everyone_else(): void
+    {
+        foreach (self::SHARED_READS as $uri => $otherModule) {
+            Sanctum::actingAs($this->userHolding(["{$otherModule}.view"], 'Regression Sharer'));
+            $this->getJson('/api/v1/'.$uri)->assertOk();
+
+            Sanctum::actingAs($this->userHolding(['maintenance.view'], 'Regression Outsider'));
+            $this->getJson('/api/v1/'.$uri)->assertForbidden();
+        }
     }
 
     public function test_each_report_is_refused_without_its_own_module_permission(): void

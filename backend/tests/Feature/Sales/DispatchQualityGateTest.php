@@ -122,7 +122,7 @@ class DispatchQualityGateTest extends TestCase
     {
         $line = $this->heldLine('200', '200');
 
-        $this->actingWith(['sales.view', 'sales.manage']);
+        $this->actingWith(['inventory.manage']); // the STORE dispatches (DEC-20260901-001)
 
         $this->dispatch($line, '200')
             ->assertStatus(422)
@@ -136,7 +136,7 @@ class DispatchQualityGateTest extends TestCase
         $line = $this->heldLine('200', '200');
         $this->approveAsQuality($line);
 
-        $this->actingWith(['sales.view', 'sales.manage']);
+        $this->actingWith(['inventory.manage']); // the STORE dispatches (DEC-20260901-001)
 
         $this->dispatch($line, '200')->assertSuccessful();
 
@@ -150,12 +150,59 @@ class DispatchQualityGateTest extends TestCase
         // Quality looked at 120 of the 200.
         $this->approveAsQuality($line, '120');
 
-        $this->actingWith(['sales.view', 'sales.manage']);
+        $this->actingWith(['inventory.manage']); // the STORE dispatches (DEC-20260901-001)
 
         $this->dispatch($line, '200')->assertStatus(422);
 
         $this->dispatch($line, '120')->assertSuccessful();
         $this->assertSame('120.0000', (string) $line->fresh()->quantity_delivered);
+    }
+
+    // ---- who may dispatch --------------------------------------------------
+
+    /**
+     * DEC-20260901-001, resolving Q78: the STORE performs the final dispatch
+     * action and Sales does not.
+     *
+     * Two assertions, and the second is the one that makes the first mean
+     * something. It is not enough that Sales is refused — if the Store were
+     * refused too, dispatch would simply be broken and the first assertion
+     * would still pass.
+     *
+     * The Store dispatches on its OWN `inventory.manage`. It is deliberately
+     * NOT given sales.manage to do it: the owner's condition was that the
+     * Store gets the permission needed for dispatch and no wider Sales access,
+     * so being able to dispatch must unlock nothing about sales orders,
+     * customers or invoices.
+     */
+    public function test_sales_may_no_longer_dispatch_and_the_store_may(): void
+    {
+        $line = $this->heldLine('200', '200');
+        $this->approveAsQuality($line);
+
+        $this->actingWith(['sales.view', 'sales.manage']);
+        $this->dispatch($line, '200')->assertForbidden();
+        $this->assertSame('0.0000', (string) $line->fresh()->quantity_delivered, 'a refused dispatch moves nothing');
+
+        $this->actingWith(['inventory.manage']);
+        $this->dispatch($line, '200')->assertSuccessful();
+        $this->assertSame('200.0000', (string) $line->fresh()->quantity_delivered);
+    }
+
+    /** Dispatching must not become a back door into the rest of Sales. */
+    public function test_the_store_dispatching_gains_no_sales_access(): void
+    {
+        $line = $this->heldLine('200', '200');
+        $this->approveAsQuality($line);
+
+        $this->actingWith(['inventory.manage']);
+        $this->dispatch($line, '200')->assertSuccessful();
+
+        // The same login, immediately after dispatching, is still refused the
+        // Sales desk's own work.
+        $this->postJson('/api/v1/sales/sales-orders', [])->assertForbidden();
+        $this->postJson('/api/v1/sales/invoices', [])->assertForbidden();
+        $this->getJson('/api/v1/sales/customers')->assertForbidden();
     }
 
     // ---- withdrawal --------------------------------------------------------
@@ -179,7 +226,7 @@ class DispatchQualityGateTest extends TestCase
     {
         $line = $this->heldLine('200', '200');
         $this->approveAsQuality($line);
-        $this->actingWith(['sales.view', 'sales.manage']);
+        $this->actingWith(['inventory.manage']); // the STORE dispatches (DEC-20260901-001)
         $this->dispatch($line, '200')->assertSuccessful();
 
         $this->actingWith(['quality.manage']);

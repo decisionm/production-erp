@@ -378,13 +378,22 @@ describe('the Fulfilment Control entry (permissionModule as a list)', () => {
     });
 
     /**
-     * Widening ONE child must not smuggle the rest of the Sales menu in with
-     * it: a storekeeper still has no business on the customer, order or invoice
+     * Widening a child must not smuggle the rest of the Sales menu in with it:
+     * a storekeeper still has no business on the customer, order or invoice
      * screens, and the server would refuse them anyway.
+     *
+     * TWO children are now deliberately shared, not one. Deliveries joined the
+     * board when the STORE became the team that performs the final dispatch
+     * action (DEC-20260901-001, resolving Q78) — the store must reach the
+     * screen it dispatches from, and Sales keeps it to trace what left.
      */
-    it('is the only Sales child a store login gains', () => {
+    it('gains a store login exactly the two shared Sales children and no more', () => {
         const sales = buildNavItems(userWith(['inventory.view'])).find((group) => group.key === 'sales');
+        const keys = sales?.children?.map((child) => child.key) ?? [];
 
-        expect(sales?.children?.map((child) => child.key)).toEqual([BOARD]);
+        expect(keys).toEqual(['/sales/deliveries', BOARD]);
+        expect(keys).not.toContain('/sales/customers');
+        expect(keys).not.toContain('/sales/sales-orders');
+        expect(keys).not.toContain('/sales/invoices');
     });
 });

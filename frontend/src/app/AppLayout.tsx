@@ -318,7 +318,15 @@ export const allNavItems: readonly NavGroup[] = [
         children: [
             { key: '/sales/customers', label: 'Customers' },
             { key: '/sales/sales-orders', label: 'Sales Orders' },
-            { key: '/sales/deliveries', label: 'Deliveries' },
+            {
+                key: '/sales/deliveries',
+                label: 'Deliveries',
+                // The STORE dispatches, Sales only reads (DEC-20260901-001).
+                // Both therefore need the screen, so it is shown to either —
+                // mirroring the route, which is `module:sales,inventory` to
+                // read and `module:inventory` to post.
+                permissionModule: ['sales', 'inventory'],
+            },
             { key: '/sales/invoices', label: 'Invoices' },
             {
                 key: '/sales/fulfilment-control',

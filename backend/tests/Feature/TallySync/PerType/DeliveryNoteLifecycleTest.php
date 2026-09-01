@@ -55,7 +55,9 @@ class DeliveryNoteLifecycleTest extends PerTypeLifecycleTestCase
 
     private function postDelivery()
     {
-        return $this->asUser($this->staff('Dispatch Desk', ['sales.view', 'sales.manage']))
+        // The Store dispatches (DEC-20260901-001), so the dispatch desk holds
+        // `inventory.manage`; it keeps sales.view to read back what it sent.
+        return $this->asUser($this->staff('Dispatch Desk', ['sales.view', 'inventory.manage']))
             ->postJson('/api/v1/sales/deliveries', [
                 'sales_order_id' => $this->order->id,
                 'warehouse_id' => $this->fgStore->id,

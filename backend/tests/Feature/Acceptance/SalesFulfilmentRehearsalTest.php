@@ -122,8 +122,14 @@ class SalesFulfilmentRehearsalTest extends TestCase
         // quality approval and capped at the approved quantity
         // (DEC-20260831-006). The gate itself is DispatchQualityGateTest's
         // subject; here it is the precondition the owner's sequence puts
-        // between the store's hold and Sales' dispatch.
+        // between the store's hold and the store's dispatch.
         $this->approveQualityForDispatch($lineId, '600');
+
+        // ---- 5b. THE STORE, not Sales, performs the dispatch ---------------
+        // DEC-20260901-001 resolving Q78. The store holds the goods, so the
+        // store lets them go; the desk that sold them may only read what left.
+        // It dispatches on `inventory.manage` and is given no Sales permission.
+        $this->actingWith(['inventory.manage']);
 
         $this->postJson('/api/v1/sales/deliveries', [
             'sales_order_id' => $orderId,
@@ -146,7 +152,13 @@ class SalesFulfilmentRehearsalTest extends TestCase
         $this->assertCount(1, $issues, 'a dispatch writes ONE issue movement, never two');
         $this->assertSame('600.0000', (string) $issues->first()->quantity);
 
-        // ---- 6. ACCOUNTS bills it ------------------------------------------
+        // ---- 6. SALES bills it ---------------------------------------------
+        // The invoice is Sales' act and stays Sales': only the DISPATCH moved
+        // to the Store (DEC-20260901-001). A store login is refused here.
+        $this->postJson('/api/v1/sales/invoices', [])->assertForbidden();
+
+        $this->actingWith(['sales.view', 'sales.manage']);
+
         $invoiceId = $this->postJson('/api/v1/sales/invoices', [
             'sales_order_id' => $orderId,
             'invoice_date' => '2026-08-31',
@@ -211,12 +223,17 @@ class SalesFulfilmentRehearsalTest extends TestCase
         // the quality gate, so the sign-off is assumed rather than walked.
         $this->approveQualityForDispatch($lineId, '100');
 
+        // The Store dispatches (DEC-20260901-001), then Sales invoices.
+        $this->actingWith(['inventory.manage']);
+
         $this->postJson('/api/v1/sales/deliveries', [
             'sales_order_id' => $orderId,
             'warehouse_id' => $fg->id,
             'delivered_date' => '2026-08-31',
             'lines' => [['sales_order_line_id' => $lineId, 'quantity' => '100']],
         ])->assertSuccessful();
+
+        $this->actingWith(['sales.view', 'sales.manage']);
 
         $invoiceId = $this->postJson('/api/v1/sales/invoices', [
             'sales_order_id' => $orderId,

@@ -70,7 +70,9 @@ class SalesDocumentShowTest extends TestCase
         parent::setUp();
 
         $this->desk = User::factory()->create(['name' => 'Sales Desk', 'is_active' => true]);
-        foreach (['production.view', 'production.manage', 'sales.view', 'sales.manage'] as $permission) {
+        // `inventory.manage` because this actor DISPATCHES: the Store performs the
+        // final dispatch action, not Sales (DEC-20260901-001, resolving Q78).
+        foreach (['production.view', 'production.manage', 'sales.view', 'sales.manage', 'inventory.manage'] as $permission) {
             Permission::findOrCreate($permission, 'web');
             $this->desk->givePermissionTo($permission);
         }

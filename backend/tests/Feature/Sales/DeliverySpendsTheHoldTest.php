@@ -83,7 +83,7 @@ class DeliverySpendsTheHoldTest extends TestCase
         // outright (DEC-20260831-006) and nothing below would ever run.
         $this->approveQualityForDispatch($line);
 
-        $this->actingWith(['sales.manage']);
+        $this->actingWith(['inventory.manage']); // the STORE dispatches (DEC-20260901-001)
 
         $this->postJson('/api/v1/sales/deliveries', [
             'sales_order_id' => $order->id,
@@ -117,7 +117,7 @@ class DeliverySpendsTheHoldTest extends TestCase
         // loaded from (DEC-20260831-006) — the mismatch below is still legal.
         $this->approveQualityForDispatch($line);
 
-        $this->actingWith(['sales.manage']);
+        $this->actingWith(['inventory.manage']); // the STORE dispatches (DEC-20260901-001)
 
         $this->postJson('/api/v1/sales/deliveries', [
             'sales_order_id' => $order->id,
@@ -169,7 +169,7 @@ class DeliverySpendsTheHoldTest extends TestCase
         // it is deliberately left unsigned.
         $this->approveQualityForDispatch($line);
 
-        $this->actingWith(['sales.manage']);
+        $this->actingWith(['inventory.manage']); // the STORE dispatches (DEC-20260901-001)
 
         // 40 out of the depot: spends no hold (S3).
         $this->postJson('/api/v1/sales/deliveries', [
@@ -207,7 +207,7 @@ class DeliverySpendsTheHoldTest extends TestCase
         // on the hold (DEC-20260831-006).
         $this->approveQualityForDispatch($line);
 
-        $this->actingWith(['sales.manage']);
+        $this->actingWith(['inventory.manage']); // the STORE dispatches (DEC-20260901-001)
 
         $this->postJson('/api/v1/sales/deliveries', [
             'sales_order_id' => $order->id,

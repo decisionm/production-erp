@@ -329,9 +329,11 @@ class FulfilmentControlService
                 ];
         }
 
-        // Covered by holds. Whether it MAY leave is now a recorded fact rather
-        // than an unknown: Quality signs the line off, and only then is it
-        // Sales' to dispatch. DEC-20260831-006.
+        // Covered by holds. Whether it MAY leave is a recorded fact rather than
+        // an unknown: Quality signs the line off (DEC-20260831-006), and only
+        // then is it the STORE's to dispatch (DEC-20260901-001, resolving Q78 —
+        // the team that physically has the goods performs the act; Sales does
+        // not dispatch and may only read what left).
         if (! $qualityApproved) {
             return [
                 'code' => 'awaiting_quality_approval',
@@ -343,8 +345,8 @@ class FulfilmentControlService
 
         return [
             'code' => 'ready_to_dispatch',
-            'summary' => 'Held in full and approved by Quality — Sales may dispatch it.',
-            'team' => 'Sales',
+            'summary' => 'Held in full and approved by Quality — the Store may dispatch it.',
+            'team' => 'Store',
             'severity' => 1,
         ];
     }

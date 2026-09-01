@@ -71,8 +71,11 @@ class DispatchRefusesQualityRejectedCartonTest extends TestCase
     {
         parent::setUp();
 
+        // The STORE dispatches (DEC-20260901-001, resolving Q78), so the
+        // dispatching login holds `inventory.manage` and no Sales permission
+        // at all — it needs production's for the carton scan surface only.
         $this->dispatcher = User::factory()->create(['name' => 'Ravi Dispatch', 'is_active' => true]);
-        foreach (['production.view', 'production.manage', 'sales.view', 'sales.manage'] as $permission) {
+        foreach (['production.view', 'production.manage', 'inventory.manage'] as $permission) {
             Permission::findOrCreate($permission, 'web');
             $this->dispatcher->givePermissionTo($permission);
         }

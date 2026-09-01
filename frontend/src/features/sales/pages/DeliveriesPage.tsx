@@ -11,6 +11,8 @@ import type { FinishedCarton } from '@/features/production/types';
 import { createDelivery, listDeliveries, listSalesOrders } from '@/features/sales/api';
 import { hasActiveFilters } from '@/features/sales/filters';
 import SalesDocumentDrawer, { TallyLinkCell } from '@/features/sales/SalesDocumentDrawer';
+import { hasManageAccess } from '@/features/auth/permissions';
+import { useAuthStore } from '@/features/auth/store';
 import SalesFilterBar from '@/features/sales/SalesFilterBar';
 import type { Delivery } from '@/features/sales/types';
 import { useSalesListParams } from '@/features/sales/useSalesListParams';
@@ -34,6 +36,15 @@ type DeliveryFormValues = z.infer<typeof deliverySchema>;
 
 export default function DeliveriesPage() {
     const [modalOpen, setModalOpen] = useState(false);
+
+    // THE STORE DISPATCHES, SALES READS (DEC-20260901-001, resolving Q78).
+    // Sales still needs this screen — it must be able to see and trace what
+    // left against its orders — so the page stays, and only the act goes.
+    // Hidden rather than disabled-with-a-reason: a button that explains why it
+    // cannot be pressed is a sentence the floor will not read, and the server
+    // refuses this with a 403 regardless.
+    const user = useAuthStore((state) => state.user);
+    const canDispatch = hasManageAccess(user, 'inventory');
     // DISPATCH BY SCAN: the cartons scanned for this delivery. When any are
     // present the server derives the lines from these physical boxes and the
     // typed quantities above are not sent at all.
@@ -169,7 +180,7 @@ export default function DeliveriesPage() {
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
                 <Typography.Title level={3} style={{ margin: 0 }}>Deliveries</Typography.Title>
-                <Button type="primary" onClick={() => setModalOpen(true)}>New Delivery</Button>
+                {canDispatch && <Button type="primary" onClick={() => setModalOpen(true)}>New Delivery</Button>}
             </Space>
 
             <SalesFilterBar kind="delivery" filters={filters} onChange={setFilters} />
