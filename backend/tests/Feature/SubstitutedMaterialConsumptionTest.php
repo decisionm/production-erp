@@ -3,7 +3,9 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Models\MaterialLot;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Production\Models\Bom;
@@ -357,6 +359,44 @@ class SubstitutedMaterialConsumptionTest extends TestCase
         // the dropdown is deliberately stricter than the engine, which would
         // happily issue it negative (DEC-20260831-002's shape).
         $this->assertNotContains('100 Ml Tray', $names->all());
+    }
+
+    public function test_material_standing_in_incoming_qc_hold_is_never_offered(): void
+    {
+        $this->actAsSupervisor(['material-substitution.manage']);
+
+        StockBalance::create([
+            'item_id' => $this->spareTray->id,
+            'warehouse_id' => $this->wip->id,
+            'quantity' => '250.0000',
+        ]);
+
+        // DEC-20260825-001: bags in waiting_qc may not leave through a
+        // production completion's material consumption. StockMovementService
+        // refuses it under the balance lock, so offering it here would be a
+        // pick that 422s on submit.
+        $lot = MaterialLot::create([
+            'item_id' => $this->spareTray->id,
+            'received_date' => '2026-09-01',
+            'bag_count' => 1,
+            'total_received_kg' => '250.0000',
+        ]);
+        $lot->bags()->create([
+            'barcode' => 'BAG-QC-1',
+            'original_kg' => '250.0000',
+            'remaining_kg' => '250.0000',
+            'status' => MaterialBagStatus::WaitingQc,
+            'current_warehouse_id' => $this->wip->id,
+        ]);
+
+        $names = collect(
+            $this->getJson('/api/v1/production/shift-production-entries/substitute-materials')
+                ->assertOk()
+                ->json('data')
+        )->pluck('name');
+
+        // The whole quantity is held, so nothing is free to issue.
+        $this->assertNotContains('200 Ml Brute Tray', $names->all());
     }
 
     public function test_a_negative_wip_balance_is_a_discrepancy_and_is_never_offered(): void

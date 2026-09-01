@@ -143,6 +143,40 @@ test('the committed fixture carries no purchase rate — FC-06, and it must stay
     }
 });
 
+test('no element other than a quantity or a name carries a figure at all', () => {
+    // The class, not two names. Tally scatters money across BASICRATE*,
+    // CLASSRATE, DISCOUNT and the additional-cost lists, and a refresh from a
+    // richer voucher could reintroduce a rate under an element this file has
+    // never seen. So the rule is stated positively: only quantities and names
+    // may carry a non-zero number.
+    const allowed = /QTY$|^STOCKITEMNAME$|^BATCHNAME$|^GODOWNNAME$|^VOUCHERNUMBER$|^NARRATION$/;
+
+    const leaked = [];
+    for (const m of REAL.matchAll(/<([A-Z][A-Z0-9.]*)>([^<]*[1-9][0-9]*\.[0-9]+[^<]*)<\/\1>/g)) {
+        if (!allowed.test(m[1])) {
+            leaked.push(`${m[1]} = ${m[2].trim()}`);
+        }
+    }
+
+    assert.deepEqual(leaked, [], `money may have leaked into the fixture:\n${leaked.join('\n')}`);
+});
+
+test('the fixture names no supplier and no ledger — the other half of FC-06', () => {
+    // FC-06 protects supplier identity as well as rates. A Stock Journal
+    // should carry neither; assert it rather than assume it.
+    assert.doesNotMatch(REAL, /<LEDGERNAME>/);
+    assert.doesNotMatch(REAL, /<PARTYNAME>/);
+    assert.doesNotMatch(REAL, /<PARTYLEDGERNAME>/);
+});
+
+test('the live company file is not identifiable from the fixture', () => {
+    // GUID / VCHKEY / REMOTEID were neutralised to all-zero forms.
+    for (const m of REAL.matchAll(/<GUID>([^<]*)<\/GUID>/g)) {
+        assert.match(m[1], /^0{8}-0{4}-0{4}-0{4}-0{12}-0{8}$/, `GUID leaked: ${m[1]}`);
+    }
+    assert.doesNotMatch(REAL, /REMOTEID="(?!0{8}-)/);
+});
+
 // ---------------------------------------------------------------------------
 // What we emit, held against it.
 // ---------------------------------------------------------------------------

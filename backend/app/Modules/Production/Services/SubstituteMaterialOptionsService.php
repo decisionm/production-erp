@@ -5,6 +5,7 @@ namespace App\Modules\Production\Services;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Services\ProductionAvailabilityService;
 use App\Modules\Inventory\Services\ProductionWipLocationResolver;
+use App\Modules\Inventory\Services\StockStateReader;
 use Illuminate\Support\Collection;
 
 /**
@@ -27,6 +28,20 @@ use Illuminate\Support\Collection;
  *    standing in a unit the item master no longer agrees with is reported but
  *    never counted (FC-03). An item whose only WIP figure is one of those two
  *    is not offered.
+ *
+ *  - NOTHING STANDING IN INCOMING-QC HOLD. DEC-20260825-001: material with
+ *    bags in waiting_qc may not leave a store's balance through ANY outflow
+ *    door, and a production completion's material consumption is named in
+ *    that decision explicitly. StockMovementService already refuses it under
+ *    the balance lock, so an item offered here on a held quantity is a pick
+ *    that 422s on submit — the broken control this class exists to avoid.
+ *    The owner's "any active stock item" set the BREADTH of the dropdown; it
+ *    did not repeal a decision about what may move.
+ *
+ *    StockStateReader is the read, not IncomingQcHold::lockAndSum: this is a
+ *    screen and must not take bag locks. It is deliberately the stricter of
+ *    the two — a bag with no store recorded counts against every store — so
+ *    it can only ever offer LESS than the writer would permit, never more.
  *
  *  - NOTHING THE ENGINE WOULD THEN 422 ON. completeBatch resolves a line's
  *    source warehouse itself when the client sends none, and answers 422 for
@@ -56,11 +71,13 @@ class SubstituteMaterialOptionsService
     public function __construct(
         private readonly ProductionAvailabilityService $availability,
         private readonly ProductionWipLocationResolver $wip,
+        private readonly StockStateReader $stockState,
     ) {}
 
     /**
      * @return list<array{item_id: int, name: string, sku: string|null, uom: string|null,
-     *     warehouse_id: int, usable_wip_quantity: string, unit_matches: bool}>
+     *     warehouse_id: int, usable_wip_quantity: string, qa_hold_quantity: string,
+     *     unit_matches: bool}>
      */
     public function options(?string $search = null): array
     {
@@ -84,9 +101,23 @@ class SubstituteMaterialOptionsService
 
         $availability = $this->availability->forItems($items->pluck('id')->all());
 
+        // The incoming-QC hold standing against each item in Production/WIP.
+        // Asked for every candidate in one read (this class never loops a
+        // query per row), against the usable figure as the on-hand side so
+        // the two subtractions agree about what they are subtracting from.
+        $qaHold = $this->stockState->forRows(
+            $items->map(fn (Item $item) => [
+                'item_id' => (int) $item->id,
+                'warehouse_id' => $wipId,
+                'quantity' => (string) ($availability->get($item->id)['usable'] ?? '0'),
+            ])->all(),
+        );
+
         return $items
-            ->map(function (Item $item) use ($availability, $wipId) {
+            ->map(function (Item $item) use ($availability, $wipId, $qaHold) {
                 $wip = $availability->get($item->id);
+
+                $state = $qaHold["{$item->id}|{$wipId}"] ?? null;
 
                 return [
                     'item_id' => (int) $item->id,
@@ -98,9 +129,13 @@ class SubstituteMaterialOptionsService
                     // actually is rather than from wherever a resolver would
                     // have guessed.
                     'warehouse_id' => $wipId,
-                    // The usable figure, by DEC-20260831-005's definition —
-                    // never the raw balance.
-                    'usable_wip_quantity' => (string) ($wip['usable'] ?? '0'),
+                    // free_to_issue, not the raw balance: DEC-20260831-005's
+                    // usable figure, less what is left
+                    // after the incoming-QC hold (and any customer
+                    // reservation) is taken off. This is the quantity the
+                    // floor may actually consume.
+                    'usable_wip_quantity' => (string) ($state['free_to_issue'] ?? ($wip['usable'] ?? '0')),
+                    'qa_hold_quantity' => (string) ($state['qa_hold'] ?? '0'),
                     // Surfaced rather than hidden: an item standing in a unit
                     // the master disagrees with is not offered, and the screen
                     // should be able to say why if it is asked.
