@@ -5,6 +5,7 @@ namespace App\Modules\Inventory\Services;
 use App\Modules\Inventory\Exceptions\IncomingQcHoldException;
 use App\Modules\Inventory\Exceptions\InsufficientStockException;
 use App\Modules\Inventory\Models\Batch;
+use App\Modules\Inventory\Models\Enums\ReturnedQualityState;
 use App\Modules\Inventory\Models\Enums\SerialNumberStatus;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Enums\StockMovementType;
@@ -240,6 +241,14 @@ class StockMovementService
         ?int $batchId = null,
         ?int $serialNumberId = null,
         ?StockMovementPurpose $purpose = null,
+        // WHAT CONDITION THE MATERIAL IS IN, and only the production-return
+        // path passes one. Null is left null rather than defaulted to `good`
+        // — a receipt and a consumption are not being asked this question,
+        // and stamping an answer on them would make the column unreadable.
+        // It changes no arithmetic here: the quantity, the balances and the
+        // pair of movements are identical whatever it says (see
+        // ReturnedQualityState for why that boundary is deliberate).
+        ?ReturnedQualityState $qualityState = null,
     ): array {
         // A TRANSFER TO THE PLACE IT ALREADY IS, IS NOT A TRANSFER.
         //
@@ -258,7 +267,7 @@ class StockMovementService
 
         $this->assertIdentityBelongsToItem($itemId, $batchId, $serialNumberId);
 
-        return DB::transaction(function () use ($itemId, $fromWarehouseId, $toWarehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId, $purpose) {
+        return DB::transaction(function () use ($itemId, $fromWarehouseId, $toWarehouseId, $quantity, $reference, $movementDate, $notes, $createdBy, $batchId, $serialNumberId, $purpose, $qualityState) {
             // The unit first, before either balance — see lockSerial().
             $this->lockSerial($serialNumberId);
 
@@ -285,6 +294,7 @@ class StockMovementService
                 'serial_number_id' => $serialNumberId,
                 'type' => StockMovementType::TransferOut,
                 'purpose' => $purpose ?? StockMovementPurpose::Unknown,
+                'quality_state' => $qualityState,
                 'quantity' => $quantity,
                 'unit_cost' => $costAtTransfer,
                 'reference' => $reference,
@@ -301,6 +311,7 @@ class StockMovementService
                 'serial_number_id' => $serialNumberId,
                 'type' => StockMovementType::TransferIn,
                 'purpose' => $purpose ?? StockMovementPurpose::Unknown,
+                'quality_state' => $qualityState,
                 'quantity' => $quantity,
                 'unit_cost' => $costAtTransfer,
                 'reference' => $reference,

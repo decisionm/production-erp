@@ -33,6 +33,7 @@ use App\Modules\Inventory\Http\Controllers\MaterialLotController;
 use App\Modules\Inventory\Http\Controllers\MaterialLotCostVersionController;
 use App\Modules\Inventory\Http\Controllers\MaterialRequestController;
 use App\Modules\Inventory\Http\Controllers\ProductionReturnController;
+use App\Modules\Inventory\Http\Controllers\ReturnedMaterialQualityController;
 use App\Modules\Inventory\Http\Controllers\SerialNumberController;
 use App\Modules\Inventory\Http\Controllers\StockBalanceController;
 use App\Modules\Inventory\Http\Controllers\StockMovementController;
@@ -717,6 +718,29 @@ Route::prefix('v1')->group(function () {
 
         Route::prefix('quality')->middleware('module:quality')->group(function () {
             Route::apiResource('incoming-inspections', IncomingInspectionController::class)->only(['index', 'store']);
+
+            /*
+             * MATERIAL THAT CAME BACK FROM PRODUCTION DAMAGED
+             * (DEC-20260901-003) — the quality desk's end of the return.
+             *
+             * UNDER /quality, NOT /inventory, and gated on module:quality:
+             * the owner's rule is that a damaged return goes to Quality
+             * INSPECTION, so deciding what becomes of it is the quality
+             * desk's act. The store's half — marking the line damaged on
+             * the way in — is on the return door and stays there.
+             *
+             * The controller and service live in Inventory because the thing
+             * being moved is stock, which is Inventory's to write; a service
+             * in Quality would have to reach into Inventory's models
+             * directly, which the module rule forbids.
+             *
+             * Append-only, like every other stock lifecycle here: both
+             * actions are POSTs that write a movement. There is no PUT and
+             * no DELETE — a wrong disposition is answered by a new movement.
+             */
+            Route::get('returned-material-holds', [ReturnedMaterialQualityController::class, 'index']);
+            Route::post('returned-material-holds/confirm-damage', [ReturnedMaterialQualityController::class, 'confirmDamage']);
+            Route::post('returned-material-holds/release', [ReturnedMaterialQualityController::class, 'release']);
 
             Route::apiResource('ncrs', NonConformanceReportController::class)->only(['index', 'store']);
             Route::post('ncrs/{ncr}/close', [NonConformanceReportController::class, 'close']);

@@ -195,7 +195,6 @@ export const allNavItems: readonly NavGroup[] = [
             // exists anywhere in the repo, and the header measurement above
             // says the opposite. Removed rather than left to be inherited.)
             { key: '/inventory/store-production', label: 'Store ↔ Production' },
-            { key: '/inventory/warehouses', label: 'Warehouses' },
             // The ledger, first-class since 27-Aug-2026. It was NOT in this
             // menu before, and the reason recorded here was true at the time:
             // /inventory/stock-movements was an API path with no page behind
@@ -217,6 +216,14 @@ export const allNavItems: readonly NavGroup[] = [
             // Neither screen moves stock and neither gates dispatch (Q27).
             { key: '/inventory/fulfilment', label: 'Store Fulfilment' },
             { key: '/inventory/planning', label: 'Fulfilment Planning' },
+            // WAREHOUSES IS SETUP AND SITS LAST, which is what this group's
+            // own header already said it should ("daily-use first, masters
+            // after") — it was sitting between Store ↔ Production and Stock
+            // Movements, splitting the storekeeper's daily run in half. It is
+            // opened when a location is added or retired, which on a
+            // one-godown factory (DEC-20260830-002) is close to never.
+            // Nothing else about the entry changed and the route is untouched.
+            { key: '/inventory/warehouses', label: 'Warehouses' },
             // Batches and Serial Numbers are NOT children here any more, and
             // they are not withdrawn either: both routes stay mounted and both
             // pages still work. They are per-item identity registers opened
@@ -353,6 +360,10 @@ export const allNavItems: readonly NavGroup[] = [
             // First in the group on purpose: it is the only one of these worked
             // every single shift, and the factory opens it each morning.
             { key: '/quality/production-qc', label: 'Production QC' },
+            // Damaged material back from production, waiting on this desk
+            // (DEC-20260901-003). Second in the group, beside the other
+            // inspection queues: it is a daily act, not configuration.
+            { key: '/quality/returned-material', label: 'Returned Material' },
             { key: '/quality/incoming-inspections', label: 'Incoming Inspections' },
             { key: '/quality/ncrs', label: 'Non-Conformance Reports' },
             { key: '/quality/capas', label: 'CAPA' },

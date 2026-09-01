@@ -86,6 +86,9 @@ const ROUTE_TABLE = [
     '/finance/journal-entries',
     '/finance/reports',
     '/quality/production-qc',
+    // Damaged material back from production, waiting on the quality desk
+    // (DEC-20260901-003).
+    '/quality/returned-material',
     '/quality/incoming-inspections',
     '/quality/ncrs',
     '/quality/capas',

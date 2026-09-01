@@ -69,7 +69,7 @@ export function movementTypeTone(type: string): string {
  * `null` is returned for the absent case so the caller renders a plain dash
  * rather than a tag advertising nothing.
  */
-const PURPOSE_TEXT: Record<string, string> = {
+export const PURPOSE_TEXT: Record<string, string> = {
     opening: 'Opening balance',
     receipt: 'Receipt',
     issue_to_production: 'Issued to production',
@@ -78,11 +78,13 @@ const PURPOSE_TEXT: Record<string, string> = {
     output: 'Output',
     dispatch: 'Dispatch',
     adjustment: 'Adjustment',
+    scrap: 'Scrap',
+    quality_release: 'Released by Quality',
     reconcile: 'Reconcile',
     unknown: 'Not stated',
 };
 
-const PURPOSE_TONE: Record<string, string> = {
+export const PURPOSE_TONE: Record<string, string> = {
     opening: 'default',
     receipt: 'green',
     issue_to_production: 'geekblue',
@@ -91,6 +93,11 @@ const PURPOSE_TONE: Record<string, string> = {
     output: 'cyan',
     dispatch: 'magenta',
     adjustment: 'gold',
+    scrap: 'red',
+    // GREEN like a receipt, not red like its sibling: material Quality cleared
+    // is back on the shelf and issuable. The two outcomes of one inspection
+    // must not read alike at a glance on the ledger.
+    quality_release: 'green',
     reconcile: 'blue',
     unknown: 'default',
 };

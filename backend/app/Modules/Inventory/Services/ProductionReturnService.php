@@ -2,6 +2,7 @@
 
 namespace App\Modules\Inventory\Services;
 
+use App\Modules\Inventory\Models\Enums\ReturnedQualityState;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\StockBalance;
@@ -107,6 +108,11 @@ class ProductionReturnService
     public function __construct(
         private readonly StockMovementService $stock,
         private readonly ProductionWipLocationResolver $wip,
+        // WHERE A DAMAGED RETURN GOES INSTEAD OF THE STORE (DEC-20260901-003).
+        // Resolved per return rather than held, and it REFUSES rather than
+        // falling back — see QualityHoldLocationResolver for why a fallback
+        // here would be the one outcome the rule forbids.
+        private readonly QualityHoldLocationResolver $qualityHold,
         private readonly StoreIssueService $issues,
         // DELIBERATELY the Sales grammar, not a second one, exactly as
         // ProcurementDocumentQuery took it: how a typed term matches a
@@ -293,22 +299,38 @@ class ProductionReturnService
 
                 $residues[$itemId] = bcsub($residues[$itemId], $quantity, 4);
 
+                $qualityState = ReturnedQualityState::fromNullable($line['quality_state'] ?? null);
+
+                // THE DESTINATION IS DECIDED BY THE CONDITION, not by the
+                // dropdown (DEC-20260901-003). A good line goes to the store
+                // the storekeeper picked; a damaged one goes to quality hold
+                // and the picked store is not consulted at all — it is the
+                // one place a person's choice must not be able to put
+                // damaged material back into issuable stock.
+                $destination = $this->destinationFor($qualityState, $toWarehouseId, "lines.{$index}");
+
                 $this->stock->recordTransfer(
                     itemId: $itemId,
                     fromWarehouseId: $wipId,
-                    toWarehouseId: $toWarehouseId,
+                    toWarehouseId: $destination,
                     quantity: $quantity,
-                    reference: 'Production return — not against a store issue',
+                    reference: $this->referenceFor($qualityState, 'Production return — not against a store issue'),
                     notes: $notes,
                     createdBy: $recordedBy,
                     purpose: StockMovementPurpose::ReturnFromProduction,
+                    qualityState: $qualityState,
                 );
 
                 $moved->push([
                     'item_id' => $itemId,
                     'quantity' => $quantity,
                     'store_issue_line_id' => null,
-                    'to_warehouse_id' => $toWarehouseId,
+                    // WHERE IT ACTUALLY WENT, which for a damaged line is not
+                    // the warehouse the caller asked for. The receipt must say
+                    // the true destination or the screen reports a move that
+                    // did not happen.
+                    'to_warehouse_id' => $destination,
+                    'quality_state' => $qualityState->value,
                 ]);
             }
 
@@ -326,6 +348,18 @@ class ProductionReturnService
                         fn (array $line) => [
                             'store_issue_line_id' => $line['store_issue_line_id'],
                             'quantity' => $line['quantity'],
+                            // Carried, not defaulted here: returnUnused reads
+                            // a missing key as `good` in one place, so the two
+                            // halves of the same return cannot disagree.
+                            'quality_state' => $line['quality_state'] ?? null,
+                            // AND WHERE IT GOES. returnUnused normally sends
+                            // material back to the store it was ISSUED from —
+                            // a fact about the original handover — and that is
+                            // exactly the destination a DAMAGED line must not
+                            // use. Resolved once, in lockAttributedLines, so
+                            // both doors refuse identically on an unconfigured
+                            // hold and neither re-decides it here.
+                            'to_warehouse_id' => $line['to_warehouse_id'],
                         ],
                         $issueLines,
                     ),
@@ -339,6 +373,10 @@ class ProductionReturnService
                         'quantity' => $line['quantity'],
                         'store_issue_line_id' => $line['store_issue_line_id'],
                         'to_warehouse_id' => $line['to_warehouse_id'],
+                        // Same reading of a missing key as the unattributed
+                        // half above, so the receipt a storekeeper gets back
+                        // says the same thing whichever door they used.
+                        'quality_state' => ReturnedQualityState::fromNullable($line['quality_state'] ?? null)->value,
                     ]);
                 }
             }
@@ -613,6 +651,42 @@ class ProductionReturnService
      * @param  array<int, array<string, mixed>>  $lines
      * @return array<int, array{index: int|string, quantity: string}>
      */
+    /**
+     * WHERE A RETURNED LINE ACTUALLY LANDS (DEC-20260901-003).
+     *
+     * `good` goes where the caller said. `damaged` goes to quality hold, and
+     * the caller's destination is not consulted — a damaged line may never
+     * reach issuable stock, and letting a payload name its own destination
+     * for one is the hole this method exists to close.
+     *
+     * IT REFUSES RATHER THAN FALLING BACK when no quality-hold location is
+     * configured. The refusal is attached to the LINE that caused it, so a
+     * storekeeper returning six materials is told which one stopped, and it
+     * offers the recoverable alternative (record it as good if it is not
+     * damaged) rather than only naming a setting they may not administer.
+     */
+    private function destinationFor(ReturnedQualityState $state, int $pickedWarehouseId, string $field): int
+    {
+        if ($state === ReturnedQualityState::Good) {
+            return $pickedWarehouseId;
+        }
+
+        return $this->qualityHold->warehouseOrFail($field)->id;
+    }
+
+    /**
+     * The ledger's own words for where the material went. A damaged return
+     * reads as a hand-off to Quality rather than as a plain return, because
+     * that is what it is — and the reference is what a person scanning the
+     * movement list sees before they read any column.
+     */
+    private function referenceFor(ReturnedQualityState $state, string $base): string
+    {
+        return $state === ReturnedQualityState::Damaged
+            ? $base.' — damaged, held for Quality'
+            : $base;
+    }
+
     private function attributedAsks(array $lines): array
     {
         $asks = [];
@@ -625,10 +699,37 @@ class ProductionReturnService
             }
 
             $quantity = bcadd((string) $line['quantity'], '0', 4);
+            $qualityState = ReturnedQualityState::fromNullable($line['quality_state'] ?? null);
 
-            $asks[$lineId] = isset($asks[$lineId])
-                ? ['index' => $asks[$lineId]['index'], 'quantity' => bcadd($asks[$lineId]['quantity'], $quantity, 4)]
-                : ['index' => $index, 'quantity' => $quantity];
+            if (! isset($asks[$lineId])) {
+                $asks[$lineId] = ['index' => $index, 'quantity' => $quantity, 'quality_state' => $qualityState];
+
+                continue;
+            }
+
+            // TWO ASKS AGAINST ONE HANDOVER LINE ARE ADDED UP — that is what
+            // this merge has always done, and it is right for a quantity. It
+            // is NOT right for a condition: 30 kg good and 20 kg damaged
+            // against the same line is not 50 kg of anything, and picking
+            // either answer would put a state on the ledger nobody wrote.
+            //
+            // Refused rather than resolved, because both readings are lossy
+            // and the storekeeper is the one who knows. The screen cannot
+            // produce this — it holds one condition per line — so this is the
+            // API door being honest, not a case anybody meets at the hatch.
+            if ($asks[$lineId]['quality_state'] !== $qualityState) {
+                throw ValidationException::withMessages([
+                    "lines.{$index}.quality_state" => 'That store issue line is returned twice on this document in '
+                        .'two different conditions. Send one line per condition, against its own store issue line, '
+                        .'so the ledger records which quantity came back in which state.',
+                ]);
+            }
+
+            $asks[$lineId] = [
+                'index' => $asks[$lineId]['index'],
+                'quantity' => bcadd($asks[$lineId]['quantity'], $quantity, 4),
+                'quality_state' => $qualityState,
+            ];
         }
 
         return $asks;
@@ -646,7 +747,7 @@ class ProductionReturnService
      * same column); this is the write side agreeing with it. A caller reaching
      * the API directly is the only way to get here.
      *
-     * @param  array<int, array{index: int|string, quantity: string}>  $asks
+     * @param  array<int, array{index: int|string, quantity: string, quality_state: ReturnedQualityState}>  $asks
      * @return array<int, array<int, array<string, mixed>>>
      */
     private function lockAttributedLines(array $asks, int $wipId): array
@@ -694,7 +795,22 @@ class ProductionReturnService
                 'store_issue_line_id' => $lineId,
                 'item_id' => (int) $line->item_id,
                 'quantity' => $ask['quantity'],
-                'to_warehouse_id' => (int) $line->from_warehouse_id,
+                // THE DESTINATION, DECIDED BY THE CONDITION (DEC-20260901-003).
+                // A good line goes home to the store it was issued FROM, which
+                // is what this door has always done and is a fact about the
+                // original handover rather than this screen's to redirect. A
+                // damaged one goes to quality hold instead, and refuses here —
+                // inside the lock, before any material moves — when none is
+                // configured.
+                'to_warehouse_id' => $this->destinationFor(
+                    $ask['quality_state'],
+                    (int) $line->from_warehouse_id,
+                    "lines.{$ask['index']}",
+                ),
+                // Carried from the ask, not re-read from the caller's payload:
+                // by here the payload has been grouped and merged, and reading
+                // it again would be reading a different line's answer.
+                'quality_state' => $ask['quality_state']->value,
             ];
         }
 

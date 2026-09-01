@@ -246,10 +246,14 @@ describe('the Inventory menu', () => {
             '/inventory/stock',
             '/inventory/barcode-labels',
             '/inventory/store-production',
-            '/inventory/warehouses',
             '/inventory/stock-movements',
             '/inventory/fulfilment',
             '/inventory/planning',
+            // WAREHOUSES LAST — it is setup, and the group's own header states
+            // the rule ("daily-use first, masters after"). It used to sit
+            // between Store ↔ Production and Stock Movements, splitting the
+            // storekeeper's daily run in half.
+            '/inventory/warehouses',
         ]);
     });
 

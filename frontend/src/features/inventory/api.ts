@@ -160,6 +160,13 @@ export type WarehousesPage = Paginated<Warehouse> & {
          * anyway (a purchase has not been "issued to production").
          */
         production_wip_warehouse_id?: number | null;
+        /**
+         * Where a DAMAGED production return goes instead of the store
+         * (DEC-20260901-003). Null means none is configured — on live that is
+         * the state today, and a damaged return is refused by the server
+         * until a person names the row.
+         */
+        quality_hold_warehouse_id?: number | null;
     };
 };
 

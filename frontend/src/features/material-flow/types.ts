@@ -327,6 +327,14 @@ export interface ProductionReturnable {
  * line goes home to the store it came out of, which is a fact about the
  * original handover and not this screen's to redirect.
  */
+/**
+ * What condition material came back in, mirroring the server's
+ * ReturnedQualityState. Optional on the wire: a payload that omits it is
+ * recorded as `good`, which is how every return written before the field
+ * existed reads.
+ */
+export type ReturnedQualityState = 'good' | 'damaged';
+
 export interface ProductionReturnPayload {
     to_warehouse_id: number;
     notes?: string | null;
@@ -334,13 +342,14 @@ export interface ProductionReturnPayload {
         item_id?: number | null;
         store_issue_line_id?: number | null;
         quantity: number;
+        quality_state?: ReturnedQualityState;
     }[];
 }
 
 export interface ReturnToStorePayload {
     received_by?: number | null;
     notes?: string | null;
-    lines: { store_issue_line_id: number; quantity: number }[];
+    lines: { store_issue_line_id: number; quantity: number; quality_state?: ReturnedQualityState }[];
 }
 
 /**

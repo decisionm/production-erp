@@ -52,6 +52,7 @@ import IncomingInspectionsPage from '@/features/quality/pages/IncomingInspection
 import InstrumentsPage from '@/features/quality/pages/InstrumentsPage';
 import NonConformanceReportsPage from '@/features/quality/pages/NonConformanceReportsPage';
 import ProductionQcPage from '@/features/quality/pages/ProductionQcPage';
+import ReturnedMaterialHoldsPage from '@/features/quality/pages/ReturnedMaterialHoldsPage';
 import SpcChartPage from '@/features/quality/pages/SpcChartPage';
 import SpcCharacteristicsPage from '@/features/quality/pages/SpcCharacteristicsPage';
 import BarcodeLabelsPage from '@/features/inventory/pages/BarcodeLabelsPage';
@@ -243,6 +244,16 @@ export default function App() {
                                     <Route path="/finance/journal-entries" element={<JournalEntriesPage />} />
                                     <Route path="/finance/reports" element={<ReportsPage />} />
                                     <Route path="/quality/production-qc" element={<ProductionQcPage />} />
+                                    {/* DAMAGED MATERIAL BACK FROM PRODUCTION
+                                        (DEC-20260901-003). The store marks a
+                                        return damaged and the server holds it
+                                        out of issuable stock; this is where
+                                        Quality says whether it becomes Scrap
+                                        or goes back to a store. Under /quality
+                                        because deciding that is this desk's
+                                        act — the API is gated on
+                                        module:quality, not inventory. */}
+                                    <Route path="/quality/returned-material" element={<ReturnedMaterialHoldsPage />} />
                                     <Route path="/quality/incoming-inspections" element={<IncomingInspectionsPage />} />
                                     <Route path="/quality/ncrs" element={<NonConformanceReportsPage />} />
                                     <Route path="/quality/capas" element={<CapasPage />} />
