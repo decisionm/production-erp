@@ -2,6 +2,8 @@
 
 namespace App\Modules\Production\Services;
 
+use App\Modules\Inventory\Models\Enums\ItemCategory;
+use App\Modules\Inventory\Models\Item;
 use App\Modules\Production\Models\Bom;
 use App\Modules\Production\Models\ProductionConfiguration;
 use App\Modules\Production\Models\ProductionStandard;
@@ -47,6 +49,9 @@ class ProductStandardsWorkspaceService
 
     public const VIEW_ALL = 'all';
 
+    /** How many uncovered finished goods one search will list. */
+    public const UNCONFIGURED_ITEM_LIMIT = 25;
+
     public function __construct(
         private readonly ProductReadinessService $readiness,
         private readonly ProductionStandardResolver $resolver,
@@ -72,7 +77,7 @@ class ProductStandardsWorkspaceService
 
     /**
      * @param  array<string, mixed>  $filters
-     * @return array{page: LengthAwarePaginator, summary: array{ready: int, incomplete: int, all: int}}
+     * @return array{page: LengthAwarePaginator, summary: array{ready: int, incomplete: int, all: int}, configuration_overlaps: mixed, unconfigured_items: array{data: list<array<string, mixed>>, total: int}}
      */
     public function workspace(array $filters = [], int $perPage = 25, int $page = 1): array
     {
@@ -115,7 +120,97 @@ class ProductStandardsWorkspaceService
             // simply picked one and no screen anywhere admitted a choice had
             // been made.
             'configuration_overlaps' => $this->configurations->overlappingApproved(),
+            // Finished goods the product master does not cover. NOT rows of
+            // this table and never merged into it: a standard is a record
+            // with figures, an unconfigured item is the absence of one, and
+            // paginating them together would put a row on screen that no
+            // action on it can act on.
+            'unconfigured_items' => $this->unconfiguredItems($filters),
         ];
+    }
+
+    /**
+     * The finished goods the product master DOES NOT COVER, for this search.
+     *
+     * WHY THIS EXISTS. Until it did, this endpoint could answer exactly one
+     * question — "of the standards that exist, which match?" — and the
+     * factory kept asking a different one. A finished good with no standard
+     * is not shown as incomplete, is not shown as archived, and is not shown
+     * at all; searching its Tally name returns nothing, and nothing on the
+     * screen distinguishes "this product is fine" from "this product has
+     * never been set up". That is how five 100ML Emcure Amber bottles sat in
+     * the item master with two standards between them and no screen said so.
+     *
+     * ONLY WHEN A SEARCH IS ACTIVE, and that is a scope decision, not an
+     * optimisation. This factory has 371 finished goods against ~106
+     * standards, and 173 items nobody has classified yet; listing every
+     * uncovered one unconditionally would bury a workspace the floor reads
+     * under a few hundred Tally leftovers that will never be moulded. A
+     * search is the person saying which product they mean.
+     *
+     * CATEGORY DECIDES, and only `finished_good` qualifies. That column is
+     * assigned by a person, never inferred — so an unclassified item that
+     * really is a bottle will NOT appear here. That is the honest failure:
+     * the alternative is guessing a factory value out of a name, which
+     * AGENTS.md forbids and which would put products on this list that the
+     * factory does not make.
+     *
+     * The list is capped. A two-letter search matching two hundred items is
+     * a person who has not finished typing, not a work queue, so the count
+     * is reported in full and the rows are not.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return array{data: list<array<string, mixed>>, total: int}
+     */
+    private function unconfiguredItems(array $filters): array
+    {
+        $search = trim((string) ($filters['search'] ?? ''));
+
+        if ($search === '') {
+            return ['data' => [], 'total' => 0];
+        }
+
+        // Every item_id any standard points at, archived standards INCLUDED.
+        // A soft-deleted standard is still a record of the product having
+        // been set up, and listing its item as "never configured" would send
+        // someone to create a duplicate of the row they archived.
+        $covered = ProductionStandard::withTrashed()
+            ->whereNotNull('item_id')
+            ->pluck('item_id');
+
+        $query = Item::query()
+            ->where('is_active', true)
+            ->where('category', ItemCategory::FinishedGood->value)
+            ->whereNotIn('id', $covered)
+            // The same two columns the standards search matches on, so one
+            // box searches one vocabulary and the two halves of the answer
+            // cannot disagree about what was asked.
+            ->where(fn ($q) => $q
+                ->where('name', 'like', "%{$search}%")
+                ->orWhere('sku', 'like', "%{$search}%"));
+
+        $total = (clone $query)->count();
+
+        $rows = $query
+            ->orderBy('name')
+            ->limit(self::UNCONFIGURED_ITEM_LIMIT)
+            ->get(['id', 'name', 'sku', 'nominal_weight_grams', 'standard_cavities', 'standard_cycle_time', 'tally_stock_item_guid'])
+            ->map(fn (Item $item): array => [
+                'item_id' => $item->id,
+                'name' => $item->name,
+                'sku' => $item->sku,
+                // What the item master ALREADY knows, so the person can see
+                // how much of the new standard is actually left to fill in
+                // rather than discovering it one required field at a time.
+                'nominal_weight_grams' => $item->nominal_weight_grams,
+                'standard_cavities' => $item->standard_cavities,
+                'standard_cycle_time' => $item->standard_cycle_time,
+                'in_tally' => $item->tally_stock_item_guid !== null,
+            ])
+            ->values()
+            ->all();
+
+        return ['data' => $rows, 'total' => $total];
     }
 
     private function view(mixed $requested): string

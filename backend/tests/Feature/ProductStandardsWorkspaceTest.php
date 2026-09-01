@@ -584,4 +584,113 @@ class ProductStandardsWorkspaceTest extends TestCase
         $this->assertSame(500, $row['packagings'][0]['nos_per_box']);
         $this->assertSame($row['packagings'][0]['id'], $row['resolved_packaging_id']);
     }
+
+    // ------------------------------- finished goods no standard covers (WS)
+
+    /**
+     * THE DEFECT THIS CLOSES, in the shape the factory reported it.
+     *
+     * Five 100ML Emcure Amber bottles sit in the item master; two have
+     * standards. Searching the Tally name of one of the other three returned
+     * nothing at all — not an incomplete row, not an archived one, nothing —
+     * so the screen could not distinguish "this product is fine" from "this
+     * product has never been set up", and the answer to "why is it not in
+     * product config?" was invisible.
+     */
+    public function test_a_searched_finished_good_with_no_standard_is_reported_beside_the_rows(): void
+    {
+        $configured = $this->item('B.100 ML Emcure Amber Pet Bottle-12.9gms WR', ['category' => 'finished_good']);
+        $this->standard('100ML EMCURE - RING', $configured);
+
+        $uncovered = $this->item('B.100 Ml Emcure Amber WOR Sangam', [
+            'category' => 'finished_good',
+            'nominal_weight_grams' => '12.9',
+        ]);
+
+        $body = $this->workspace(['view' => 'all', 'search' => 'emcure'])->assertOk()->json();
+
+        // The standard still answers as it always did...
+        $this->assertSame(['100ML EMCURE - RING'], array_column($body['data'], 'source_product_name'));
+
+        // ...and the product with no standard is now ADMITTED rather than
+        // silently absent.
+        $this->assertSame(1, $body['unconfigured_items']['total']);
+        $this->assertSame(
+            ['B.100 Ml Emcure Amber WOR Sangam'],
+            array_column($body['unconfigured_items']['data'], 'name'),
+        );
+        $this->assertSame($uncovered->id, $body['unconfigured_items']['data'][0]['item_id']);
+        // What the item master already knows, so the person can see how much
+        // of the new standard is actually left to fill in.
+        $this->assertSame('12.9000', $body['unconfigured_items']['data'][0]['nominal_weight_grams']);
+    }
+
+    /**
+     * Scope, not an optimisation. 371 finished goods against ~106 standards
+     * on the live master: listing every uncovered one unconditionally buries
+     * the workspace the floor reads.
+     */
+    public function test_nothing_is_listed_until_a_search_names_a_product(): void
+    {
+        $this->item('B.100 Ml Emcure Amber WOR Sangam', ['category' => 'finished_good']);
+
+        $body = $this->workspace(['view' => 'all'])->assertOk()->json();
+
+        $this->assertSame(['data' => [], 'total' => 0], $body['unconfigured_items']);
+    }
+
+    /**
+     * An ARCHIVED standard still covers its item. Listing it as never
+     * configured would send someone to create a duplicate of the row they
+     * deliberately archived.
+     */
+    public function test_an_archived_standard_still_counts_as_covering_its_item(): void
+    {
+        $item = $this->item('B.100 Ml Emcure Amber WOR Sangam', ['category' => 'finished_good']);
+        $this->standard('100ML EMCURE - SANGAM', $item)->delete();
+
+        $body = $this->workspace(['view' => 'all', 'search' => 'emcure'])->assertOk()->json();
+
+        $this->assertSame(0, $body['unconfigured_items']['total']);
+    }
+
+    /**
+     * CATEGORY DECIDES. Raw material, packing material and — deliberately —
+     * an item nobody has classified stay off this list. `category` is
+     * assigned by a person and never inferred, so the honest cost is that an
+     * unclassified bottle does not appear; the alternative is guessing a
+     * factory value out of a name to put products on the list that the
+     * factory does not make.
+     */
+    public function test_only_finished_goods_are_offered_and_never_an_unclassified_item(): void
+    {
+        $this->item('100ml Emcure Master Carton', ['category' => 'packing_material']);
+        $this->item('Emcure Resin Amber', ['category' => 'raw_material']);
+        $this->item('B.100 Ml Emcure Amber Unclassified', ['category' => null]);
+        $this->item('B.100 Ml Emcure Amber Retired', ['category' => 'finished_good', 'is_active' => false]);
+        $listed = $this->item('B.100 Ml Emcure Amber WOR Sangam', ['category' => 'finished_good']);
+
+        $body = $this->workspace(['view' => 'all', 'search' => 'emcure'])->assertOk()->json();
+
+        $this->assertSame([$listed->id], array_column($body['unconfigured_items']['data'], 'item_id'));
+    }
+
+    /**
+     * A two-letter search matching two hundred items is a person who has not
+     * finished typing, not a work queue: the count is reported in full and
+     * the rows are not.
+     */
+    public function test_the_list_is_capped_and_the_count_stays_honest(): void
+    {
+        $limit = \App\Modules\Production\Services\ProductStandardsWorkspaceService::UNCONFIGURED_ITEM_LIMIT;
+
+        foreach (range(1, $limit + 6) as $n) {
+            $this->item(sprintf('B.100 Ml Emcure Amber Variant %02d', $n), ['category' => 'finished_good']);
+        }
+
+        $body = $this->workspace(['view' => 'all', 'search' => 'emcure'])->assertOk()->json();
+
+        $this->assertCount($limit, $body['unconfigured_items']['data']);
+        $this->assertSame($limit + 6, $body['unconfigured_items']['total']);
+    }
 }

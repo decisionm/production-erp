@@ -84,6 +84,10 @@ class ProductionStandardController extends Controller
         return response()->json($result['page']->toArray() + [
             'summary' => $result['summary'],
             'configuration_overlaps' => $result['configuration_overlaps'],
+            // Finished goods no standard covers, for this search. Alongside
+            // the page rather than in it — see the service's own note on why
+            // they are never paginated together.
+            'unconfigured_items' => $result['unconfigured_items'],
         ]);
     }
 

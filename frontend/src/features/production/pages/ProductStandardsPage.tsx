@@ -51,6 +51,7 @@ import {
     PRODUCT_STANDARDS_PAGE_SIZES,
     saveProductConfigurationFigures,
     type StandardPackagingPayload,
+    type UnconfiguredFinishedGood,
     updateProductionConfiguration,
     updateStandardPackaging,
 } from '@/features/production/api';
@@ -1254,7 +1255,15 @@ function DerivedPerBox({ per, count, unit }: { per?: number; count?: number; uni
     );
 }
 
-function NewStandardModal({ onClose, initialName }: { onClose: () => void; initialName?: string }) {
+function NewStandardModal({
+    onClose,
+    initialName,
+    initialItem,
+}: {
+    onClose: () => void;
+    initialName?: string;
+    initialItem?: UnconfiguredFinishedGood | null;
+}) {
     const queryClient = useQueryClient();
     const [form] = Form.useForm<NewStandardForm>();
 
@@ -1321,8 +1330,6 @@ function NewStandardModal({ onClose, initialName }: { onClose: () => void; initi
                 second one that then has to be reconciled.
             </Typography.Paragraph>
 
-            <TallyItemPicker form={form} />
-
             {/* Opened from a blocked Start Batch: the product is already known,
                 so it arrives typed. Still editable — the workbook's wording and
                 the item master's are not always the same, and only a person can
@@ -1332,8 +1339,47 @@ function NewStandardModal({ onClose, initialName }: { onClose: () => void; initi
                 layout="vertical"
                 onFinish={submit}
                 requiredMark={false}
-                initialValues={initialName ? { source_product_name: initialName } : undefined}
+                // Opened for an uncovered finished good: its identity is
+                // already settled, and the figures the item master ALREADY
+                // holds are carried in rather than retyped. Cavities and
+                // cycle time stay blank when the master does not hold them —
+                // they are measurements, and a plausible default is how a
+                // wrong expected output reaches the floor.
+                initialValues={{
+                    ...(initialName ? { source_product_name: initialName } : {}),
+                    ...(initialItem
+                        ? {
+                              item_id: initialItem.item_id,
+                              ...(initialItem.nominal_weight_grams !== null
+                                  ? { unit_weight_grams: Number(initialItem.nominal_weight_grams) }
+                                  : {}),
+                              ...(initialItem.standard_cavities !== null
+                                  ? { cavities: initialItem.standard_cavities }
+                                  : {}),
+                              ...(initialItem.standard_cycle_time !== null
+                                  ? { cycle_time: Number(initialItem.standard_cycle_time) }
+                                  : {}),
+                          }
+                        : {}),
+                }}
             >
+                {/* INSIDE THE FORM, and that is the whole fix.
+
+                    This picker rendered a `Form.Item name="item_id"` OUTSIDE
+                    the `<Form>`, so the field bound to rc-field-form's default
+                    (no-op) context instead of this form's store. Two things
+                    followed, both silent: the confirmation line under the
+                    field reads `Form.useWatch('item_id', form)` and so could
+                    never appear however carefully a product was chosen, and
+                    `onFinish` never carried `item_id` at all — meaning
+                    `item_id: v.item_id ?? null` sent NULL every single time.
+                    Every standard created through this modal was created
+                    UNATTACHED, and the screen gave no sign of it.
+
+                    The horizontal label was the visible tell: outside the
+                    Form it could not inherit `layout="vertical"` either. */}
+                <TallyItemPicker form={form} />
+
                 <Form.Item
                     name="source_product_name"
                     label="Product name"
@@ -1859,7 +1905,10 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
     const [machineId, setMachineId] = useState<number | undefined>();
 
     const [attaching, setAttaching] = useState<ProductStandardsWorkspaceRow | null>(null);
-    const [adding, setAdding] = useState(false);
+    // Null when closed. `{ item: null }` is the plain "New product standard"
+    // button; `{ item }` is the same modal opened FOR a finished good the
+    // master does not cover, with its identity already chosen.
+    const [adding, setAdding] = useState<{ item: UnconfiguredFinishedGood | null } | null>(null);
     const [openRow, setOpenRow] = useState<ProductStandardsWorkspaceRow | null>(null);
     const [figures, setFigures] = useState<{ row: ProductStandardsWorkspaceRow; focus: FigureField } | null>(null);
 
@@ -1925,6 +1974,9 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
     const rows = useMemo(() => data?.data ?? [], [data]);
     const summary = data?.summary ?? { ready: 0, incomplete: 0, all: 0 };
     const total = data?.meta.total ?? 0;
+    // Only ever non-empty while a search is active — the server decides that,
+    // not this component, so the two cannot drift apart.
+    const unconfigured = data?.unconfigured_items ?? { data: [], total: 0 };
 
     // The drawer must show the CURRENT row, not the one that was clicked: a
     // save invalidates the list, and a gap list still naming a figure that has
@@ -1982,7 +2034,7 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                     </Col>
                 )}
                 <Col>
-                    <Button type="primary" onClick={() => setAdding(true)}>
+                    <Button type="primary" onClick={() => setAdding({ item: null })}>
                         New product standard
                     </Button>
                 </Col>
@@ -2170,6 +2222,53 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                     </Checkbox>
                 </Tooltip>
             </Space>
+
+            {/* PRODUCTS THIS PAGE USED TO LEAVE OUT ENTIRELY.
+
+                A finished good with no standard was not shown as incomplete,
+                not shown as archived, and not shown at all — so searching its
+                Tally name returned an empty table and nothing distinguished
+                "this product is fine" from "this product has never been set
+                up". That is how five 100ML Emcure Amber bottles sat in the
+                item master with two standards between them.
+
+                It sits directly above the grid, because it is the other half
+                of the answer to the search that was just typed. No blurb: a
+                count, the names, and the button that fixes each one. */}
+            {unconfigured.total > 0 && (
+                <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                    message={
+                        <Typography.Text strong>
+                            {unconfigured.total} finished good{unconfigured.total === 1 ? '' : 's'} matching &ldquo;
+                            {search}&rdquo; {unconfigured.total === 1 ? 'has' : 'have'} no standard
+                        </Typography.Text>
+                    }
+                    description={
+                        <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                            {unconfigured.data.map((i) => (
+                                <Space key={i.item_id} size={8} wrap>
+                                    <Button size="small" type="primary" onClick={() => setAdding({ item: i })}>
+                                        Add standard
+                                    </Button>
+                                    <Typography.Text>{i.name}</Typography.Text>
+                                    {!i.in_tally && <Tag color="orange">Tally mapping pending</Tag>}
+                                </Space>
+                            ))}
+                            {/* The count is the whole truth; the list is
+                                capped. Saying so beats a list that quietly
+                                stops at twenty-five. */}
+                            {unconfigured.total > unconfigured.data.length && (
+                                <Typography.Text type="secondary">
+                                    +{unconfigured.total - unconfigured.data.length} more — narrow the search
+                                </Typography.Text>
+                            )}
+                        </Space>
+                    }
+                />
+            )}
 
             {/* Figures line up column-wise across every cell of the grid. */}
             <div style={numeric}>
@@ -2544,8 +2643,12 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
             )}
             {adding && (
                 <NewStandardModal
-                    onClose={() => setAdding(false)}
-                    initialName={resumeItem?.name ?? undefined}
+                    // Remounted per target, so the form never opens holding
+                    // the product someone abandoned a moment ago.
+                    key={adding.item?.item_id ?? 'blank'}
+                    onClose={() => setAdding(null)}
+                    initialName={adding.item?.name ?? resumeItem?.name ?? undefined}
+                    initialItem={adding.item}
                 />
             )}
         </>
