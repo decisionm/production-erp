@@ -20,7 +20,9 @@ class ShiftMaterialConsumptionResource extends JsonResource
             // rule is that a substitution is never silent, and a line that
             // reached the floor as one but reads back as an ordinary
             // consumption on every later screen would be exactly that.
-            'is_substitution' => (bool) $this->is_substitution,
+            'is_substitution' => $this->substitutes_item_id !== null,
+            'substitutes_item_id' => $this->substitutes_item_id,
+            'substitutes_item' => ItemResource::make($this->whenLoaded('substitutesItem')),
             'substitution_reason' => $this->substitution_reason,
         ];
     }

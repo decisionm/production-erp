@@ -9,13 +9,23 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['shift_production_entry_id', 'item_id', 'warehouse_id', 'quantity_issued_kg', 'is_substitution', 'substitution_reason', 'created_by'])]
+#[Fillable(['shift_production_entry_id', 'item_id', 'warehouse_id', 'quantity_issued_kg', 'substitutes_item_id', 'substitution_reason', 'created_by'])]
 class ShiftMaterialConsumption extends Model
 {
-    /** @return array<string, string> */
-    protected function casts(): array
+    /**
+     * A line IS a substitution when it names what it stood in for — the same
+     * predicate StoreIssueLine uses, so both surfaces answer the question the
+     * same way (DEC-20260901-004).
+     */
+    public function isSubstitution(): bool
     {
-        return ['is_substitution' => 'boolean'];
+        return $this->substitutes_item_id !== null;
+    }
+
+    /** The item this line stood in for. */
+    public function substitutesItem(): BelongsTo
+    {
+        return $this->belongsTo(Item::class, 'substitutes_item_id');
     }
 
     public function shiftProductionEntry(): BelongsTo

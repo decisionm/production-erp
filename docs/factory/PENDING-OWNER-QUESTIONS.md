@@ -2519,3 +2519,61 @@ what was written down. Guessing a hold would have answered this question.
 
 **Blocked:** any behaviour attached to the damaged state for these three
 categories — now built. What remains open is the Tally half above.
+
+
+## Q90 · Three of the 34 Stock Journals in the factory's own export are not shift production. What are they, and how should the ERP treat them?
+
+**Raised 2026-09-01** while validating the production Stock Journal against the
+factory's own Tally export (`docs/tally-sync/2026-09-01-production-journal-validation.md`).
+The export is manifest entry `tally-testing-xml-2026-08-26`, read 01-Sep-2026:
+34 vouchers, all `VCHTYPE="Stock Journal"`, 732 inventory lines.
+
+Thirty-one are ordinary shift production and match FC-04 exactly. **Three are
+not, and the ERP has no rule for them:**
+
+| Voucher | Date | Shape |
+|---|---|---|
+| 114 | 2026-07-10 | OUT `PET Polyster Chips` 588.990 Kgs → IN `Pet Scrap` 588.990 Kgs |
+| 116 | 2026-07-21 | OUT `PET Polyster Chips` 6000.000 Kgs → IN `Pet Scrap` 6000.000 Kgs |
+| 115 | 2026-07-16 | IN `Plastic Bags Used` 328.0000 Nos — **no OUT side at all** |
+
+114 and 116 are equal-quantity, single-line-each-side journals that look like
+regrind or reclassification — chips becoming scrap with nothing produced. 115
+is one-sided: an inward line with no consumption against it, and the only IN
+line in the whole export that is neither a bottle nor `Pet Scrap`.
+
+**What is being asked**
+
+1. Are 114/116 a real, ongoing factory practice (regrind, reclassification, a
+   correction), or were they one-off adjustments? If they are practice, does
+   the ERP need to be able to record one?
+2. Is 115 correct? A Stock Journal with no consumption side is legitimate in
+   Tally, but the ERP has never emitted one, and whether the factory MEANS to
+   book inward-only adjustments this way is not something to infer from XML.
+3. `Plastic Bags Used` appears in no ERP flow. What is it, and does anything
+   need to consume or produce it?
+
+**Nothing here is a fact and nothing has been implemented.** The accountant's
+intent is not inferable from the file; these are reported exactly as found.
+
+**THE CASE IS HELD FAIL-CLOSED UNTIL THIS IS ANSWERED.** Concretely:
+
+- **Nothing reads Stock Journals inbound today.** `TransactionClassifier`
+  classifies only what the ERP itself enqueues (source `erp`);
+  `TallyVoucherXmlReader` reads Sales vouchers. So no code currently
+  classifies these three, and none may be added that guesses.
+- **Any future inbound Stock Journal reader must REFUSE a voucher of these
+  shapes rather than classify it** — a journal with no OUT side, or whose
+  every line is an equal-quantity reclassification, is not shift production
+  and must not be counted, matched or posted as such. Treating 115 as
+  production would book an inward quantity against no consumption; treating
+  114/116 as production would report 6.5 tonnes of scrap as a shift's output.
+- **Anything that counts "production vouchers" in this export must exclude
+  all three.** `tally-sync-agent/tests/stockJournalRealXml.test.js` pins the
+  shape difference so the exclusion is executable rather than remembered, and
+  the validation doc records it.
+
+The rule this protects is FC-04 (the shape of a production Stock Journal) and
+FC-02 (scrap is produced stock, booked inward) — 114/116 book scrap inward
+with no production behind it, which is the one case FC-02's evidence does not
+cover.

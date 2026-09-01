@@ -122,14 +122,14 @@ class CompleteBatchRequest extends FormRequest
             // AN OFF-PLAN LINE, DECLARED AS ONE. When a packing or
             // consumption material runs short the floor may add what it
             // actually reached for — but never as a line that looks planned.
-            // The flag makes it visibly distinct and the reason says why, in
-            // the person's own words; the service refuses the flag without
-            // the material-substitution.manage permission. Absent means
-            // false, so every existing caller is unchanged.
-            'material_consumptions.*.is_substitution' => ['sometimes', 'boolean'],
+            // DEC-20260901-004: the substitute line NAMES WHAT IT STANDS IN
+            // FOR AND WHY, both against the line. The service refuses it
+            // without the material-substitution.manage permission. Absent
+            // means an ordinary line, so every existing caller is unchanged.
+            'material_consumptions.*.substitutes_item_id' => ['sometimes', 'nullable', 'integer', 'exists:items,id'],
             'material_consumptions.*.substitution_reason' => [
-                'exclude_unless:material_consumptions.*.is_substitution,true',
-                'required', 'string', 'max:255',
+                'required_with:material_consumptions.*.substitutes_item_id',
+                'nullable', 'string', 'max:500',
             ],
 
             // Day-bin closing weight per material, same contract as
@@ -211,6 +211,7 @@ class CompleteBatchRequest extends FormRequest
             'active_cavities' => 'active cavities',
             'running_hours' => 'running hours',
             'qc_rejection_kg' => 'QC rejection kg',
+            'material_consumptions.*.substitutes_item_id' => 'material this line stood in for',
             'material_consumptions.*.substitution_reason' => 'reason for the substituted material',
             'packing_lines.*.boxes' => 'cartons on this line',
             'packing_lines.*.nos_per_box' => 'pieces per box on this line',

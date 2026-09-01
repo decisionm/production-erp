@@ -30,17 +30,25 @@ use Tests\TestCase;
  * substitute one product or packing item for another. Asked how wide the
  * dropdown should be, the owner answered: any active stock item.
  *
+ * DEC-20260901-004 is the owner's rule for a substitution ANYWHERE in the
+ * flow, and its worked example is the shape these tests encode: required 6,
+ * original actually used 5, alternate used 1, total actual 6. Store issue does
+ * this one document earlier (store_issue_lines, PR #71) — what the storekeeper
+ * HANDED OVER; this is what the machine actually ATE. Same rule, same columns.
+ *
  * "Never silently" is the load-bearing half, and it has three parts, each
  * pinned below:
  *
- *   NOT BY ANYONE   the flag needs material-substitution.manage, on the
- *                   same shape as production.override-fifo — a scoped
- *                   permission plus an explicit per-line flag, so the swap is
- *                   a recorded decision and not an accident.
- *   NOT UNSAID      the reason is required whenever the flag is set, and
- *                   travels with the row and onto the API resource, so a line
- *                   that reached the floor as a substitution never reads back
- *                   as an ordinary consumption.
+ *   NOT BY ANYONE   it needs material-substitution.manage, on the same shape
+ *                   as production.override-fifo — a scoped permission plus an
+ *                   explicit per-line declaration, so the swap is a recorded
+ *                   decision and not an accident. This is a who-may-RECORD
+ *                   rule, not the approver-above-the-recorder that
+ *                   DEC-20260901-004 expressly leaves undecided and unbuilt.
+ *   NOT UNSAID      the line NAMES WHAT IT STOOD IN FOR AND WHY — the two
+ *                   halves DEC-20260901-004 calls controlled — and both travel
+ *                   onto the API resource, so a line that reached the floor as
+ *                   a substitution never reads back as an ordinary one.
  *   NOT MERGED      the added line is stored, and posted to Tally, as its OWN
  *                   line under its OWN stock item. Two materials genuinely
  *                   left the floor; one summed row would name one of them as
@@ -159,7 +167,8 @@ class SubstitutedMaterialConsumptionTest extends TestCase
                     // the only place the floor's own material stands.
                     'warehouse_id' => $this->wip->id,
                     'quantity_issued_kg' => '10',
-                    'is_substitution' => true,
+                    // DEC-20260901-004: the line NAMES what it stood in for.
+                    'substitutes_item_id' => $this->tray->id,
                     'substitution_reason' => '100 Ml trays ran out at 14:20; finished the run on brute trays',
                 ], $substitutionOverrides),
             ],
@@ -208,7 +217,9 @@ class SubstitutedMaterialConsumptionTest extends TestCase
             ->where('item_id', $this->spareTray->id)
             ->firstOrFail();
 
-        $this->assertTrue($line->is_substitution);
+        $this->assertTrue($line->isSubstitution());
+        // What it stood in for is on the line, not inferred later.
+        $this->assertSame($this->tray->id, $line->substitutes_item_id);
         $this->assertSame('100 Ml trays ran out at 14:20; finished the run on brute trays', $line->substitution_reason);
         // WHO is already answered by the column the table has always carried.
         $this->assertSame($this->user->id, $line->created_by);
@@ -246,8 +257,11 @@ class SubstitutedMaterialConsumptionTest extends TestCase
         $this->assertStringContainsString('ran out', $substituted['substitution_reason']);
 
         // And an ordinary line still reads as one.
+        $this->assertSame($this->tray->id, $substituted['substitutes_item_id']);
+
         $planned = $lines->firstWhere(fn ($l) => $l['item']['name'] === 'Relpet');
         $this->assertFalse($planned['is_substitution']);
+        $this->assertNull($planned['substitutes_item_id']);
         $this->assertNull($planned['substitution_reason']);
     }
 
@@ -266,7 +280,8 @@ class SubstitutedMaterialConsumptionTest extends TestCase
         ])->assertOk();
 
         $line = ShiftProductionEntry::findOrFail($entryId)->materialConsumptions()->firstOrFail();
-        $this->assertFalse($line->is_substitution);
+        $this->assertFalse($line->isSubstitution());
+        $this->assertNull($line->substitutes_item_id);
         $this->assertNull($line->substitution_reason);
     }
 

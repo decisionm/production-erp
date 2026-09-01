@@ -824,20 +824,28 @@ class ShiftProductionEntryService
                         "material_consumptions.{$index}.warehouse_id",
                     )->id;
 
-                // AN OFF-PLAN LINE IS NEVER SILENT. The owner's rule (01-Sep-
-                // 2026) is that a short packing or consumption material may be
-                // covered by whatever the floor actually reached for — chosen
-                // from a dropdown of any active stock item — but that the swap
-                // must never look like a planned line afterwards. So the flag
-                // is carried onto the row, the reason with it, and the act
-                // needs a permission the way an out-of-order bag does.
+                // AN OFF-PLAN LINE IS NEVER SILENT. DEC-20260901-004 is the
+                // owner's rule for a substitution anywhere in the flow, and its
+                // worked example is the shape: required 6, original actually
+                // used 5, alternate used 1. The ORIGINAL line keeps its own
+                // short figure — writing it up to 6 would say the requirement
+                // was met by the original material, which is not what happened
+                // and is the whole reason to record a substitution.
                 //
-                // The line is stored SEPARATELY and never merged into the short
-                // one: two different materials genuinely left the floor, and a
-                // single summed row would name one of them as the other.
-                $isSubstitution = (bool) ($line['is_substitution'] ?? false);
+                // So the alternate is a SECOND line that NAMES WHAT IT STOOD IN
+                // FOR AND WHY — the two halves DEC-20260901-004 calls
+                // controlled — and recording one needs a permission the way an
+                // out-of-order bag does. Merging the two would put a quantity
+                // of one item against another item's Tally ledger.
+                //
+                // Store issue does the same thing one document earlier
+                // (store_issue_lines.substitutes_item_id, PR #71): that surface
+                // is what the storekeeper HANDED OVER, this one is what the
+                // machine actually ATE. One rule, one column shape, two
+                // documents.
+                $substitutesItemId = $line['substitutes_item_id'] ?? null;
 
-                if ($isSubstitution && ! $this->maySubstituteMaterial($completedBy)) {
+                if ($substitutesItemId !== null && ! $this->maySubstituteMaterial($completedBy)) {
                     throw SubstitutionNotPermittedException::forItem(
                         Item::find($line['item_id'])?->name ?? "item #{$line['item_id']}",
                     );
@@ -847,8 +855,8 @@ class ShiftProductionEntryService
                     'item_id' => $line['item_id'],
                     'warehouse_id' => $warehouseId,
                     'quantity_issued_kg' => $line['quantity_issued_kg'],
-                    'is_substitution' => $isSubstitution,
-                    'substitution_reason' => $isSubstitution ? ($line['substitution_reason'] ?? null) : null,
+                    'substitutes_item_id' => $substitutesItemId,
+                    'substitution_reason' => $substitutesItemId !== null ? ($line['substitution_reason'] ?? null) : null,
                     'created_by' => $completedBy,
                 ]);
 

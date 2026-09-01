@@ -14,15 +14,25 @@ use Spatie\Permission\Models\Permission;
  * material_consumptions row and looked, forever after, exactly like a planned
  * one — which is the silent substitution the owner's rule forbids.
  *
- * TWO COLUMNS, NOT THREE. The owner's answer (01-Sep-2026) is that the
- * dropdown may offer ANY active stock item, not a paired alternative for the
- * short one — so there is no reliable "substituted for" item to point at, and
- * a column inviting one would be filled with a guess. What the rule actually
- * demands is that the line be visibly distinct, attributed and reasoned:
+ * THE SAME TWO COLUMNS PR #71 PUTS ON store_issue_lines, deliberately.
+ * DEC-20260901-004 is the owner's rule for a substitution anywhere in the
+ * flow: "the substitute line must NAME WHAT IT STANDS IN FOR AND WHY: the
+ * item it substitutes for, and a reason, both recorded against the line."
+ * That surface is the STORE ISSUE — what the storekeeper handed over. This
+ * one is the PRODUCTION COMPLETION — what the machine actually ate. Two
+ * different documents, one rule, and therefore one column shape:
  *
- *   is_substitution       this line was added at completion, off-plan.
+ *   substitutes_item_id   the item this line stood in for. A line IS a
+ *                         substitution when, and only when, this is set —
+ *                         the same predicate StoreIssueLine uses.
  *   substitution_reason   why, in the person's own words. Required by
- *                         CompleteBatchRequest whenever the flag is set.
+ *                         CompleteBatchRequest whenever the item is named.
+ *
+ * A separate boolean was the first shape here and was WRONG: it recorded
+ * that a swap happened without recording what was swapped, which is half of
+ * what DEC-20260901-004 calls controlled. The owner's "any active stock item"
+ * (DEC-20260901-007) sets how WIDE the dropdown is; it does not excuse the
+ * line from naming what it replaced.
  *
  * WHO is already answered: shift_material_consumptions.created_by has carried
  * the completing user since the table was created.
@@ -45,8 +55,8 @@ use Spatie\Permission\Models\Permission;
  * migration must leave the permission existing on an instance that has not
  * re-seeded yet, and both calls are idempotent.
  *
- * NOTHING IS BACKFILLED. Existing rows get is_substitution = false, which is
- * the honest answer: nobody recorded a substitution on them, and inferring
+ * NOTHING IS BACKFILLED. Existing rows keep a null substitutes_item_id, which
+ * is the honest answer: nobody recorded a substitution on them, and inferring
  * one now from item names would be inventing history.
  */
 return new class extends Migration
@@ -54,8 +64,18 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('shift_material_consumptions', function (Blueprint $table) {
-            $table->boolean('is_substitution')->default(false)->after('quantity_issued_kg');
-            $table->string('substitution_reason', 255)->nullable()->after('is_substitution');
+            // restrictOnDelete matches item_id beside it, and matches
+            // store_issue_lines.substitutes_item_id: an item named by a
+            // substitution is part of that shift's history.
+            $table->foreignId('substitutes_item_id')
+                ->nullable()
+                ->after('item_id')
+                ->constrained('items')
+                ->restrictOnDelete();
+
+            $table->string('substitution_reason', 500)
+                ->nullable()
+                ->after('substitutes_item_id');
         });
 
         Permission::findOrCreate('material-substitution.manage', 'web');
@@ -64,7 +84,8 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('shift_material_consumptions', function (Blueprint $table) {
-            $table->dropColumn(['is_substitution', 'substitution_reason']);
+            $table->dropConstrainedForeignId('substitutes_item_id');
+            $table->dropColumn('substitution_reason');
         });
     }
 };

@@ -220,6 +220,48 @@ test('our voucher uses the same elements the real one does', () => {
     }
 });
 
+// ---------------------------------------------------------------------------
+// PENDING Q90 — the three vouchers that are NOT shift production.
+// ---------------------------------------------------------------------------
+
+/**
+ * Three of the export's 34 are not shift production, and what they ARE is an
+ * open owner question (Q90). Until it is answered the case is held FAIL-CLOSED:
+ * nothing may classify them as production, and anything counting production
+ * vouchers must exclude them.
+ *
+ * These tests pin the shapes so the exclusion is executable rather than
+ * remembered. The fixture is voucher 104 — a real production journal — so what
+ * is asserted is the POSITIVE shape a production voucher has, which is exactly
+ * the predicate a future inbound reader must require before treating any
+ * voucher as production.
+ */
+test('a production journal has BOTH sides — the predicate Q90 holds the line on', () => {
+    // Voucher 115 has an IN side and no OUT side at all. A reader that assumed
+    // both sides are populated would book an inward quantity against no
+    // consumption and call it a shift's output.
+    assert.ok(entries(REAL, 'IN').length > 0, 'production journal must produce something');
+    assert.ok(entries(REAL, 'OUT').length > 0, 'production journal must consume something');
+});
+
+test('a production journal is not an equal-quantity reclassification', () => {
+    // Vouchers 114 and 116 are chips OUT -> scrap IN at identical quantities,
+    // one line each side, nothing produced. Treating those as production would
+    // report 6.5 tonnes of scrap as a shift's output.
+    const inLines = entries(REAL, 'IN');
+    const outLines = entries(REAL, 'OUT');
+
+    const isReclassification =
+        inLines.length === 1 &&
+        outLines.length === 1 &&
+        itemOf(inLines[0]) === 'Pet Scrap' &&
+        /Chips|Polyster/i.test(itemOf(outLines[0]));
+
+    assert.equal(isReclassification, false);
+    // A real production journal produces bottles alongside its scrap.
+    assert.ok(inLines.map(itemOf).some((n) => /Pet Bottle/i.test(n)));
+});
+
 test('our voucher puts every item on the same side the real one put it', () => {
     const ours = rebuiltFromReal();
 
