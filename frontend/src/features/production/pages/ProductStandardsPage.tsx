@@ -1,6 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     Alert,
+    AutoComplete,
     Button,
     Checkbox,
     Col,
@@ -45,11 +46,13 @@ import {
     listAllMolds,
     listProductionStandards,
     listStandardItemCandidates,
+    listPackingMaterialMappings,
     listStandardMachineExceptions,
     listWorkCenters,
     machineLabel,
     PRODUCT_STANDARDS_PAGE_SIZES,
     saveProductConfigurationFigures,
+    type PackingMaterialMappingRow,
     type StandardPackagingPayload,
     type UnconfiguredFinishedGood,
     updateProductionConfiguration,
@@ -1255,6 +1258,80 @@ function DerivedPerBox({ per, count, unit }: { per?: number; count?: number; uni
     );
 }
 
+/**
+ * ONE PACKING SPEC, CHOSEN RATHER THAN REMEMBERED.
+ *
+ * These three fields were free text, and the codes they hold are not free
+ * text at all: each one is a KEY into the packing-material master, which says
+ * which Tally item that carton, tray or film actually is. A typo there is not
+ * a cosmetic problem — the spec silently maps to nothing, and the material
+ * never reaches the voucher. Nothing on the form gave the slightest hint that
+ * the codes already existed somewhere, let alone what they were.
+ *
+ * So the options are the master's own `spec_value`s for this kind, and each
+ * one shows the Tally item it resolves to — which is the answer to the
+ * question a person actually has ("which of these is the box I mean?").
+ *
+ * IT STAYS TYPEABLE, and that is deliberate. This is an AutoComplete, not a
+ * Select: a genuinely new carton size has to be enterable the first time it
+ * is used, and the master is maintained on another tab. Refusing an unknown
+ * code here would mean a new box blocks the standard — the packing tab is
+ * where that mapping gets made, and it can be made after this.
+ */
+function PackingSpecPicker({
+    kind,
+    placeholder,
+    value,
+    onChange,
+}: {
+    kind: PackingMaterialMappingRow['spec_kind'];
+    placeholder: string;
+    // Supplied by the enclosing Form.Item — this is a controlled field.
+    value?: string;
+    onChange?: (value: string) => void;
+}) {
+    const { data: mappings, isFetching } = useQuery({
+        queryKey: ['production', 'packing-material-mappings'],
+        queryFn: listPackingMaterialMappings,
+        staleTime: 5 * 60 * 1000,
+    });
+
+    const options = (mappings ?? [])
+        .filter((m) => m.spec_kind === kind)
+        .map((m) => ({
+            value: m.spec_value,
+            label: (
+                <Space size={6}>
+                    <span>{m.spec_value}</span>
+                    <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                        {m.item.name}
+                    </Typography.Text>
+                </Space>
+            ),
+        }));
+
+    return (
+        <AutoComplete
+            allowClear
+            value={value}
+            onChange={onChange}
+            options={options}
+            // Matched on the CODE, never on the Tally item name shown beside
+            // it: the label is a React node, and filtering a node is how a
+            // dropdown starts matching nothing.
+            filterOption={(input, option) =>
+                String(option?.value ?? '')
+                    .toLowerCase()
+                    .includes(input.toLowerCase())
+            }
+        >
+            {/* placeholder and maxLength belong to the rendered input, not to
+                the AutoComplete wrapping it. */}
+            <Input maxLength={64} placeholder={isFetching ? 'Loading codes…' : placeholder} />
+        </AutoComplete>
+    );
+}
+
 function NewStandardModal({
     onClose,
     initialName,
@@ -1470,17 +1547,17 @@ function NewStandardModal({
                 <Row gutter={12}>
                     <Col xs={24} sm={8}>
                         <Form.Item name="carton_spec" label="Carton">
-                            <Input maxLength={64} placeholder="e.g. 500ML ROUND" />
+                            <PackingSpecPicker kind="carton" placeholder="e.g. 500ML ROUND" />
                         </Form.Item>
                     </Col>
                     <Col xs={24} sm={8}>
                         <Form.Item name="tray_spec" label="Tray">
-                            <Input maxLength={64} placeholder="e.g. 835 X 610" />
+                            <PackingSpecPicker kind="tray" placeholder="e.g. 835 X 610" />
                         </Form.Item>
                     </Col>
                     <Col xs={24} sm={8}>
                         <Form.Item name="pouch_spec" label="Pouch">
-                            <Input maxLength={64} placeholder="e.g. HM 30.5*49" />
+                            <PackingSpecPicker kind="pouch_film" placeholder="e.g. HM 30.5*49" />
                         </Form.Item>
                     </Col>
                 </Row>
