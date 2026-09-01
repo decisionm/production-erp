@@ -5,6 +5,7 @@ namespace App\Modules\Production\Http\Requests;
 use App\Modules\Production\Http\Requests\Concerns\ValidatesDowntimeEvents;
 use App\Modules\Production\Models\ProductionStandardPackaging;
 use App\Modules\Production\Models\ShiftProductionEntry;
+use App\Modules\Production\Services\RunConsumableOptionsService;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
@@ -118,6 +119,12 @@ class CompleteBatchRequest extends FormRequest
             // vs store) — see FactoryWarehouseResolver::consumptionSource().
             'material_consumptions.*.warehouse_id' => ['sometimes', 'nullable', 'integer', 'exists:warehouses,id'],
             'material_consumptions.*.quantity_issued_kg' => ['required', 'numeric', 'gt:0'],
+            // WHY THIS RUN CONSUMED SOMETHING IT WAS NOT PLANNED ON. Required
+            // only for a line naming a material outside the run's expected
+            // set — see assertConsumptionsAreOnTheList(), which is where the
+            // list and the authority both live. A blank string is not a
+            // reason and is refused as an absent one.
+            'material_consumptions.*.added_reason' => ['sometimes', 'nullable', 'string', 'max:255'],
 
             // Day-bin closing weight per material, same contract as
             // HandoverRequest. This is what makes automatic consumption
@@ -219,7 +226,109 @@ class CompleteBatchRequest extends FormRequest
             if (is_array($downtime) && $downtime !== []) {
                 $this->validateDowntimeEvents($validator, $downtime, 'downtime_events');
             }
+
+            $consumptions = $this->input('material_consumptions');
+            if (is_array($consumptions) && $consumptions !== []) {
+                $this->assertConsumptionsAreOnTheList($validator, $consumptions);
+            }
         });
+    }
+
+    /**
+     * A CONSUMPTION LINE NAMES A MATERIAL FROM THE LIST, OR IT IS REFUSED.
+     *
+     * `exists:items,id` was the only guard here until now, which is to say
+     * there was none: a finished bottle, a scrap grade or a spare part could
+     * be booked as this run's own input and carried straight onto a Tally
+     * Stock Journal as one. RunConsumableOptionsService holds the two sets
+     * and the reasoning behind them; this method is only the refusal.
+     *
+     * Three outcomes per line:
+     *   · EXPECTED material — an ordinary line, nothing more is asked.
+     *   · ALLOWED but not expected — an ADDED line. It needs a reason, and the
+     *     person sending it needs `consumption-substitute.manage`. Refused
+     *     without either, so a substitution can never happen quietly.
+     *   · outside ALLOWED — refused outright, naming the row.
+     *
+     * ADDITIVE, ALWAYS. Nothing here (and nothing in the service behind it)
+     * reduces, clears or reassigns the line the added material stood in for.
+     * Both lines stand on the batch and both reach the voucher exactly as
+     * recorded — the owner's answer, 01-Sep-2026. One material silently
+     * standing in for another is the failure this whole path exists to
+     * prevent.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     */
+    private function assertConsumptionsAreOnTheList(Validator $validator, array $lines): void
+    {
+        $entry = $this->route('shift_production_entry');
+
+        if (! $entry instanceof ShiftProductionEntry) {
+            return;
+        }
+
+        $options = app(RunConsumableOptionsService::class);
+        $allowed = array_flip($options->allowedItemIds($entry));
+        $expectedIds = $options->expectedItemIds($entry);
+        $expected = array_flip($expectedIds);
+
+        // NOTHING PLANNED MEANS NOTHING TO DEPART FROM.
+        //
+        // A run with no BOM, no standard and no resolvable resin has an EMPTY
+        // expected set — and that is ordinary, not broken: the suggesters
+        // return null rather than guess between two candidates, and plenty of
+        // this catalogue's products carry no BOM at all. Reading every line of
+        // such a run as a substitution would demand a reason and a special
+        // permission for the resin the shift obviously ran on, and the floor
+        // would learn to type "n/a" into the box — which is worse than not
+        // asking, because then a real substitution reads like every other line.
+        //
+        // The list itself is still enforced below: a spare part or a finished
+        // bottle is refused here whether or not anything was planned. Only the
+        // reason-and-authority half stands down.
+        $planned = $expectedIds !== [];
+
+        // Asked ONCE, not per line: the answer cannot differ between rows of
+        // one request, and a permission check inside a loop is a query inside
+        // a loop.
+        $mayAdd = (bool) $this->user()?->can('consumption-substitute.manage');
+
+        foreach ($lines as $index => $line) {
+            $itemId = (int) ($line['item_id'] ?? 0);
+
+            if ($itemId <= 0 || isset($expected[$itemId])) {
+                continue;
+            }
+
+            if (! isset($allowed[$itemId])) {
+                $validator->errors()->add(
+                    "material_consumptions.{$index}.item_id",
+                    'This is not a material a production run may consume. Pick one from the materials list.',
+                );
+
+                continue;
+            }
+
+            if (! $planned) {
+                continue;
+            }
+
+            if (trim((string) ($line['added_reason'] ?? '')) === '') {
+                $validator->errors()->add(
+                    "material_consumptions.{$index}.added_reason",
+                    'This run was not planned to consume this material. Say why it did — the material it '
+                    .'stood in for stays on the batch either way.',
+                );
+            }
+
+            if (! $mayAdd) {
+                $validator->errors()->add(
+                    "material_consumptions.{$index}.item_id",
+                    'Adding a material this run was not planned on needs an authorised user. Ask a plant '
+                    .'manager or the office to record this line.',
+                );
+            }
+        }
     }
 
     /**

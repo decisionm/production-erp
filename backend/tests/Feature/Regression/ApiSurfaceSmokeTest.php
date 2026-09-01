@@ -315,6 +315,7 @@ class ApiSurfaceSmokeTest extends TestCase
             'api/v1/production/shift-production-entries/{shift_production_entry}/cartons' => "/api/v1/production/shift-production-entries/{$entry}/cartons",
             'api/v1/production/shift-production-entries/{shift_production_entry}/day-bin' => "/api/v1/production/shift-production-entries/{$entry}/day-bin",
             'api/v1/production/shift-production-entries/{shift_production_entry}/voucher-preview' => "/api/v1/production/shift-production-entries/{$entry}/voucher-preview",
+            'api/v1/production/shift-production-entries/{shift_production_entry}/consumable-materials' => "/api/v1/production/shift-production-entries/{$entry}/consumable-materials",
             'api/v1/production/shifts/{shift}' => "/api/v1/production/shifts/{$fx['shift']->id}",
             'api/v1/production/standards/{standard}' => "/api/v1/production/standards/{$fx['standard']->id}",
             'api/v1/production/standards/{standard}/packagings/{packaging}' => "/api/v1/production/standards/{$fx['standard']->id}/packagings/{$fx['packaging']->id}",

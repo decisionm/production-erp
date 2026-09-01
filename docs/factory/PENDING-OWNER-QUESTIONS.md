@@ -2519,3 +2519,55 @@ what was written down. Guessing a hold would have answered this question.
 
 **Blocked:** any behaviour attached to the damaged state for these three
 categories — now built. What remains open is the Tally half above.
+
+---
+
+## Q90 · Which materials may a production run consume at all — is the category enough?
+
+A completion line is now refused unless the material is on a controlled list,
+and a line naming a material the run was not planned on is recorded as an
+ADDED line with a reason and the person who authorised it. The list
+deliberately refuses only two things: an item recorded as a FINISHED GOOD, and
+the product the run is making.
+
+**It does NOT refuse a spare part, a tool, or an unclassified master**, and
+that is the open half rather than an oversight. DEC-20260827-001 classified
+the catalogue and then said in terms that the classification "does NOT switch
+on any enforcement ... which categories each document may use is Q59 and stays
+open, so no purchase order, sales order or material request begins refusing
+anything as a result". Twelve live masters are deliberately NULL, meaning "not
+recorded yet" and never "none of the above" (DEC-20260827-002). Narrowing the
+list to raw material, packing material and consumable would answer Q59 on a
+completion screen, in the owner's absence.
+
+**What is asked:** may a production completion refuse a material on its
+CATEGORY — specifically, may it refuse spares, tooling and unclassified
+masters as consumption inputs? Today an off-plan spare is accepted, with a
+reason and an authorised user recorded against it.
+
+**Blocks:** nothing that works today. It is a one-line widening of
+`RunConsumableOptionsService::NOT_AN_INPUT` on the day it is answered.
+*Open since 2026-09-01.*
+
+## Q91 · Who holds `consumption-substitute.manage`?
+
+Recording a consumption line the run was NOT planned on now needs
+`consumption-substitute.manage`, a new catalog permission. `PermissionSeeder`
+grants it to **Administrator only** — no Supervisor, Plant Manager or Accounts
+role holds it until a person grants it through the Roles screen.
+
+**Why this is asked rather than assumed.** It is an authority question, and
+the measured signal is real: four existing tests modelling perfectly ordinary
+runs (a masterbatch with no dosing row, a carton with no mapping, a seeded
+resin) had to be granted the permission to keep passing. The same will happen
+on the floor wherever BOMs, packing mappings and dosing rows are still
+incomplete — and this catalogue's are, on purpose (the packing seed "leaves
+the rest empty").
+
+**What is asked:** which role should hold it — Plant Manager, Accounts, both,
+or should the Supervisor role hold it too and the reason box alone carry the
+control?
+
+Two levers exist either way: grant the permission to a role, or widen what
+counts as planned in `RunConsumableOptionsService::expectedItemIds()`.
+*Open since 2026-09-01.*

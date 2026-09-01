@@ -129,13 +129,15 @@ class CommonResinEstimateTest extends TestCase
         }
     }
 
-    private function actAsSupervisor(): User
+    /** @param array<int, string> $extra */
+    private function actAsSupervisor(array $extra = []): User
     {
+        $permissions = array_merge(['production.view', 'production.manage'], $extra);
         $user = User::factory()->create(['is_active' => true]);
-        foreach (['production.view', 'production.manage'] as $permission) {
+        foreach ($permissions as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
-        $user->givePermissionTo(['production.view', 'production.manage']);
+        $user->givePermissionTo($permissions);
         Sanctum::actingAs($user);
 
         return $user;
@@ -447,7 +449,10 @@ class CommonResinEstimateTest extends TestCase
 
     public function test_a_piece_counted_material_never_appears_in_a_kilogram_estimate(): void
     {
-        $this->actAsSupervisor();
+        // This carton is in no BOM, no packing master and no dosing sheet, so
+        // the completion reads it as an ADDED line — hence the reason and the
+        // authority to record one (AddedConsumptionLineTest).
+        $this->actAsSupervisor(['consumption-substitute.manage']);
         $this->bag('BAG-A', '500');
         $this->load('BAG-A');
 
@@ -459,6 +464,7 @@ class CommonResinEstimateTest extends TestCase
             // 13 cartons, filed into a column named kg by the exceptions
             // repeater — a real row shape, not a contrived one.
             'quantity_issued_kg' => '13',
+            'added_reason' => 'No carton mapping on this product yet',
         ];
 
         $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", $figures)->assertOk();

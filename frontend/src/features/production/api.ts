@@ -934,6 +934,34 @@ export async function getVoucherPreview(entryId: number): Promise<VoucherPreview
     return data.data;
 }
 
+/**
+ * WHICH MATERIALS THIS RUN MAY BOOK, and which of them it was planned on.
+ *
+ * The same list the completion refuses against, so the drawer cannot offer a
+ * choice the server would then reject. `is_expected` false means the line is
+ * an ADDITION — it needs a reason, and `may_add_unplanned` says whether this
+ * user is allowed to record one at all.
+ */
+export interface RunConsumableMaterials {
+    expected_item_ids: number[];
+    options: {
+        item_id: number;
+        name: string;
+        sku: string | null;
+        uom: string | null;
+        category: string | null;
+        is_expected: boolean;
+    }[];
+    may_add_unplanned: boolean;
+}
+
+export async function getConsumableMaterials(entryId: number): Promise<RunConsumableMaterials> {
+    const { data } = await api.get<{ data: RunConsumableMaterials }>(
+        `/production/shift-production-entries/${entryId}/consumable-materials`,
+    );
+    return data.data;
+}
+
 export async function startBatch(payload: StartBatchPayload): Promise<ShiftProductionEntry> {
     const { data } = await api.post<{ data: ShiftProductionEntry }>('/production/shift-production-entries', payload);
     return data.data;
@@ -966,7 +994,19 @@ export interface CompleteBatchPayload {
      * than removed because the endpoint continues to accept an explicit id
      * from non-floor callers, and validates it when sent.
      */
-    material_consumptions?: { item_id: number; warehouse_id?: number; quantity_issued_kg: number }[];
+    material_consumptions?: {
+        item_id: number;
+        warehouse_id?: number;
+        quantity_issued_kg: number;
+        /**
+         * Why this run consumed a material it was not planned on — the 100 ml
+         * cartons ran out, so today's run went in a 90 ml box. Sent only for a
+         * line the run's plan does not cover; the server refuses such a line
+         * without it, and without `consumption-substitute.manage` on the user.
+         * The material it stood in for keeps its own line, untouched.
+         */
+        added_reason?: string;
+    }[];
     scraps?: { type: 'rejected_finished_good' | 'lumps'; quantity_nos?: number; quantity_kg?: number; scrap_reason_id?: number }[];
     /**
      * Day-bin closing weight per material. Same contract as handover — it

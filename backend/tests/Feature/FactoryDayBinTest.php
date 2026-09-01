@@ -277,7 +277,13 @@ class FactoryDayBinTest extends TestCase
 
     public function test_completing_a_batch_from_the_bin_decreases_the_bin_balance_by_exactly_the_kg_entered(): void
     {
-        $this->actingAsProduction();
+        // The masterbatch here is in no BOM, no packing master and no dosing
+        // sheet, so the completion reads its line as an ADDED one — hence the
+        // reason below and the authority to record it (AddedConsumptionLineTest).
+        $user = $this->actingAsProduction();
+        Permission::findOrCreate('consumption-substitute.manage', 'web');
+        $user->givePermissionTo('consumption-substitute.manage');
+
         app(FactoryDayBinService::class)->setWarehouseId($this->dayBin->id);
 
         $binResin = $this->stockInBin($this->resin, '1000.0000');
@@ -291,7 +297,7 @@ class FactoryDayBinTest extends TestCase
             'running_hours' => 8,
             'material_consumptions' => [
                 ['item_id' => $this->resin->id, 'warehouse_id' => $this->dayBin->id, 'quantity_issued_kg' => '124.7500'],
-                ['item_id' => $this->masterbatch->id, 'warehouse_id' => $this->dayBin->id, 'quantity_issued_kg' => '2.5000'],
+                ['item_id' => $this->masterbatch->id, 'warehouse_id' => $this->dayBin->id, 'quantity_issued_kg' => '2.5000', 'added_reason' => 'No dosing row for this colour yet'],
             ],
         ])->assertOk();
 

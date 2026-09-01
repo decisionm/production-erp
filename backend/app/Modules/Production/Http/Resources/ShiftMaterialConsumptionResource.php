@@ -16,6 +16,11 @@ class ShiftMaterialConsumptionResource extends JsonResource
             'item' => ItemResource::make($this->whenLoaded('item')),
             'warehouse' => WarehouseResource::make($this->whenLoaded('warehouse')),
             'quantity_issued_kg' => $this->quantity_issued_kg,
+            // A line the run was not planned on says so on its own row. Null
+            // on every ordinary line — an expected material needs no reason
+            // and nobody's authority.
+            'added_reason' => $this->added_reason,
+            'added_by' => $this->added_by === null ? null : (int) $this->added_by,
         ];
     }
 }

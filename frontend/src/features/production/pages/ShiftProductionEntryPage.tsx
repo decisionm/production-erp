@@ -37,6 +37,7 @@ import {
     createShiftStockCount,
     findMaterialBagByBarcode,
     getBinBayAvailability,
+    getConsumableMaterials,
     getEntryDayBinSummary,
     getFactoryDayBin,
     listDowntimeReasons,
@@ -979,6 +980,13 @@ const completeBatchSchema = z.object({
     // the fields would have left two form values nothing fills and nothing
     // reads, waiting to be wired back into a payload by someone reading this
     // schema as the contract.
+    // WHY A RESIN OR MASTERBATCH THE RUN WAS NOT PLANNED ON. These two rows
+    // have their own pickers rather than living in the exception repeater, so
+    // they need their own reason fields — they reach the server as
+    // material_consumptions lines like any other, and are refused like any
+    // other. See addedReasonFor() for how the row decides to ask.
+    resin_added_reason: z.string().max(255, 'Max 255 characters').optional(),
+    mb_added_reason: z.string().max(255, 'Max 255 characters').optional(),
     resin_item_id: z.number().nullish(),
     resin_grams_per_bottle: z.number().min(0).nullish(),
     resin_kg: z.number().min(0).nullish(),
@@ -1001,6 +1009,12 @@ const completeBatchSchema = z.object({
             z.object({
                 item_id: z.number({ error: 'Item is required' }),
                 quantity_issued_kg: z.number().gt(0, 'Must be greater than 0'),
+                // Only asked for, and only sent, on a line the run was not
+                // planned on. Optional here because the SERVER decides which
+                // lines those are — it holds the plan, and a second copy of
+                // that judgement on this side would eventually disagree with
+                // it and refuse a line the server would have taken.
+                added_reason: z.string().max(255, 'Max 255 characters').optional(),
             }),
         )
         .optional(),
@@ -1682,6 +1696,22 @@ export default function ShiftProductionEntryPage() {
         if (completingEntryId === null) return;
         queryClient.invalidateQueries({ queryKey: ['production', 'scrap-reasons', 'all'] });
     }, [completingEntryId, queryClient]);
+    /**
+     * THE MATERIALS THIS RUN MAY BOOK, from the server that will refuse
+     * against them. Fetched when the completion drawer opens and not before —
+     * it is per-entry, and the list is only ever read inside that drawer.
+     *
+     * Absent (still in flight, or an older backend) is NOT read as an empty
+     * list: `consumableOptions` falls back to the full item list, which is
+     * exactly what this screen offered before the endpoint existed. A picker
+     * that empties itself because a read has not landed is how a supervisor
+     * ends up unable to complete a batch that is finished and packed.
+     */
+    const { data: consumableMaterials } = useQuery({
+        queryKey: ['production', 'consumable-materials', completingEntryId],
+        queryFn: () => getConsumableMaterials(completingEntryId as number),
+        enabled: completingEntryId !== null,
+    });
     // The GLOBAL downtime reason list — shared with Production Configuration
     // (same query key), so a reason saved from either screen appears in both.
     const { data: downtimeReasons } = useQuery({
@@ -1794,6 +1824,26 @@ export default function ShiftProductionEntryPage() {
     // Inactive items (retired demo/legacy masters) must not be selectable —
     // Tally rejects vouchers for items it doesn't know.
     const itemOptions = items?.data.filter((i) => i.is_active).map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
+    /**
+     * THE COMPLETION DRAWER'S MATERIAL PICKER — the server's own list, so the
+     * dropdown cannot offer a choice the completion would refuse.
+     *
+     * Planned materials sort first: those are the rows a supervisor reaches
+     * for on an ordinary run, and the rest need a reason typed beside them.
+     * Falls back to the whole item list while the read is in flight, which is
+     * what this picker showed before the endpoint existed — an empty picker
+     * would strand a finished, packed batch.
+     */
+    const consumableOptions = useMemo(() => {
+        if (consumableMaterials === undefined) return itemOptions;
+
+        return [...consumableMaterials.options]
+            .sort((a, b) => Number(b.is_expected) - Number(a.is_expected) || a.name.localeCompare(b.name))
+            .map((option) => ({ value: option.item_id, label: option.sku ? `${option.name} (${option.sku})` : option.name }));
+        // itemOptions is rebuilt each render from `items`; keying the memo on
+        // `items` rather than on it keeps this from recomputing every time.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [consumableMaterials, items]);
     // Which items the factory standards cover. Undefined coverage (still in
     // flight, or an older backend) is deliberately distinguished from empty
     // coverage below — see startItemOptions.
@@ -1836,10 +1886,45 @@ export default function ShiftProductionEntryPage() {
     // When the family matcher finds NOTHING on the live catalogue, fall back
     // to every active item (still searchable) — a scoped-but-empty dropdown
     // is a dead end that blocks the whole completion.
-    const resinOptions =
-        resinMatches.length > 0 ? resinMatches.map((i) => ({ value: i.id, label: itemLabel(i) })) : itemOptions;
-    const mbOptions =
-        items?.data.filter((i) => i.is_active && isMasterbatchItem(i)).map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
+    /**
+     * NARROWED TO WHAT THE RUN MAY ACTUALLY BOOK, once the server's list has
+     * landed. Both pickers below feed `material_consumptions` on the wire, so
+     * both are refused against the same list — and `resinOptions` in
+     * particular falls back to the WHOLE item list when no name matches, which
+     * would offer a finished bottle the completion now rejects.
+     *
+     * A no-op while the list is in flight, and a no-op for anything already on
+     * it: this only ever removes what the server would refuse anyway.
+     */
+    const onlyConsumable = useCallback(
+        (options: { value: number; label: string }[]) => {
+            if (consumableMaterials === undefined) return options;
+            const allowed = new Set(consumableMaterials.options.map((option) => option.item_id));
+
+            return options.filter((option) => allowed.has(option.value));
+        },
+        [consumableMaterials],
+    );
+    /**
+     * IS THIS MATERIAL OFF-PLAN? The server holds the plan and refuses against
+     * it; this only decides whether to ASK for the reason before submitting,
+     * so a supervisor is never handed a 422 naming a box the drawer does not
+     * render. Undefined (the list has not landed) asks nothing.
+     */
+    const isUnplannedMaterial = useCallback(
+        (itemId: number | null | undefined) =>
+            consumableMaterials !== undefined &&
+            itemId !== null &&
+            itemId !== undefined &&
+            !consumableMaterials.expected_item_ids.includes(itemId),
+        [consumableMaterials],
+    );
+    const resinOptions = onlyConsumable(
+        resinMatches.length > 0 ? resinMatches.map((i) => ({ value: i.id, label: itemLabel(i) })) : itemOptions,
+    );
+    const mbOptions = onlyConsumable(
+        items?.data.filter((i) => i.is_active && isMasterbatchItem(i)).map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [],
+    );
     const moldOptions =
         molds?.data.filter((m) => m.status === 'active').map((m) => ({ value: m.id, label: `${m.code} — ${m.name}` })) ?? [];
     // "Changed From" is a historical record of what just came out, not a
@@ -4381,13 +4466,20 @@ export default function ShiftProductionEntryPage() {
                 notes: entry.notes ?? undefined,
                 resin_item_id: resinLine?.item?.id ?? undefined,
                 resin_kg: toNum(resinLine?.quantity_issued_kg) ?? undefined,
+                resin_added_reason: resinLine?.added_reason ?? undefined,
                 mb_item_id: mbLine?.item?.id ?? undefined,
                 mb_kg: toNum(mbLine?.quantity_issued_kg) ?? undefined,
+                mb_added_reason: mbLine?.added_reason ?? undefined,
                 material_consumptions: otherLines
                     .filter((line) => line.item?.id != null && toNum(line.quantity_issued_kg) !== null)
                     .map((line) => ({
                         item_id: line.item!.id,
                         quantity_issued_kg: toNum(line.quantity_issued_kg) as number,
+                        // CARRIED THROUGH THE AMEND. An amend re-sends every
+                        // line, and the server refuses an added one without a
+                        // reason — dropping it here would make a correction of
+                        // the box count fail on the line that was fine.
+                        added_reason: line.added_reason ?? undefined,
                     })),
                 scraps: (entry.scraps ?? []).map((scrap) => ({
                     type: scrap.type,
@@ -4527,9 +4619,14 @@ export default function ShiftProductionEntryPage() {
                 resin_item_id,
                 resin_grams_per_bottle: _resinGramsPerBottle,
                 resin_kg,
+                // Lifted out of ...rest for the same reason the pickers are:
+                // they belong to their own consumption line, not to the
+                // completion's top level, and the endpoint has no such field.
+                resin_added_reason,
                 mb_item_id,
                 mb_grams_per_bottle: _mbGramsPerBottle,
                 mb_kg,
+                mb_added_reason,
                 running_hours,
                 qc_rejection_kg,
                 actual_cycle_time,
@@ -4609,10 +4706,18 @@ export default function ShiftProductionEntryPage() {
                 }));
             const consumptions = [
                 ...(resin_item_id && resin_kg && resin_kg > 0
-                    ? [{ item_id: resin_item_id, quantity_issued_kg: resin_kg }]
+                    ? [{
+                        item_id: resin_item_id,
+                        quantity_issued_kg: resin_kg,
+                        added_reason: (resin_added_reason ?? '').trim() || undefined,
+                    }]
                     : []),
                 ...(mb_item_id && mb_kg && mb_kg > 0
-                    ? [{ item_id: mb_item_id, quantity_issued_kg: mb_kg }]
+                    ? [{
+                        item_id: mb_item_id,
+                        quantity_issued_kg: mb_kg,
+                        added_reason: (mb_added_reason ?? '').trim() || undefined,
+                    }]
                     : []),
                 ...packingConsumptions,
                 // Exception lines: the item and the quantity the supervisor
@@ -4620,6 +4725,12 @@ export default function ShiftProductionEntryPage() {
                 ...(material_consumptions ?? []).map((line) => ({
                     item_id: line.item_id,
                     quantity_issued_kg: line.quantity_issued_kg,
+                    // Sent only when it was actually typed. A blank box is
+                    // absent, not an empty string: the server treats a
+                    // whitespace reason as no reason, and an added line with
+                    // no reason has to be refused rather than recorded with a
+                    // sentence nobody wrote.
+                    added_reason: (line.added_reason ?? '').trim() || undefined,
                 })),
             ];
             // Only rows the supervisor actually weighed. A blank closing
@@ -8075,6 +8186,27 @@ export default function ShiftProductionEntryPage() {
                                     )}
                                 />
                             </Form.Item>
+                            {isUnplannedMaterial(resinItemIdWatch) && (
+                                <Controller
+                                    name="resin_added_reason"
+                                    control={completeForm.control}
+                                    render={({ field }) => (
+                                        <Input
+                                            {...field}
+                                            value={field.value ?? ''}
+                                            size="large"
+                                            maxLength={255}
+                                            style={{ marginTop: 8 }}
+                                            disabled={!consumableMaterials?.may_add_unplanned}
+                                            placeholder={
+                                                consumableMaterials?.may_add_unplanned
+                                                    ? 'Why this resin — it is not on this run’s plan'
+                                                    : 'A plant manager or the office records this line'
+                                            }
+                                        />
+                                    )}
+                                />
+                            )}
                         </Col>
                         <Col xs={12} sm={7}>
                             <Controller
@@ -8161,6 +8293,27 @@ export default function ShiftProductionEntryPage() {
                                             )}
                                         />
                                     </Form.Item>
+                                    {isUnplannedMaterial(mbItemIdWatch) && (
+                                        <Controller
+                                            name="mb_added_reason"
+                                            control={completeForm.control}
+                                            render={({ field }) => (
+                                                <Input
+                                                    {...field}
+                                                    value={field.value ?? ''}
+                                                    size="large"
+                                                    maxLength={255}
+                                                    style={{ marginTop: 8 }}
+                                                    disabled={!consumableMaterials?.may_add_unplanned}
+                                                    placeholder={
+                                                        consumableMaterials?.may_add_unplanned
+                                                            ? 'Why this masterbatch — it is not on this run’s plan'
+                                                            : 'A plant manager or the office records this line'
+                                                    }
+                                                />
+                                            )}
+                                        />
+                                    )}
                                 </Col>
                                 {/* THE PERCENTAGE, which is how this factory states a
                                     masterbatch dose — 2.5% of the bottle's weight
@@ -8535,6 +8688,12 @@ export default function ShiftProductionEntryPage() {
                         const selectedItemId = completeForm.watch(`material_consumptions.${index}.item_id`);
                         const selectedRawUom = items?.data.find((i) => i.id === selectedItemId)?.uom;
                         const selectedUom = isKgFamilyUom(selectedRawUom) ? 'Kg' : packingUnitLabel(selectedRawUom ?? '');
+                        // A material the run was not planned on. The server
+                        // decides this and refuses the line without a reason
+                        // and the authority to give one; the row asks for the
+                        // reason here rather than letting the drawer come back
+                        // with a 422 the supervisor cannot answer.
+                        const isUnplanned = isUnplannedMaterial(selectedItemId);
                         return (
                         <Row key={field.id} gutter={[8, 8]} align="middle" style={{ marginTop: 8 }}>
                             {/* The exception lines no longer carry a source
@@ -8550,7 +8709,7 @@ export default function ShiftProductionEntryPage() {
                                     name={`material_consumptions.${index}.item_id`}
                                     control={completeForm.control}
                                     render={({ field }) => (
-                                        <Select {...field} size="large" options={itemOptions} showSearch optionFilterProp="label" style={{ width: '100%' }} placeholder="Resin/Masterbatch" />
+                                        <Select {...field} size="large" options={consumableOptions} showSearch optionFilterProp="label" style={{ width: '100%' }} placeholder="Resin/Masterbatch" />
                                     )}
                                 />
                             </Col>
@@ -8566,6 +8725,34 @@ export default function ShiftProductionEntryPage() {
                             <Col xs={24} sm={3}>
                                 <Button danger block onClick={() => materialFields.remove(index)}>Remove</Button>
                             </Col>
+                            {isUnplanned && (
+                                <Col xs={24}>
+                                    <Controller
+                                        name={`material_consumptions.${index}.added_reason`}
+                                        control={completeForm.control}
+                                        render={({ field }) => (
+                                            <Input
+                                                {...field}
+                                                value={field.value ?? ''}
+                                                size="large"
+                                                maxLength={255}
+                                                disabled={!consumableMaterials?.may_add_unplanned}
+                                                status={
+                                                    completeForm.formState.errors.material_consumptions?.[index]
+                                                        ?.added_reason
+                                                        ? 'error'
+                                                        : undefined
+                                                }
+                                                placeholder={
+                                                    consumableMaterials?.may_add_unplanned
+                                                        ? 'Why this material — e.g. 100 ml boxes ran out at 11:20'
+                                                        : 'A plant manager or the office records this line'
+                                                }
+                                            />
+                                        )}
+                                    />
+                                </Col>
+                            )}
                             <Col xs={24}>
                                 {dayBinHint(
                                     selectedItemId,

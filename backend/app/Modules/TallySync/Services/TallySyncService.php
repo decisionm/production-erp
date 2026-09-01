@@ -726,13 +726,16 @@ class TallySyncService
      * amended three times builds a voucher from the third calculation, not from
      * the sum of three.
      *
-     * NO SCRAP OUTPUT LINE. Rejected pieces and lumps stay recorded in the
-     * ERP's own stock and ride this payload as data and narration, but nothing
-     * on `produced`/`consumed` books them into Tally: the owner has not yet
-     * ruled whether they are kept as stock or discarded, and a scrap line
-     * posted on the wrong assumption is a real quantity in someone's books.
-     * The withholding is stated out loud on `withheld` rather than left as an
-     * absence nobody notices.
+     * SCRAP IS A SECOND PRODUCED LINE. Rejected pieces and lumps are not
+     * discarded from the books: they post inward as the configured PET Scrap
+     * item (FC-02 / DEC-20260805-001, read out of 31 of the factory's 38 Stock
+     * Journals and confirmed by the owner on 05-Aug). The paragraph that used
+     * to stand here said the opposite — "the owner has not yet ruled whether
+     * they are kept as stock or discarded" — and that is the WITHDRAWN reading:
+     * the owner first said rejects were discarded and then reversed on seeing
+     * the journals, which is recorded in the decision itself. The line is built
+     * by producedScrapLine() below and is silent, never zero, when no scrap item
+     * is configured or the shift scrapped nothing.
      *
      * Split out of enqueueShiftProductionEntry() so the pre-post preview and
      * the real post are produced by the same code — a preview built by a
@@ -897,28 +900,24 @@ class TallySyncService
     }
 
     /**
-     * The scrap this batch made, stated as a withheld line — never as stock.
+     * The scrap this batch made, as an INWARD stock line — the factory's own
+     * practice, read out of 31 of their 38 Stock Journals and confirmed by the
+     * owner (05-Aug, FC-02 / DEC-20260805-001).
      *
-     * THE OWNER HAS NOW ANSWERED (05-Aug): "rejects and lumps are discarded."
-     * That settles the question this line used to say was open, and it settles
-     * it in favour of what the code already did — nothing is posted to Tally,
-     * because discarded material is not stock anybody owns. The figures are
-     * still carried so the accountant can see what the shift threw away; they
-     * are simply not a voucher line.
+     * TWO PARAGRAPHS THAT USED TO OPEN THIS BLOCK HAVE BEEN REMOVED, and it is
+     * worth saying why rather than letting them come back. They described scrap
+     * as "discarded" and as a WITHHELD line that is "never stock" — the owner's
+     * FIRST answer, which he reversed the same week on seeing his own journals.
+     * The code below has booked the inward line since; only the comment was
+     * still arguing the withdrawn side, directly above the sentence correcting
+     * it. A reader who trusted the top of the block would delete a line the
+     * factory's accountant posts daily.
      *
      * The consumption side needs no adjustment and that is worth stating,
      * because it looks like an omission: the resin that became a reject was
      * genuinely consumed, and the resin line already includes it (produced
      * counts are net of rejects while consumption covers everything moulded).
-     * Discarding the bottle does not un-consume the resin.
-     *
-     * Kept as a WITHHELD line rather than dropped entirely: a shift that made
-     * 237 rejects should say so on its own voucher record, and an absence
-     * nobody notices is how the figure stops being looked at.
-     *
-     * The scrap this batch made, as an INWARD stock line — the factory's own
-     * practice, read out of 31 of their 38 Stock Journals and confirmed by the
-     * owner (05-Aug).
+     * Scrapping the bottle does not un-consume the resin.
      *
      * Null when no scrap item is configured, or when the shift made no scrap.
      * Both are silences with meaning and neither is a zero line: a voucher
