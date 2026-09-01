@@ -141,6 +141,13 @@ export interface ShiftMaterialConsumption {
     item?: Item | null;
     warehouse?: Warehouse | null;
     quantity_issued_kg: string;
+    /**
+     * Why the run consumed a material it was not planned on, and who
+     * authorised it. Null on every ordinary line — an expected material needs
+     * no reason and nobody's authority.
+     */
+    added_reason?: string | null;
+    added_by?: number | null;
 }
 
 export interface ShiftScrap {

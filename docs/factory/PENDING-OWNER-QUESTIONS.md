@@ -2519,3 +2519,130 @@ what was written down. Guessing a hold would have answered this question.
 
 **Blocked:** any behaviour attached to the damaged state for these three
 categories — now built. What remains open is the Tally half above.
+
+---
+
+## Q90 · Which materials may a production run consume at all — is the category enough?
+
+A completion line is now refused unless the material is on a controlled list,
+and a line naming a material the run was not planned on is recorded as an
+ADDED line with a reason and the person who authorised it. The list
+deliberately refuses only two things: an item recorded as a FINISHED GOOD, and
+the product the run is making.
+
+**It does NOT refuse a spare part, a tool, or an unclassified master**, and
+that is the open half rather than an oversight. DEC-20260827-001 classified
+the catalogue and then said in terms that the classification "does NOT switch
+on any enforcement ... which categories each document may use is Q59 and stays
+open, so no purchase order, sales order or material request begins refusing
+anything as a result". Twelve live masters are deliberately NULL, meaning "not
+recorded yet" and never "none of the above" (DEC-20260827-002). Narrowing the
+list to raw material, packing material and consumable would answer Q59 on a
+completion screen, in the owner's absence.
+
+**What is asked:** may a production completion refuse a material on its
+CATEGORY — specifically, may it refuse spares, tooling and unclassified
+masters as consumption inputs? Today an off-plan spare is accepted, with a
+reason and an authorised user recorded against it.
+
+**Blocks:** nothing that works today. It is a one-line widening of
+`RunConsumableOptionsService::NOT_AN_INPUT` on the day it is answered.
+*Open since 2026-09-01.*
+
+## Q91 · Who holds `consumption-substitute.manage`? — RESOLVED
+
+**Resolved 2026-09-01 by DEC-20260901-007: Administrator AND Plant Manager,
+and nobody else by default.** `PermissionSeeder` now grants it to the Plant
+Manager role beside the Administrator's catalog grant, following the
+carton-trace precedent (`givePermissionTo`, never `syncPermissions`, so a
+re-run adds its one permission and never rewrites what an administrator
+configured through the Roles screen). Accounts is deliberately not granted:
+booking what a machine ate is a floor act, not a books one. The Supervisor
+role does NOT hold it, so the reason box alone is not the control — the
+completion drawer's refusal tells the supervisor to fetch a plant manager, and
+now there is a plant manager who can actually record it.
+
+The second lever named below — widening `expectedItemIds()` — was NOT pulled.
+Incomplete BOMs, packing mappings and dosing rows remain the real cause of a
+line reading as unplanned, and widening what counts as planned would hide that
+rather than fix it.
+
+
+Recording a consumption line the run was NOT planned on now needs
+`consumption-substitute.manage`, a new catalog permission. `PermissionSeeder`
+grants it to **Administrator only** — no Supervisor, Plant Manager or Accounts
+role holds it until a person grants it through the Roles screen.
+
+**Why this is asked rather than assumed.** It is an authority question, and
+the measured signal is real: four existing tests modelling perfectly ordinary
+runs (a masterbatch with no dosing row, a carton with no mapping, a seeded
+resin) had to be granted the permission to keep passing. The same will happen
+on the floor wherever BOMs, packing mappings and dosing rows are still
+incomplete — and this catalogue's are, on purpose (the packing seed "leaves
+the rest empty").
+
+**What is asked:** which role should hold it — Plant Manager, Accounts, both,
+or should the Supervisor role hold it too and the reason box alone carry the
+control?
+
+Two levers exist either way: grant the permission to a role, or widen what
+counts as planned in `RunConsumableOptionsService::expectedItemIds()`.
+*Open since 2026-09-01.*
+
+
+## Q92 · Three of the 34 Stock Journals in the factory's own export are not shift production. What are they, and how should the ERP treat them?
+
+**Raised 2026-09-01** while validating the production Stock Journal against the
+factory's own Tally export. The export is manifest entry
+`tally-testing-xml-2026-08-26`, read 01-Sep-2026: 34 vouchers, all
+`VCHTYPE="Stock Journal"`, 732 inventory lines.
+
+Thirty-one are ordinary shift production and match FC-04 exactly. **Three are
+not, and the ERP has no rule for them:**
+
+| Voucher | Date | Shape |
+|---|---|---|
+| 114 | 2026-07-10 | OUT `PET Polyster Chips` 588.990 Kgs → IN `Pet Scrap` 588.990 Kgs |
+| 116 | 2026-07-21 | OUT `PET Polyster Chips` 6000.000 Kgs → IN `Pet Scrap` 6000.000 Kgs |
+| 115 | 2026-07-16 | IN `Plastic Bags Used` 328.0000 Nos — **no OUT side at all** |
+
+114 and 116 are equal-quantity, single-line-each-side journals that look like
+regrind or reclassification — chips becoming scrap with nothing produced. 115
+is one-sided: an inward line with no consumption against it, and the only IN
+line in the whole export that is neither a bottle nor `Pet Scrap`.
+
+**What is being asked**
+
+1. Are 114/116 a real, ongoing factory practice (regrind, reclassification, a
+   correction), or one-off adjustments? If they are practice, does the ERP
+   need to be able to record one?
+2. Is 115 correct? A Stock Journal with no consumption side is legitimate in
+   Tally, but the ERP has never emitted one, and whether the factory MEANS to
+   book inward-only adjustments this way is not inferable from a file.
+3. `Plastic Bags Used` appears in no ERP flow. What is it, and does anything
+   need to consume or produce it?
+
+**Nothing here is a fact and nothing has been implemented.** These are
+reported exactly as found.
+
+**THE CASE IS HELD FAIL-CLOSED UNTIL THIS IS ANSWERED.** Concretely:
+
+- **Nothing reads Stock Journals inbound today.** `TransactionClassifier`
+  classifies only what the ERP itself enqueues (source `erp`);
+  `TallyVoucherXmlReader` reads Sales vouchers. So no code currently
+  classifies these three, and none may be added that guesses.
+- **Any future inbound Stock Journal reader must REFUSE a voucher of these
+  shapes rather than classify it** — a journal with no OUT side, or whose
+  every line is an equal-quantity reclassification, is not shift production.
+  Treating 115 as production would book an inward quantity against no
+  consumption; treating 114/116 as production would report 6.5 tonnes of
+  scrap as a shift's output.
+- **Anything counting "production vouchers" in this export must exclude all
+  three.** `tally-sync-agent/tests/stockJournalRealXml.test.js` pins the
+  positive shape a production journal has, so the exclusion is executable
+  rather than remembered.
+
+The rule this protects is FC-04 (the shape of a production Stock Journal) and
+FC-02 (scrap is produced stock, booked inward) — 114/116 book scrap inward
+with no production behind it, which is the one case FC-02's evidence does not
+cover.

@@ -103,13 +103,19 @@ class ControlledProductEndToEndTest extends TestCase
     private function actAs(string ...$roles): User
     {
         $user = User::factory()->create(['is_active' => true]);
-        foreach (['production.manage', 'production.view', 'tally.view', 'tally.manage', 'quality.manage', 'quality.view'] as $permission) {
+        foreach (['production.manage', 'production.view', 'tally.view', 'tally.manage', 'quality.manage', 'quality.view', 'consumption-substitute.manage'] as $permission) {
             Permission::findOrCreate($permission, 'web');
         }
         // quality.* because the run now passes a quality check on its way to
         // the plant manager — the same person can hold both here; the four-eyes
         // rule only bars the checker from being the batch's own completer.
-        $user->givePermissionTo(['production.manage', 'production.view', 'quality.manage', 'quality.view']);
+        // consumption-substitute.manage because one case below consumes a
+        // seeded resin that no BOM, packing master or dosing sheet knows —
+        // an ADDED line (AddedConsumptionLineTest).
+        $user->givePermissionTo([
+            'production.manage', 'production.view', 'quality.manage', 'quality.view',
+            'consumption-substitute.manage',
+        ]);
         foreach ($roles as $role) {
             $user->assignRole(Role::findOrCreate($role, 'web'));
         }
@@ -292,7 +298,7 @@ class ControlledProductEndToEndTest extends TestCase
             'quantity_produced' => '10400',
             'running_hours' => '8',
             'material_consumptions' => [
-                ['item_id' => $seededResin->id, 'warehouse_id' => $seededGodown->id, 'quantity_issued_kg' => '335'],
+                ['item_id' => $seededResin->id, 'warehouse_id' => $seededGodown->id, 'quantity_issued_kg' => '335', 'added_reason' => 'Seeded resin, not on this product plan'],
             ],
         ])->assertOk();
 

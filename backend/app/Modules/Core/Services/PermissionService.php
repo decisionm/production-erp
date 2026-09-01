@@ -65,6 +65,19 @@ class PermissionService
         // Administrator role every catalog permission, which is how the owner
         // receives this one; no other role does unless a human grants it.
         'configuration-delete' => 'Configuration Hard Delete',
+        // THE ADDED-CONSUMPTION-LINE TIER. Completing a batch is every
+        // supervisor's job (production.manage); booking a material the run
+        // was NOT planned on — the 100 ml cartons ran out, so today's run
+        // went in a 90 ml box — is not, because a material standing in for
+        // another is exactly the mistake that reaches a Tally Stock Journal
+        // and cannot be seen afterwards. Its own catalog entry for the same
+        // mechanical reason as machine-master and carton-trace: RoleService
+        // intersects every grant with this list, so a permission that is not
+        // here is stripped from every role on the next save through the Roles
+        // screen. `.manage` is the real half; `.view` is the vestigial twin.
+        // The owner receives it as Administrator through PermissionSeeder;
+        // no other role holds it unless a human grants it.
+        'consumption-substitute' => 'Added Consumption Lines',
         'sales' => 'Sales',
         'finance' => 'Finance',
         'quality' => 'Quality',

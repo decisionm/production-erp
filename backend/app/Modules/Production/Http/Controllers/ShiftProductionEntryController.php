@@ -13,6 +13,7 @@ use App\Modules\Production\Http\Requests\RejectShiftProductionEntryRequest;
 use App\Modules\Production\Http\Requests\StartBatchRequest;
 use App\Modules\Production\Http\Resources\ShiftProductionEntryResource;
 use App\Modules\Production\Models\ShiftProductionEntry;
+use App\Modules\Production\Services\RunConsumableOptionsService;
 use App\Modules\Production\Services\ShiftPageEntryService;
 use App\Modules\Production\Services\ShiftProductionEntryService;
 use Illuminate\Http\JsonResponse;
@@ -91,6 +92,30 @@ class ShiftProductionEntryController extends Controller
         return ShiftProductionEntryResource::make(
             $this->entries->startBatch($request->validated(), $request->user()?->id),
         );
+    }
+
+    /**
+     * THE MATERIALS DROPDOWN the completion drawer adds a line from.
+     *
+     * `expected` is what the run was planned to consume; `allowed` is
+     * everything it may consume at all, each option carrying `is_expected` so
+     * the drawer can put the planned materials first and mark the rest as
+     * needing a reason. The server refuses against exactly this list
+     * (CompleteBatchRequest), so a screen that renders it cannot offer a
+     * choice the completion would then reject.
+     */
+    public function consumableMaterials(
+        ShiftProductionEntry $shiftProductionEntry,
+        RunConsumableOptionsService $options,
+    ): JsonResponse {
+        return response()->json(['data' => [
+            'expected_item_ids' => $options->expectedItemIds($shiftProductionEntry),
+            'options' => $options->options($shiftProductionEntry),
+            // Whether THIS user may send a line that is not expected. The
+            // drawer disables the add button rather than letting a supervisor
+            // fill a form the server will refuse.
+            'may_add_unplanned' => (bool) request()->user()?->can('consumption-substitute.manage'),
+        ]]);
     }
 
     public function complete(CompleteBatchRequest $request, ShiftProductionEntry $shiftProductionEntry): ShiftProductionEntryResource

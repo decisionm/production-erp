@@ -664,7 +664,10 @@ class BagCostTraceabilityTest extends TestCase
 
     public function test_batch_cost_splits_pooled_resin_from_other_material_and_costs_each_accepted_piece_after_quality_nets_it(): void
     {
-        $this->actingAsProduction();
+        // The masterbatch below is in no BOM, no packing master and no dosing
+        // sheet, so the completion reads it as an ADDED line and asks for a
+        // reason and the authority to record one (AddedConsumptionLineTest).
+        $this->actingAsProduction(['consumption-substitute.manage']);
 
         $masterbatch = Item::create(['sku' => 'RM-MB', 'name' => 'Blue Masterbatch', 'uom' => 'Kgs.']);
         app(StockMovementService::class)->recordReceipt(
@@ -688,7 +691,7 @@ class BagCostTraceabilityTest extends TestCase
         // which is the rule this module holds to.
         $this->complete($entry, '10000', [
             ['item_id' => $this->resin->id, 'quantity_issued_kg' => '20.0000'],
-            ['item_id' => $masterbatch->id, 'quantity_issued_kg' => '2.0000'],
+            ['item_id' => $masterbatch->id, 'quantity_issued_kg' => '2.0000', 'added_reason' => 'Blue run, no dosing sheet yet'],
         ]);
 
         $allocator = app(BagCostAllocationService::class);

@@ -1221,6 +1221,9 @@ Route::prefix('v1')->group(function () {
             // anything the resource might route.
             Route::post('shift-production-entries/page', [ShiftProductionEntryController::class, 'ingestPage']);
             Route::apiResource('shift-production-entries', ShiftProductionEntryController::class)->only(['index', 'store']);
+            // The materials list the completion drawer adds a line from — and
+            // the same list the completion refuses against. Read only.
+            Route::get('shift-production-entries/{shift_production_entry}/consumable-materials', [ShiftProductionEntryController::class, 'consumableMaterials']);
             Route::post('shift-production-entries/{shift_production_entry}/complete', [ShiftProductionEntryController::class, 'complete']);
             // Correcting a completed batch that quality has not touched yet —
             // the floor's own fix, refused the moment the batch stops being
