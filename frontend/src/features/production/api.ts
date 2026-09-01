@@ -598,11 +598,31 @@ export interface ConfigurationOverlap {
     values_differ: boolean;
 }
 
+/**
+ * A finished good the product master does not cover.
+ *
+ * NOT a workspace row and deliberately not shaped like one: a standard is a
+ * record with figures and lifecycle actions, this is the ABSENCE of one, and
+ * the only thing that can be done to it is create the standard it lacks.
+ */
+export interface UnconfiguredFinishedGood {
+    item_id: number;
+    name: string;
+    sku: string | null;
+    /** What the item master already knows, so the form is not a surprise. */
+    nominal_weight_grams: string | null;
+    standard_cavities: number | null;
+    standard_cycle_time: string | null;
+    in_tally: boolean;
+}
+
 export interface ProductStandardsWorkspacePage {
     data: ProductStandardsWorkspaceRow[];
     meta: Paginated<ProductStandardsWorkspaceRow>['meta'];
     summary: ProductStandardsSummary;
     configuration_overlaps: ConfigurationOverlap[];
+    /** Capped list plus the honest count — see the service's note on both. */
+    unconfigured_items: { data: UnconfiguredFinishedGood[]; total: number };
 }
 
 /**
@@ -622,7 +642,11 @@ export interface ProductStandardsWorkspacePage {
 export async function listProductionStandards(
     params: ProductStandardsWorkspaceParams = {},
 ): Promise<ProductStandardsWorkspacePage> {
-    const { data } = await api.get<WirePage<ProductStandardsWorkspaceRow> & { summary?: ProductStandardsSummary; configuration_overlaps?: ConfigurationOverlap[] }>(
+    const { data } = await api.get<WirePage<ProductStandardsWorkspaceRow> & {
+        summary?: ProductStandardsSummary;
+        configuration_overlaps?: ConfigurationOverlap[];
+        unconfigured_items?: { data: UnconfiguredFinishedGood[]; total: number };
+    }>(
         '/production/standards',
         { params },
     );
@@ -642,6 +666,10 @@ export async function listProductionStandards(
         summary: data.summary ?? { ready: 0, incomplete: 0, all: data.total ?? rows.length },
         // An older backend sends none; an empty list is the honest default.
         configuration_overlaps: data.configuration_overlaps ?? [],
+        // Same rule: an older backend cannot answer "which finished goods
+        // have no standard", and inventing a zero would be a claim it never
+        // made. Empty and zero read the same on screen — nothing is shown.
+        unconfigured_items: data.unconfigured_items ?? { data: [], total: 0 },
     };
 }
 

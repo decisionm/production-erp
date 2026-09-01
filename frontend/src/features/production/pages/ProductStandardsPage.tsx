@@ -1,6 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
     Alert,
+    AutoComplete,
     Button,
     Checkbox,
     Col,
@@ -45,12 +46,15 @@ import {
     listAllMolds,
     listProductionStandards,
     listStandardItemCandidates,
+    listPackingMaterialMappings,
     listStandardMachineExceptions,
     listWorkCenters,
     machineLabel,
     PRODUCT_STANDARDS_PAGE_SIZES,
     saveProductConfigurationFigures,
+    type PackingMaterialMappingRow,
     type StandardPackagingPayload,
+    type UnconfiguredFinishedGood,
     updateProductionConfiguration,
     updateStandardPackaging,
 } from '@/features/production/api';
@@ -1254,7 +1258,89 @@ function DerivedPerBox({ per, count, unit }: { per?: number; count?: number; uni
     );
 }
 
-function NewStandardModal({ onClose, initialName }: { onClose: () => void; initialName?: string }) {
+/**
+ * ONE PACKING SPEC, CHOSEN RATHER THAN REMEMBERED.
+ *
+ * These three fields were free text, and the codes they hold are not free
+ * text at all: each one is a KEY into the packing-material master, which says
+ * which Tally item that carton, tray or film actually is. A typo there is not
+ * a cosmetic problem — the spec silently maps to nothing, and the material
+ * never reaches the voucher. Nothing on the form gave the slightest hint that
+ * the codes already existed somewhere, let alone what they were.
+ *
+ * So the options are the master's own `spec_value`s for this kind, and each
+ * one shows the Tally item it resolves to — which is the answer to the
+ * question a person actually has ("which of these is the box I mean?").
+ *
+ * IT STAYS TYPEABLE, and that is deliberate. This is an AutoComplete, not a
+ * Select: a genuinely new carton size has to be enterable the first time it
+ * is used, and the master is maintained on another tab. Refusing an unknown
+ * code here would mean a new box blocks the standard — the packing tab is
+ * where that mapping gets made, and it can be made after this.
+ */
+function PackingSpecPicker({
+    kind,
+    placeholder,
+    value,
+    onChange,
+}: {
+    kind: PackingMaterialMappingRow['spec_kind'];
+    placeholder: string;
+    // Supplied by the enclosing Form.Item — this is a controlled field.
+    value?: string;
+    onChange?: (value: string) => void;
+}) {
+    const { data: mappings, isFetching } = useQuery({
+        queryKey: ['production', 'packing-material-mappings'],
+        queryFn: listPackingMaterialMappings,
+        staleTime: 5 * 60 * 1000,
+    });
+
+    const options = (mappings ?? [])
+        .filter((m) => m.spec_kind === kind)
+        .map((m) => ({
+            value: m.spec_value,
+            label: (
+                <Space size={6}>
+                    <span>{m.spec_value}</span>
+                    <Typography.Text type="secondary" style={{ fontSize: 11 }}>
+                        {m.item.name}
+                    </Typography.Text>
+                </Space>
+            ),
+        }));
+
+    return (
+        <AutoComplete
+            allowClear
+            value={value}
+            onChange={onChange}
+            options={options}
+            // Matched on the CODE, never on the Tally item name shown beside
+            // it: the label is a React node, and filtering a node is how a
+            // dropdown starts matching nothing.
+            filterOption={(input, option) =>
+                String(option?.value ?? '')
+                    .toLowerCase()
+                    .includes(input.toLowerCase())
+            }
+        >
+            {/* placeholder and maxLength belong to the rendered input, not to
+                the AutoComplete wrapping it. */}
+            <Input maxLength={64} placeholder={isFetching ? 'Loading codes…' : placeholder} />
+        </AutoComplete>
+    );
+}
+
+function NewStandardModal({
+    onClose,
+    initialName,
+    initialItem,
+}: {
+    onClose: () => void;
+    initialName?: string;
+    initialItem?: UnconfiguredFinishedGood | null;
+}) {
     const queryClient = useQueryClient();
     const [form] = Form.useForm<NewStandardForm>();
 
@@ -1321,8 +1407,6 @@ function NewStandardModal({ onClose, initialName }: { onClose: () => void; initi
                 second one that then has to be reconciled.
             </Typography.Paragraph>
 
-            <TallyItemPicker form={form} />
-
             {/* Opened from a blocked Start Batch: the product is already known,
                 so it arrives typed. Still editable — the workbook's wording and
                 the item master's are not always the same, and only a person can
@@ -1332,8 +1416,47 @@ function NewStandardModal({ onClose, initialName }: { onClose: () => void; initi
                 layout="vertical"
                 onFinish={submit}
                 requiredMark={false}
-                initialValues={initialName ? { source_product_name: initialName } : undefined}
+                // Opened for an uncovered finished good: its identity is
+                // already settled, and the figures the item master ALREADY
+                // holds are carried in rather than retyped. Cavities and
+                // cycle time stay blank when the master does not hold them —
+                // they are measurements, and a plausible default is how a
+                // wrong expected output reaches the floor.
+                initialValues={{
+                    ...(initialName ? { source_product_name: initialName } : {}),
+                    ...(initialItem
+                        ? {
+                              item_id: initialItem.item_id,
+                              ...(initialItem.nominal_weight_grams !== null
+                                  ? { unit_weight_grams: Number(initialItem.nominal_weight_grams) }
+                                  : {}),
+                              ...(initialItem.standard_cavities !== null
+                                  ? { cavities: initialItem.standard_cavities }
+                                  : {}),
+                              ...(initialItem.standard_cycle_time !== null
+                                  ? { cycle_time: Number(initialItem.standard_cycle_time) }
+                                  : {}),
+                          }
+                        : {}),
+                }}
             >
+                {/* INSIDE THE FORM, and that is the whole fix.
+
+                    This picker rendered a `Form.Item name="item_id"` OUTSIDE
+                    the `<Form>`, so the field bound to rc-field-form's default
+                    (no-op) context instead of this form's store. Two things
+                    followed, both silent: the confirmation line under the
+                    field reads `Form.useWatch('item_id', form)` and so could
+                    never appear however carefully a product was chosen, and
+                    `onFinish` never carried `item_id` at all — meaning
+                    `item_id: v.item_id ?? null` sent NULL every single time.
+                    Every standard created through this modal was created
+                    UNATTACHED, and the screen gave no sign of it.
+
+                    The horizontal label was the visible tell: outside the
+                    Form it could not inherit `layout="vertical"` either. */}
+                <TallyItemPicker form={form} />
+
                 <Form.Item
                     name="source_product_name"
                     label="Product name"
@@ -1424,17 +1547,17 @@ function NewStandardModal({ onClose, initialName }: { onClose: () => void; initi
                 <Row gutter={12}>
                     <Col xs={24} sm={8}>
                         <Form.Item name="carton_spec" label="Carton">
-                            <Input maxLength={64} placeholder="e.g. 500ML ROUND" />
+                            <PackingSpecPicker kind="carton" placeholder="e.g. 500ML ROUND" />
                         </Form.Item>
                     </Col>
                     <Col xs={24} sm={8}>
                         <Form.Item name="tray_spec" label="Tray">
-                            <Input maxLength={64} placeholder="e.g. 835 X 610" />
+                            <PackingSpecPicker kind="tray" placeholder="e.g. 835 X 610" />
                         </Form.Item>
                     </Col>
                     <Col xs={24} sm={8}>
                         <Form.Item name="pouch_spec" label="Pouch">
-                            <Input maxLength={64} placeholder="e.g. HM 30.5*49" />
+                            <PackingSpecPicker kind="pouch_film" placeholder="e.g. HM 30.5*49" />
                         </Form.Item>
                     </Col>
                 </Row>
@@ -1859,7 +1982,10 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
     const [machineId, setMachineId] = useState<number | undefined>();
 
     const [attaching, setAttaching] = useState<ProductStandardsWorkspaceRow | null>(null);
-    const [adding, setAdding] = useState(false);
+    // Null when closed. `{ item: null }` is the plain "New product standard"
+    // button; `{ item }` is the same modal opened FOR a finished good the
+    // master does not cover, with its identity already chosen.
+    const [adding, setAdding] = useState<{ item: UnconfiguredFinishedGood | null } | null>(null);
     const [openRow, setOpenRow] = useState<ProductStandardsWorkspaceRow | null>(null);
     const [figures, setFigures] = useState<{ row: ProductStandardsWorkspaceRow; focus: FigureField } | null>(null);
 
@@ -1925,6 +2051,9 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
     const rows = useMemo(() => data?.data ?? [], [data]);
     const summary = data?.summary ?? { ready: 0, incomplete: 0, all: 0 };
     const total = data?.meta.total ?? 0;
+    // Only ever non-empty while a search is active — the server decides that,
+    // not this component, so the two cannot drift apart.
+    const unconfigured = data?.unconfigured_items ?? { data: [], total: 0 };
 
     // The drawer must show the CURRENT row, not the one that was clicked: a
     // save invalidates the list, and a gap list still naming a figure that has
@@ -1982,7 +2111,7 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                     </Col>
                 )}
                 <Col>
-                    <Button type="primary" onClick={() => setAdding(true)}>
+                    <Button type="primary" onClick={() => setAdding({ item: null })}>
                         New product standard
                     </Button>
                 </Col>
@@ -2170,6 +2299,53 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                     </Checkbox>
                 </Tooltip>
             </Space>
+
+            {/* PRODUCTS THIS PAGE USED TO LEAVE OUT ENTIRELY.
+
+                A finished good with no standard was not shown as incomplete,
+                not shown as archived, and not shown at all — so searching its
+                Tally name returned an empty table and nothing distinguished
+                "this product is fine" from "this product has never been set
+                up". That is how five 100ML Emcure Amber bottles sat in the
+                item master with two standards between them.
+
+                It sits directly above the grid, because it is the other half
+                of the answer to the search that was just typed. No blurb: a
+                count, the names, and the button that fixes each one. */}
+            {unconfigured.total > 0 && (
+                <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                    message={
+                        <Typography.Text strong>
+                            {unconfigured.total} finished good{unconfigured.total === 1 ? '' : 's'} matching &ldquo;
+                            {search}&rdquo; {unconfigured.total === 1 ? 'has' : 'have'} no standard
+                        </Typography.Text>
+                    }
+                    description={
+                        <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                            {unconfigured.data.map((i) => (
+                                <Space key={i.item_id} size={8} wrap>
+                                    <Button size="small" type="primary" onClick={() => setAdding({ item: i })}>
+                                        Add standard
+                                    </Button>
+                                    <Typography.Text>{i.name}</Typography.Text>
+                                    {!i.in_tally && <Tag color="orange">Tally mapping pending</Tag>}
+                                </Space>
+                            ))}
+                            {/* The count is the whole truth; the list is
+                                capped. Saying so beats a list that quietly
+                                stops at twenty-five. */}
+                            {unconfigured.total > unconfigured.data.length && (
+                                <Typography.Text type="secondary">
+                                    +{unconfigured.total - unconfigured.data.length} more — narrow the search
+                                </Typography.Text>
+                            )}
+                        </Space>
+                    }
+                />
+            )}
 
             {/* Figures line up column-wise across every cell of the grid. */}
             <div style={numeric}>
@@ -2544,8 +2720,12 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
             )}
             {adding && (
                 <NewStandardModal
-                    onClose={() => setAdding(false)}
-                    initialName={resumeItem?.name ?? undefined}
+                    // Remounted per target, so the form never opens holding
+                    // the product someone abandoned a moment ago.
+                    key={adding.item?.item_id ?? 'blank'}
+                    onClose={() => setAdding(null)}
+                    initialName={adding.item?.name ?? resumeItem?.name ?? undefined}
+                    initialItem={adding.item}
                 />
             )}
         </>
