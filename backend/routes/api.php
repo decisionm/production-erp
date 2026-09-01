@@ -24,6 +24,7 @@ use App\Modules\HRMS\Http\Controllers\LeaveBalanceController;
 use App\Modules\HRMS\Http\Controllers\LeaveRequestController;
 use App\Modules\HRMS\Http\Controllers\LeaveTypeController;
 use App\Modules\Inventory\Http\Controllers\BatchController;
+use App\Modules\Inventory\Http\Controllers\DamagedFinishedGoodController;
 use App\Modules\Inventory\Http\Controllers\FactoryLookupController;
 use App\Modules\Inventory\Http\Controllers\FulfilmentController;
 use App\Modules\Inventory\Http\Controllers\ItemController;
@@ -284,6 +285,24 @@ Route::prefix('v1')->group(function () {
              */
             Route::get('production-returns/returnable', [ProductionReturnController::class, 'returnable']);
             Route::post('production-returns', [ProductionReturnController::class, 'store']);
+
+            /*
+             * DAMAGED FINISHED GOODS → QUALITY (DEC-20260901-006).
+             *
+             * The STORE's act, on the store's own permission, which is why it
+             * sits here beside the production return and not under `quality/`:
+             * the people who find a crushed box are the people holding the
+             * stock. What Quality then does with it — confirm the damage and
+             * scrap it, or release it — is the existing
+             * `quality/returned-material-holds` pair, gated on Quality's
+             * permission. Reporting and scrapping are deliberately two teams'
+             * acts, which is the whole meaning of "to Quality first".
+             *
+             * POST only, append-only like every other stock lifecycle here: a
+             * wrong report is answered by Quality releasing it, never by
+             * editing the movement away.
+             */
+            Route::post('damaged-finished-goods', [DamagedFinishedGoodController::class, 'store']);
 
             // Phase 6 traceability (store side): supplier lots + bags with
             // unique barcodes, and the FIFO pick list. The whole surface
