@@ -125,6 +125,13 @@ class CompleteBatchRequest extends FormRequest
             // list and the authority both live. A blank string is not a
             // reason and is refused as an absent one.
             'material_consumptions.*.added_reason' => ['sometimes', 'nullable', 'string', 'max:255'],
+            // WHAT THE ADDED LINE STOOD IN FOR (DEC-20260901-004). Optional,
+            // because an added line is not always a substitution — a run may
+            // book a consumable that replaced nothing, and forcing a name
+            // there would make somebody invent one. When it IS given it must
+            // be a real item, and the line then reads as a substitution on
+            // both this surface and store issue.
+            'material_consumptions.*.substitutes_item_id' => ['sometimes', 'nullable', 'integer', 'exists:items,id'],
 
             // Day-bin closing weight per material, same contract as
             // HandoverRequest. This is what makes automatic consumption

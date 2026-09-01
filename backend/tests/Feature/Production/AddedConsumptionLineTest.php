@@ -4,7 +4,9 @@ namespace Tests\Feature\Production;
 
 use App\Models\User;
 use App\Modules\Inventory\Models\Enums\ItemCategory;
+use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Models\MaterialLot;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Production\Models\Bom;
 use App\Modules\Production\Models\Shift;
@@ -242,6 +244,68 @@ class AddedConsumptionLineTest extends TestCase
         $this->assertSame($authorised->id, (int) $added->added_by);
     }
 
+    public function test_an_added_line_names_the_material_it_stood_in_for(): void
+    {
+        // DEC-20260901-004: "the substitute line must NAME WHAT IT STANDS IN
+        // FOR AND WHY". The reason and the author were already recorded; this
+        // is the third half, and it is the same column store_issue_lines
+        // carries, so a substitution reads the same way at both points in the
+        // flow.
+        $this->actingAsAuthorisedSupervisor();
+        $entry = $this->startBatch();
+
+        $this->complete($entry, [
+            ['item_id' => $this->resin->id, 'quantity_issued_kg' => '15.09'],
+            ['item_id' => $this->plannedCarton->id, 'quantity_issued_kg' => '4'],
+            [
+                'item_id' => $this->substituteCarton->id,
+                'quantity_issued_kg' => '10',
+                'added_reason' => '100 ml boxes ran out at 11:20; packed the rest in 90 ml',
+                'substitutes_item_id' => $this->plannedCarton->id,
+            ],
+        ])->assertOk();
+
+        $added = ShiftMaterialConsumption::query()
+            ->where('item_id', $this->substituteCarton->id)
+            ->firstOrFail();
+
+        $this->assertTrue($added->isSubstitution());
+        $this->assertSame($this->plannedCarton->id, (int) $added->substitutes_item_id);
+
+        // The line it replaced is untouched and is NOT itself a substitution.
+        $planned = ShiftMaterialConsumption::query()
+            ->where('item_id', $this->plannedCarton->id)
+            ->firstOrFail();
+        $this->assertFalse($planned->isSubstitution());
+        $this->assertNull($planned->substitutes_item_id);
+    }
+
+    public function test_an_added_line_that_replaced_nothing_names_nothing(): void
+    {
+        // Not every added line is a substitution. A run may book a consumable
+        // that stood in for nothing, and requiring a name there would make
+        // somebody invent a factory value.
+        $this->actingAsAuthorisedSupervisor();
+        $entry = $this->startBatch();
+
+        $this->complete($entry, [
+            ['item_id' => $this->resin->id, 'quantity_issued_kg' => '15.09'],
+            [
+                'item_id' => $this->substituteCarton->id,
+                'quantity_issued_kg' => '2',
+                'added_reason' => 'extra boxes for a re-pack; replaced nothing',
+            ],
+        ])->assertOk();
+
+        $added = ShiftMaterialConsumption::query()
+            ->where('item_id', $this->substituteCarton->id)
+            ->firstOrFail();
+
+        $this->assertNotNull($added->added_reason);
+        $this->assertFalse($added->isSubstitution());
+        $this->assertNull($added->substitutes_item_id);
+    }
+
     // ---- (4) the dropdown is the refusal set -------------------------------
 
     public function test_the_dropdown_offers_exactly_what_the_completion_will_accept(): void
@@ -265,6 +329,45 @@ class AddedConsumptionLineTest extends TestCase
         $this->assertEqualsCanonicalizing([$this->resin->id, $this->plannedCarton->id], $expected);
 
         $this->assertTrue($body['may_add_unplanned']);
+    }
+
+    public function test_material_in_incoming_qc_hold_is_not_offered_as_an_unplanned_addition(): void
+    {
+        // DEC-20260825-001: bags in waiting_qc may not leave a store's balance
+        // through a production completion, and StockMovementService already
+        // refuses it under the balance lock. Offering it here would be a pick
+        // that 422s on submit.
+        $this->actingAsAuthorisedSupervisor();
+        $entry = $this->startBatch();
+
+        $wip = Warehouse::firstWhere('code', 'WIP')
+            ?? Warehouse::create(['code' => 'WIP', 'name' => 'Production / WIP', 'is_active' => true, 'tally_guid' => 'gd-wip-qc']);
+
+        $lot = MaterialLot::create([
+            'item_id' => $this->substituteCarton->id,
+            'received_date' => '2026-09-01',
+            'bag_count' => 1,
+            'total_received_kg' => '50.0000',
+        ]);
+        $lot->bags()->create([
+            'barcode' => 'BAG-QC-ADDED-1',
+            'original_kg' => '50.0000',
+            'remaining_kg' => '50.0000',
+            'status' => MaterialBagStatus::WaitingQc,
+            'current_warehouse_id' => $wip->id,
+        ]);
+
+        $body = $this->getJson("/api/v1/production/shift-production-entries/{$entry->id}/consumable-materials")
+            ->assertOk()->json('data');
+
+        $offered = collect($body['options'])->pluck('item_id')->all();
+
+        $this->assertNotContains($this->substituteCarton->id, $offered);
+        // The refusal set is deliberately UNCHANGED — the hold narrows the
+        // screen, not what the server accepts, and a planned material under
+        // hold is never lost from the drawer.
+        $this->assertContains($this->plannedCarton->id, $offered);
+        $this->assertContains($this->resin->id, $offered);
     }
 
     public function test_the_dropdown_tells_an_ordinary_supervisor_they_may_not_add_a_line(): void

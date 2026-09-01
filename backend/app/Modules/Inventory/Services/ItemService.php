@@ -125,6 +125,17 @@ class ItemService
             // for, which is half the record the decision requires.
             DependencyCheck::table('store_issue_lines', 'substitutes_item_id')
                 ->label('material replaced by a substitution'),
+            // The same reference one document later: the item an added
+            // CONSUMPTION line stood in for. Store issue names what the
+            // storekeeper handed over; this names what the machine actually
+            // ate, and a run may consume off the floor material no store issue
+            // covered that day — so the two columns can name different items
+            // and neither covers the other. Declared for the same reason as
+            // the line above: the column RESTRICTs, the schema backstop only
+            // sees CASCADE, and without this the refusal would arrive as a
+            // QueryException 500 instead of the lifecycle's 422-with-counts.
+            DependencyCheck::table('shift_material_consumptions', 'substitutes_item_id')
+                ->label('material replaced by a substitution on the floor'),
             // A BASE PRODUCT WITH VARIANTS STILL POINTING AT IT
             // (DEC-20260821-001). The column RESTRICTs, so the database
             // would refuse — but as a QueryException inside the delete

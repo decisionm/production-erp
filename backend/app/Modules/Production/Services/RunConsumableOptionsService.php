@@ -4,6 +4,8 @@ namespace App\Modules\Production\Services;
 
 use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Services\ProductionWipLocationResolver;
+use App\Modules\Inventory\Services\StockStateReader;
 use App\Modules\Production\Models\ShiftMaterialConsumption;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use Illuminate\Support\Collection;
@@ -79,6 +81,8 @@ class RunConsumableOptionsService
         private readonly BomService $boms,
         private readonly RunMaterialSuggestionService $suggestions,
         private readonly PackingMaterialSuggestionService $packing,
+        private readonly ProductionWipLocationResolver $wip,
+        private readonly StockStateReader $stockState,
     ) {}
 
     /**
@@ -200,16 +204,37 @@ class RunConsumableOptionsService
      * whether it was expected, so the drawer can put the planned materials
      * first and mark the rest as needing a reason.
      *
-     * @return array<int, array{item_id: int, name: string, sku: ?string, uom: ?string, category: ?string, is_expected: bool}>
+     * MATERIAL IN INCOMING-QC HOLD IS NOT OFFERED (DEC-20260825-001): bags in
+     * waiting_qc may not leave a store's balance through a production
+     * completion, and StockMovementService already refuses it under the
+     * balance lock — so offering it here would be a pick that 422s on submit.
+     *
+     * The hold NARROWS THE DROPDOWN AND NOTHING ELSE. allowedItemIds() is the
+     * refusal set and is deliberately untouched: it never refuses a material
+     * the run was planned on, and a held PLANNED material therefore still
+     * appears here, flagged, rather than vanishing from the drawer with no
+     * explanation. This is the screen-stricter-than-the-engine shape the
+     * factory already chose once (DEC-20260831-002).
+     *
+     * StockStateReader, not IncomingQcHold::lockAndSum: this is a screen and
+     * must not take bag locks. It is the stricter of the two — a bag with no
+     * store recorded counts against every store — so it can only ever offer
+     * less than the writer would permit, never more.
+     *
+     * @return array<int, array{item_id: int, name: string, sku: ?string, uom: ?string, category: ?string, is_expected: bool, qa_held: bool}>
      */
     public function options(ShiftProductionEntry $entry): array
     {
         $expected = array_flip($this->expectedItemIds($entry));
 
-        return Item::query()
+        $items = Item::query()
             ->whereIn('id', $this->allowedItemIds($entry))
             ->orderBy('name')
-            ->get(['id', 'sku', 'name', 'uom', 'category'])
+            ->get(['id', 'sku', 'name', 'uom', 'category']);
+
+        $held = $this->qaHeldItemIds($items->pluck('id')->all());
+
+        return $items
             ->map(fn (Item $item) => [
                 'item_id' => (int) $item->id,
                 'name' => (string) $item->name,
@@ -219,8 +244,52 @@ class RunConsumableOptionsService
                     ? $item->category->value
                     : ($item->category === null ? null : (string) $item->category),
                 'is_expected' => isset($expected[(int) $item->id]),
+                'qa_held' => isset($held[(int) $item->id]),
             ])
+            // A held material the run was NOT planned on is simply not
+            // offered. A held material it WAS planned on stays, flagged, so
+            // the drawer can say why rather than lose it silently.
+            ->reject(fn (array $row) => $row['qa_held'] && ! $row['is_expected'])
+            ->values()
             ->all();
+    }
+
+    /**
+     * Which of these items have quantity standing in incoming-QC hold in
+     * Production/WIP, as a set keyed by item id.
+     *
+     * One read for the whole page — never a query per row. With no resolvable
+     * WIP location there is no floor to read a hold off, and the honest answer
+     * is that none is known: the dropdown then narrows nothing, and the engine
+     * remains the enforcement it already is.
+     *
+     * @param  array<int, int|string>  $itemIds
+     * @return array<int, true>
+     */
+    private function qaHeldItemIds(array $itemIds): array
+    {
+        $wipId = $this->wip->warehouseId();
+
+        if ($wipId === null || $itemIds === []) {
+            return [];
+        }
+
+        // quantity '0': only the qa_hold figure is read here, and it is
+        // computed from the bags, not from the balance passed in.
+        $state = $this->stockState->forRows(array_map(
+            fn ($itemId) => ['item_id' => (int) $itemId, 'warehouse_id' => $wipId, 'quantity' => '0'],
+            $itemIds,
+        ));
+
+        $held = [];
+        foreach ($itemIds as $itemId) {
+            $row = $state[((int) $itemId).'|'.$wipId] ?? null;
+            if ($row !== null && bccomp((string) $row['qa_hold'], '0', 4) > 0) {
+                $held[(int) $itemId] = true;
+            }
+        }
+
+        return $held;
     }
 
     /**

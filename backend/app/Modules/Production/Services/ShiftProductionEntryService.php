@@ -666,7 +666,7 @@ class ShiftProductionEntryService
      *     helper_name?: string, notes?: string,
      *     actual_cycle_time?: ?string, active_cavities?: ?int,
      *     running_hours?: ?string, qc_rejection_kg?: ?string,
-     *     material_consumptions?: array<int, array{item_id: int, warehouse_id?: ?int, quantity_issued_kg: string, added_reason?: ?string}>,
+     *     material_consumptions?: array<int, array{item_id: int, warehouse_id?: ?int, quantity_issued_kg: string, added_reason?: ?string, substitutes_item_id?: ?int}>,
      *     scraps?: array<int, array{type: string, quantity_nos?: string, quantity_kg?: string, scrap_reason_id?: int}>,
      *     downtime_events?: array<int, array{downtime_reason_id: int, minutes: string|float|int, note?: ?string}>,
      * }  $data
@@ -818,6 +818,10 @@ class ShiftProductionEntryService
                     'quantity_issued_kg' => $line['quantity_issued_kg'],
                     'added_reason' => $addedReason === '' ? null : $addedReason,
                     'added_by' => $addedReason === '' ? null : $completedBy,
+                    // DEC-20260901-004's third half: what the line stood in
+                    // for. Only meaningful on an added line — an ordinary
+                    // line replaced nothing by definition.
+                    'substitutes_item_id' => $addedReason === '' ? null : ($line['substitutes_item_id'] ?? null),
                     'created_by' => $completedBy,
                 ]);
 

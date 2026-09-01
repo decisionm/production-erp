@@ -21,6 +21,10 @@ class ShiftMaterialConsumptionResource extends JsonResource
             // and nobody's authority.
             'added_reason' => $this->added_reason,
             'added_by' => $this->added_by === null ? null : (int) $this->added_by,
+            // What it stood in for, where it stood in for something. A
+            // substitution reads as one for the life of the record.
+            'substitutes_item_id' => $this->substitutes_item_id === null ? null : (int) $this->substitutes_item_id,
+            'is_substitution' => $this->substitutes_item_id !== null,
         ];
     }
 }

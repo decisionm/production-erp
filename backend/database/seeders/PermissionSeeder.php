@@ -46,5 +46,25 @@ class PermissionSeeder extends Seeder
         foreach (['Plant Manager', 'Accounts'] as $roleName) {
             Role::findOrCreate($roleName, 'web')->givePermissionTo($cartonTrace);
         }
+
+        // THE ADDED-CONSUMPTION-LINE TIER (DEC-20260901-007, resolving Q91).
+        // The owner's answer: Administrator AND Plant Manager, and nobody
+        // else by default. The Administrator already holds it through the
+        // catalog sync above; this grants the Plant Manager, who is on the
+        // floor when a material runs out and is the person the completion
+        // drawer's own refusal tells the supervisor to fetch. Accounts is
+        // deliberately NOT granted — booking what a machine ate is a floor
+        // act, not a books one.
+        //
+        // givePermissionTo, NOT syncPermissions, for the same reason the
+        // carton-trace grant above uses it: these roles carry permissions
+        // configured through the Roles UI on the live instance and this
+        // seeder re-runs on every deploy, so it must only ever ADD its one
+        // permission, never rewrite what an administrator granted.
+        $addedLine = $permissions->firstWhere('name', 'consumption-substitute.manage');
+
+        foreach (['Plant Manager'] as $roleName) {
+            Role::findOrCreate($roleName, 'web')->givePermissionTo($addedLine);
+        }
     }
 }
