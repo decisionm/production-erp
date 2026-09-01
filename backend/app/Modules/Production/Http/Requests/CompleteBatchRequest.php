@@ -119,6 +119,19 @@ class CompleteBatchRequest extends FormRequest
             'material_consumptions.*.warehouse_id' => ['sometimes', 'nullable', 'integer', 'exists:warehouses,id'],
             'material_consumptions.*.quantity_issued_kg' => ['required', 'numeric', 'gt:0'],
 
+            // AN OFF-PLAN LINE, DECLARED AS ONE. When a packing or
+            // consumption material runs short the floor may add what it
+            // actually reached for — but never as a line that looks planned.
+            // The flag makes it visibly distinct and the reason says why, in
+            // the person's own words; the service refuses the flag without
+            // the production.substitute-material permission. Absent means
+            // false, so every existing caller is unchanged.
+            'material_consumptions.*.is_substitution' => ['sometimes', 'boolean'],
+            'material_consumptions.*.substitution_reason' => [
+                'exclude_unless:material_consumptions.*.is_substitution,true',
+                'required', 'string', 'max:255',
+            ],
+
             // Day-bin closing weight per material, same contract as
             // HandoverRequest. This is what makes automatic consumption
             // (opening + loaded − closing − returned) computable on a
@@ -198,6 +211,7 @@ class CompleteBatchRequest extends FormRequest
             'active_cavities' => 'active cavities',
             'running_hours' => 'running hours',
             'qc_rejection_kg' => 'QC rejection kg',
+            'material_consumptions.*.substitution_reason' => 'reason for the substituted material',
             'packing_lines.*.boxes' => 'cartons on this line',
             'packing_lines.*.nos_per_box' => 'pieces per box on this line',
             'packing_lines.*.loose_inner' => 'loose inner containers on this line',

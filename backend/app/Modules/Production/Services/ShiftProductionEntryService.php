@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
+use App\Models\User;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\StockMovement;
@@ -14,6 +15,7 @@ use App\Modules\Production\Events\ShiftProductionEntryCompleted;
 use App\Modules\Production\Exceptions\MachineBusyException;
 use App\Modules\Production\Exceptions\PackagingBelongsToSeparateProductException;
 use App\Modules\Production\Exceptions\ProductNotReadyException;
+use App\Modules\Production\Exceptions\SubstitutionNotPermittedException;
 use App\Modules\Production\Models\Bom;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ShiftProductionEntryStatus;
@@ -671,6 +673,24 @@ class ShiftProductionEntryService
      *     downtime_events?: array<int, array{downtime_reason_id: int, minutes: string|float|int, note?: ?string}>,
      * }  $data
      */
+    /**
+     * May this user add a consumption line the run did not plan for?
+     *
+     * Resolved from the user ID the completion is being recorded under, not
+     * from auth()->user(): completeBatch is also reached by the page-ingest
+     * path and by replays, where the acting user is passed in rather than
+     * being the request's. A null user is never authorised — a completion with
+     * nobody attached is exactly the case that must not carry a substitution.
+     */
+    private function maySubstituteMaterial(?int $userId): bool
+    {
+        if ($userId === null) {
+            return false;
+        }
+
+        return User::find($userId)?->can('production.substitute-material') ?? false;
+    }
+
     public function completeBatch(ShiftProductionEntry $entry, array $data, ?int $completedBy): ShiftProductionEntry
     {
         if ($entry->batch_status !== BatchStatus::InProgress) {
@@ -804,10 +824,31 @@ class ShiftProductionEntryService
                         "material_consumptions.{$index}.warehouse_id",
                     )->id;
 
+                // AN OFF-PLAN LINE IS NEVER SILENT. The owner's rule (01-Sep-
+                // 2026) is that a short packing or consumption material may be
+                // covered by whatever the floor actually reached for — chosen
+                // from a dropdown of any active stock item — but that the swap
+                // must never look like a planned line afterwards. So the flag
+                // is carried onto the row, the reason with it, and the act
+                // needs a permission the way an out-of-order bag does.
+                //
+                // The line is stored SEPARATELY and never merged into the short
+                // one: two different materials genuinely left the floor, and a
+                // single summed row would name one of them as the other.
+                $isSubstitution = (bool) ($line['is_substitution'] ?? false);
+
+                if ($isSubstitution && ! $this->maySubstituteMaterial($completedBy)) {
+                    throw SubstitutionNotPermittedException::forItem(
+                        Item::find($line['item_id'])?->name ?? "item #{$line['item_id']}",
+                    );
+                }
+
                 $entry->materialConsumptions()->create([
                     'item_id' => $line['item_id'],
                     'warehouse_id' => $warehouseId,
                     'quantity_issued_kg' => $line['quantity_issued_kg'],
+                    'is_substitution' => $isSubstitution,
+                    'substitution_reason' => $isSubstitution ? ($line['substitution_reason'] ?? null) : null,
                     'created_by' => $completedBy,
                 ]);
 

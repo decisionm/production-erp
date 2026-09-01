@@ -90,6 +90,7 @@ use App\Modules\Production\Http\Controllers\ShiftProductionEntryController;
 use App\Modules\Production\Http\Controllers\ShiftStockCountController;
 use App\Modules\Production\Http\Controllers\ShiftSummaryController;
 use App\Modules\Production\Http\Controllers\SubcontractOrderController;
+use App\Modules\Production\Http\Controllers\SubstituteMaterialController;
 use App\Modules\Production\Http\Controllers\VoucherPreviewController;
 use App\Modules\Production\Http\Controllers\WorkCenterController;
 use App\Modules\Production\Http\Controllers\WorkOrderController;
@@ -1221,6 +1222,12 @@ Route::prefix('v1')->group(function () {
             // anything the resource might route.
             Route::post('shift-production-entries/page', [ShiftProductionEntryController::class, 'ingestPage']);
             Route::apiResource('shift-production-entries', ShiftProductionEntryController::class)->only(['index', 'store']);
+            // THE CONTROLLED DROPDOWN for an off-plan consumption line: what
+            // an authorised person may record as actually used when a planned
+            // material ran short. Read-only, permission-gated, and declared
+            // before the {shift_production_entry} routes so the literal
+            // segment is matched ahead of a model binding.
+            Route::get('shift-production-entries/substitute-materials', SubstituteMaterialController::class);
             Route::post('shift-production-entries/{shift_production_entry}/complete', [ShiftProductionEntryController::class, 'complete']);
             // Correcting a completed batch that quality has not touched yet —
             // the floor's own fix, refused the moment the batch stops being

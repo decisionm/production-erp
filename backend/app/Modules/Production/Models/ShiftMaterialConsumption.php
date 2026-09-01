@@ -9,9 +9,15 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['shift_production_entry_id', 'item_id', 'warehouse_id', 'quantity_issued_kg', 'created_by'])]
+#[Fillable(['shift_production_entry_id', 'item_id', 'warehouse_id', 'quantity_issued_kg', 'is_substitution', 'substitution_reason', 'created_by'])]
 class ShiftMaterialConsumption extends Model
 {
+    /** @return array<string, string> */
+    protected function casts(): array
+    {
+        return ['is_substitution' => 'boolean'];
+    }
+
     public function shiftProductionEntry(): BelongsTo
     {
         return $this->belongsTo(ShiftProductionEntry::class);
