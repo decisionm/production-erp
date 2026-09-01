@@ -7,6 +7,7 @@ use App\Modules\Inventory\Models\MaterialLot;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Production\Models\DayBinMovement;
+use App\Modules\Production\Models\FinishedCarton;
 use App\Modules\Production\Models\ProductionDowntimeEvent;
 use App\Modules\Production\Models\ResinPoolBalance;
 use App\Modules\Production\Models\ShiftProductionEntry;
@@ -160,6 +161,31 @@ class ResetTestData extends Command
             ->where('syncable_type', ShiftProductionEntry::class)
             ->get();
 
+        // The batch's OUTPUT — the boxes it packed, each with its own unique
+        // carton_no. This FK is restrictOnDelete: it is the ONE child of an
+        // entry that stops the delete instead of following it, and the table
+        // was added to the schema after this command was written. A live
+        // --write run on 01-Sep-2026 died mid-transaction on exactly that
+        // constraint. The transaction rolled back so nothing was lost — and
+        // nothing was cleared either, which is the failure this block ends.
+        //
+        // Deleted WITH the batch rather than left standing: a carton whose
+        // batch is gone is a box the system cannot explain, and the
+        // finished-goods movement that put it in the store is going in the
+        // same breath.
+        $cartons = FinishedCarton::query()
+            ->whereIn('shift_production_entry_id', $entryIds)
+            ->get();
+
+        // A DISPATCHED carton already left on a delivery. The delivery is the
+        // PARENT here (the carton carries delivery_id, not the other way
+        // round), so deleting the carton cannot break the document — it takes
+        // a line off one that survives. Named rather than refused, for the
+        // same reason the Tally vouchers below are named: a delivery built out
+        // of rehearsal batches is rehearsal too, and the operator reading the
+        // dry run is the one who can tell.
+        $dispatchedCartons = $cartons->where('status', FinishedCarton::STATUS_DISPATCHED);
+
         // The scope line and the counts under it are one statement: every figure
         // in the table is the figure UNDER THE CUTOFF, so what the operator reads
         // here is exactly what a --write run would take.
@@ -177,6 +203,8 @@ class ResetTestData extends Command
             ['stock movements deleted in total', $deleteMovementIds->count()],
             ['day-bin ledger rows', $dayBinMovementIds->count()],
             ['downtime events', ProductionDowntimeEvent::query()->whereIn('shift_production_entry_id', $entryIds)->count()],
+            ['finished cartons', $cartons->count()],
+            ['  of which already dispatched', $dispatchedCartons->count()],
             ['queued/sent Tally vouchers', $vouchers->count()],
             ['material lots', $lotIds->count()],
             ['material bags', $bagIds->count()],
@@ -186,6 +214,15 @@ class ResetTestData extends Command
             $this->newLine();
             $this->warn($straddlingGroups->count().' transfer(s) have one leg before the cutoff and one after.');
             $this->warn('They are left ALONE, whole: deleting half a transfer would invent stock at one end and lose it at the other.');
+        }
+
+        if ($dispatchedCartons->isNotEmpty()) {
+            $this->newLine();
+            $this->warn($dispatchedCartons->count().' of these cartons were already DISPATCHED on a delivery.');
+            $this->warn('The delivery itself survives — deleting the carton takes that line off it:');
+            foreach ($dispatchedCartons as $carton) {
+                $this->line("  · {$carton->carton_no}  delivery_id=".($carton->delivery_id ?? '(none)'));
+            }
         }
 
         if ($vouchers->isNotEmpty()) {
@@ -221,7 +258,7 @@ class ResetTestData extends Command
             return self::SUCCESS;
         }
 
-        DB::transaction(function () use ($entryIds, $deleteMovementIds, $dayBinMovementIds, $lotIds, $bagIds, $vouchers) {
+        DB::transaction(function () use ($entryIds, $deleteMovementIds, $dayBinMovementIds, $lotIds, $bagIds, $vouchers, $cartons) {
             // Children first, so nothing is orphaned even where the schema
             // would have allowed it.
             ProductionDowntimeEvent::query()->whereIn('shift_production_entry_id', $entryIds)->delete();
@@ -256,6 +293,11 @@ class ResetTestData extends Command
             DB::table('shift_scraps')->whereIn('shift_production_entry_id', $entryIds)->delete();
 
             TallySyncEntry::query()->whereIn('id', $vouchers->pluck('id'))->delete();
+
+            // Before the entries: this is the restrictOnDelete child, so the
+            // entry delete fails outright while a single carton still stands.
+            // Every other child either cascades or nulls out.
+            FinishedCarton::query()->whereIn('id', $cartons->pluck('id'))->delete();
 
             // Handover children point at a parent entry; clearing the link
             // first keeps the delete order from tripping the constraint.

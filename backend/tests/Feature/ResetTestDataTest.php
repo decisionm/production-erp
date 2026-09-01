@@ -12,6 +12,7 @@ use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Production\Models\DayBinMovement;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\DayBinMovementType;
+use App\Modules\Production\Models\FinishedCarton;
 use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
@@ -444,5 +445,59 @@ class ResetTestDataTest extends TestCase
             ->expectsOutputToContain('SPE-'.$entry->id)
             ->expectsOutputToContain('does not remove them THERE')
             ->assertExitCode(0);
+    }
+
+    /**
+     * The regression that cost a live run.
+     *
+     * finished_cartons arrived after this command was written, and its FK is
+     * restrictOnDelete — the only child of an entry that STOPS the delete
+     * rather than cascading or nulling. On 01-Sep-2026 a --write run against
+     * the live database rolled back mid-transaction on that constraint: the
+     * dry run had reported fourteen batches and the write cleared none of
+     * them, because every batch that packed a box was undeletable.
+     *
+     * Asserted through the command, not the model: a unit test on the delete
+     * order would have passed against a schema this one never touches.
+     */
+    public function test_a_batch_that_packed_cartons_is_actually_deleted(): void
+    {
+        $entry = $this->entry();
+        FinishedCarton::create([
+            'shift_production_entry_id' => $entry->id,
+            'carton_no' => 'CTN-0001',
+            'item_id' => $this->bottle->id,
+            'pieces' => '1200.0000',
+            'status' => FinishedCarton::STATUS_IN_STOCK,
+        ]);
+
+        $this->artisan('production:reset-test-data --write --force')
+            ->assertExitCode(0);
+
+        $this->assertNull($entry->fresh(), 'The batch must go, cartons and all.');
+        $this->assertDatabaseCount('finished_cartons', 0);
+    }
+
+    public function test_a_dispatched_carton_is_named_not_hidden(): void
+    {
+        // A dispatched carton already left on a delivery that SURVIVES this
+        // command. Deleting it takes a line off that document, so the dry run
+        // says which carton — the operator is the one who can tell whether the
+        // delivery was rehearsal too.
+        $entry = $this->entry();
+        FinishedCarton::create([
+            'shift_production_entry_id' => $entry->id,
+            'carton_no' => 'CTN-DISPATCHED-9',
+            'item_id' => $this->bottle->id,
+            'pieces' => '1200.0000',
+            'status' => FinishedCarton::STATUS_DISPATCHED,
+        ]);
+
+        $this->artisan('production:reset-test-data')
+            ->expectsOutputToContain('CTN-DISPATCHED-9')
+            ->expectsOutputToContain('already DISPATCHED')
+            ->assertExitCode(0);
+
+        $this->assertDatabaseCount('finished_cartons', 1);
     }
 }
