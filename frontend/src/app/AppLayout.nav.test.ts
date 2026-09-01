@@ -278,6 +278,22 @@ describe('the Inventory menu', () => {
         expect(salesKeys).not.toContain('/inventory/fulfilment');
         expect(salesKeys).not.toContain('/inventory/planning');
     });
+
+    /**
+     * The screen is called PRODUCTION Planning, and this is where that is
+     * pinned. It used to read "Fulfilment Planning", which named the wrong
+     * half of what it does: the service behind it walks production requests
+     * and quotes completion dates from shift clocks and capacity.
+     *
+     * The route key stays `/inventory/planning` deliberately — renaming a
+     * live route would break every bookmark the floor has, and the screen's
+     * address is not what anyone reads.
+     */
+    it('calls the planning screen Production Planning', () => {
+        const planning = inventory?.children?.find((child) => child.key === '/inventory/planning');
+
+        expect(planning?.label).toBe('Production Planning');
+    });
 });
 
 describe('the Production menu', () => {
@@ -374,11 +390,23 @@ describe('the finance-gated Procurement entries (permissionModule)', () => {
         const procurement = items.find((item) => item.key === 'procurement');
 
         // Both halves of FC-06: the rates (Supplier Bills) and the supplier
-        // identity (Tally Vendor Review). Nothing else in the group.
+        // identity (the Tally review, now a tab of Vendors). Nothing else in
+        // the group. Vendors appears for this login because it carries the
+        // finance half; the page itself opens on the review tab, since the
+        // master list this login cannot read is not offered to it.
         expect(procurement?.children?.map((child) => child.key)).toEqual([
-            '/procurement/tally-vendor-review',
+            '/procurement/vendors',
             '/procurement/supplier-bills',
         ]);
+    });
+
+    // The vendor entry is now an OR of two modules, so the login holding
+    // NEITHER is a case worth pinning: an OR is only safe while it still
+    // excludes everyone outside both halves.
+    it('shows no Procurement group at all to a login holding neither module', () => {
+        const items = buildNavItems(user(['production.view', 'production.manage']));
+
+        expect(items.find((item) => item.key === 'procurement')).toBeUndefined();
     });
 
     it('hides the finance-gated entries from a procurement-only login, whose other entries are untouched', () => {
@@ -443,13 +471,22 @@ describe('the Fulfilment Control entry (permissionModule as a list)', () => {
     });
 
     /**
-     * Widening ONE child must not smuggle the rest of the Sales menu in with
-     * it: a storekeeper still has no business on the customer, order or invoice
+     * Widening a child must not smuggle the rest of the Sales menu in with it:
+     * a storekeeper still has no business on the customer, order or invoice
      * screens, and the server would refuse them anyway.
+     *
+     * TWO children are now deliberately shared, not one. Deliveries joined the
+     * board when the STORE became the team that performs the final dispatch
+     * action (DEC-20260901-005, resolving Q78) — the store must reach the
+     * screen it dispatches from, and Sales keeps it to trace what left.
      */
-    it('is the only Sales child a store login gains', () => {
+    it('gains a store login exactly the two shared Sales children and no more', () => {
         const sales = buildNavItems(userWith(['inventory.view'])).find((group) => group.key === 'sales');
+        const keys = sales?.children?.map((child) => child.key) ?? [];
 
-        expect(sales?.children?.map((child) => child.key)).toEqual([BOARD]);
+        expect(keys).toEqual(['/sales/deliveries', BOARD]);
+        expect(keys).not.toContain('/sales/customers');
+        expect(keys).not.toContain('/sales/sales-orders');
+        expect(keys).not.toContain('/sales/invoices');
     });
 });

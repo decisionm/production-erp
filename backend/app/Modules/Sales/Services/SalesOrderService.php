@@ -16,7 +16,10 @@ use Illuminate\Support\LazyCollection;
 class SalesOrderService
 {
     /** Loaded on every order the service hands back, so the resource never lazy-loads. */
-    private const WITH = ['customer', 'lines.item'];
+    // `tallyInvoices` rides here so SalesOrderResource's Tally block is a
+    // page-wide eager load rather than a query per row — the N+1 the
+    // ready_for_dispatch seam still has, not repeated.
+    private const WITH = ['customer', 'lines.item', 'tallyInvoices'];
 
     /** How many orders cursor() reads per query — a page of the export, never the whole file. */
     private const EXPORT_CHUNK = 500;

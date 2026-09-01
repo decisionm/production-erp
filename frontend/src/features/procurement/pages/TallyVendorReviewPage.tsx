@@ -60,7 +60,13 @@ function Synced({ at }: { at: string | null }) {
     );
 }
 
-export default function TallyVendorReviewPage() {
+/**
+ * `embedded` is passed when this renders as the Vendors page's second TAB
+ * rather than as its own screen: the tab already names the section, so the
+ * page heading would say it twice. Nothing else differs — same query, same
+ * mutations, same FC-06 refusal from the API.
+ */
+export default function TallyVendorReviewPage({ embedded = false }: { embedded?: boolean } = {}) {
     const queryClient = useQueryClient();
     const [selected, setSelected] = useState<Record<string, string[]>>({});
 
@@ -286,7 +292,7 @@ export default function TallyVendorReviewPage() {
 
     return (
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Typography.Title level={3} style={{ marginBottom: 0 }}>Tally vendor review</Typography.Title>
+            {!embedded && <Typography.Title level={3} style={{ marginBottom: 0 }}>Tally vendor review</Typography.Title>}
             <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
                 What Tally holds about a supplier, against what this ERP records. Nothing here changes the vendor master until
                 you confirm it, and nothing is read from Tally on a timer — the agent pulls when an operator asks it to.

@@ -61,11 +61,14 @@
              suite (exports, presenter, link service, per-type lifecycles), and those
              tests assert the pre-existing staged contract, not the gate. The
              application default (config/tally-sync.php, no env set) is OFF for both,
-             fail-closed pending the owner/Accounts answers: the factory's own export
-             holds ZERO Delivery Notes, and DEC-20260809-003 records that real sales
-             are invoiced directly in Tally while the Sales builder is self-declared
-             unvalidated (no GST ledgers, no Rounding Off). SalesTallyEmissionGateTest
-             exercises the OFF behaviour explicitly. -->
+             and OFF is now the DECIDED state, not a holding position: DEC-20260831-012
+             (superseding DEC-20260831-007 the same day) settles that the ERP sends NO
+             Sales Order, NO Delivery Note and NO Sales Invoice to Tally. Tally creates
+             the Sales Invoice, the e-invoice and the e-way details, and the ERP IMPORTS
+             that voucher instead (TallySalesInvoiceImporter). This pin therefore keeps
+             a DORMANT builder's fixtures alive and must never be read as the deployed
+             state. SalesTallyEmissionGateTest asserts the shipped default itself by
+             reading config/tally-sync.php with the env cleared. -->
         <env name="TALLY_SYNC_DELIVERY_NOTES_ENABLED" value="true"/>
         <env name="TALLY_SYNC_SALES_INVOICES_ENABLED" value="true"/>
         <!-- Synthetic and FC-06-safe, exactly like the PO and Receipt Note company

@@ -1,13 +1,18 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, Modal, Space, Table, Tag, Typography } from 'antd';
+import { Button, Form, Input, Modal, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { createVendor, listVendors, updateVendor } from '@/features/procurement/api';
 import type { Vendor } from '@/features/procurement/types';
 import { ListEmpty } from '@/lib/ListEmpty';
+import { hasModuleAccess } from '@/features/auth/permissions';
+import { useAuthStore } from '@/features/auth/store';
+import TallyVendorReviewPage from '@/features/procurement/pages/TallyVendorReviewPage';
+import { vendorActiveTab } from '@/features/procurement/vendorTabs';
 import { vendorLedgerWords } from '@/features/procurement/documentWords';
 
 // The New Vendor form does NOT ask for a code. The server mints "V-0001" and
@@ -39,7 +44,39 @@ const editVendorSchema = vendorSchema.extend({
 type VendorFormValues = z.infer<typeof vendorSchema>;
 type EditVendorFormValues = z.infer<typeof editVendorSchema>;
 
+/**
+ * THE ONE VENDOR MASTER (DEC-20260825-003).
+ *
+ * Vendor used to be two sibling menu items — "Vendors" and "Tally Vendor
+ * Review" — which read as two vendor masters to maintain. There is one:
+ * this page, on the Configuration Lifecycle Contract (DEC-20260817-002),
+ * the same shape Customers and Warehouses use. Tally PROPOSES; this master
+ * decides. So the review is now a TAB of the master it feeds, not a screen
+ * beside it.
+ *
+ * FC-06 IS UNCHANGED AND IS THE REASON FOR THE GATE BELOW. Supplier
+ * identity is Owner/Accounts only, so the review tab is offered on exactly
+ * the predicate the nav entry used — hasModuleAccess(user, 'finance') — and
+ * the API keeps refusing everyone else regardless (module:finance on
+ * tally/vendor-review/*, untouched). A procurement-only login is not shown
+ * the tab, and because the pane is never rendered for them the review query
+ * is never fired either.
+ */
 export default function VendorsPage() {
+    const user = useAuthStore((state) => state.user);
+    // TWO SEPARATE GATES, because the two tabs are two different modules and
+    // the page must not offer either login a tab its API will refuse. The
+    // master list is module:procurement; the review is module:finance
+    // (FC-06). A login holding one sees exactly the one it held before this
+    // change, with no tab bar; only a login holding both sees a choice.
+    const canSeeMaster = hasModuleAccess(user, 'procurement');
+    const canReviewTally = hasModuleAccess(user, 'finance');
+    // Deep links that used to land on /procurement/tally-vendor-review are
+    // redirected here with ?tab=tally-review, so an old bookmark still
+    // reaches the thing it named.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const activeTab = vendorActiveTab(searchParams.get('tab'), { canSeeMaster, canReviewTally });
+
     const [modalOpen, setModalOpen] = useState(false);
     const [editingVendor, setEditingVendor] = useState<Vendor | null>(null);
     const queryClient = useQueryClient();
@@ -104,7 +141,7 @@ export default function VendorsPage() {
         },
     });
 
-    return (
+    const master = (
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
                 <Typography.Title level={3} style={{ margin: 0 }}>Vendors</Typography.Title>
@@ -328,5 +365,26 @@ export default function VendorsPage() {
                 </Form>
             </Modal>
         </>
+    );
+
+    // One tab is not a tab bar: a login that reaches only one of the two
+    // gets that surface bare, exactly as it did when these were two menu
+    // entries.
+    if (!canReviewTally) return master;
+    if (!canSeeMaster) return <TallyVendorReviewPage />;
+
+    return (
+        <Tabs
+            activeKey={activeTab ?? 'master'}
+            onChange={(key) => setSearchParams(key === 'tally-review' ? { tab: 'tally-review' } : {}, { replace: true })}
+            items={[
+                { key: 'master', label: 'Vendors', children: master },
+                {
+                    key: 'tally-review',
+                    label: 'Tally review',
+                    children: <TallyVendorReviewPage embedded />,
+                },
+            ]}
+        />
     );
 }

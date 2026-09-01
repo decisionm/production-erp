@@ -24,6 +24,7 @@ use App\Modules\HRMS\Http\Controllers\LeaveBalanceController;
 use App\Modules\HRMS\Http\Controllers\LeaveRequestController;
 use App\Modules\HRMS\Http\Controllers\LeaveTypeController;
 use App\Modules\Inventory\Http\Controllers\BatchController;
+use App\Modules\Inventory\Http\Controllers\DamagedFinishedGoodController;
 use App\Modules\Inventory\Http\Controllers\FactoryLookupController;
 use App\Modules\Inventory\Http\Controllers\FulfilmentController;
 use App\Modules\Inventory\Http\Controllers\ItemController;
@@ -284,6 +285,24 @@ Route::prefix('v1')->group(function () {
              */
             Route::get('production-returns/returnable', [ProductionReturnController::class, 'returnable']);
             Route::post('production-returns', [ProductionReturnController::class, 'store']);
+
+            /*
+             * DAMAGED FINISHED GOODS → QUALITY (DEC-20260901-006).
+             *
+             * The STORE's act, on the store's own permission, which is why it
+             * sits here beside the production return and not under `quality/`:
+             * the people who find a crushed box are the people holding the
+             * stock. What Quality then does with it — confirm the damage and
+             * scrap it, or release it — is the existing
+             * `quality/returned-material-holds` pair, gated on Quality's
+             * permission. Reporting and scrapping are deliberately two teams'
+             * acts, which is the whole meaning of "to Quality first".
+             *
+             * POST only, append-only like every other stock lifecycle here: a
+             * wrong report is answered by Quality releasing it, never by
+             * editing the movement away.
+             */
+            Route::post('damaged-finished-goods', [DamagedFinishedGoodController::class, 'store']);
 
             // Phase 6 traceability (store side): supplier lots + bags with
             // unique barcodes, and the FIFO pick list. The whole surface
@@ -669,10 +688,39 @@ Route::prefix('v1')->group(function () {
             // only where an approved batch really stands behind it. Read-only.
             Route::get('sales-orders/{sales_order}/cost-insight', [SalesCostInsightController::class, 'show']);
 
-            Route::apiResource('deliveries', DeliveryController::class)->only(['index', 'store', 'show']);
-
             Route::apiResource('invoices', InvoiceController::class)->only(['index', 'store', 'show']);
             Route::post('invoices/{invoice}/issue', [InvoiceController::class, 'issue']);
+        });
+
+        /*
+         * DELIVERIES — READ by Sales or the Store; DISPATCHED by the Store alone.
+         *
+         * DEC-20260901-001 (resolving Q78): the STORE performs the final
+         * dispatch action and Sales does not. So the resource is split rather
+         * than moved wholesale, because the two halves belong to different
+         * teams:
+         *
+         *   index/show  `module:sales,inventory` — OR, so the desk that sold
+         *               the goods can still trace what left against its order
+         *               and the store can see what it dispatched. Reading is
+         *               not dispatching.
+         *   store       `module:inventory` ALONE — the act. A sales.manage
+         *               login now gets 403 here, which is the decision's
+         *               whole point.
+         *
+         * The Store is NOT given sales.manage to obtain this. It dispatches on
+         * its OWN inventory permission, so nothing about sales orders,
+         * customers or invoices is unlocked by being able to dispatch — the
+         * exact separation Q78 asked for. This mirrors Quality's dispatch
+         * sign-off above: the record lives on a Sales model, the act is gated
+         * to the team that performs it.
+         */
+        Route::prefix('sales')->middleware('module:sales,inventory')->group(function () {
+            Route::apiResource('deliveries', DeliveryController::class)->only(['index', 'show']);
+        });
+
+        Route::prefix('sales')->middleware('module:inventory')->group(function () {
+            Route::apiResource('deliveries', DeliveryController::class)->only(['store']);
         });
 
         Route::prefix('finance')->middleware('module:finance')->group(function () {

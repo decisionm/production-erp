@@ -42,7 +42,9 @@ class FinishedCartonTest extends TestCase
         parent::setUp();
 
         $user = User::factory()->create(['is_active' => true]);
-        foreach (['production.view', 'production.manage', 'sales.manage', 'sales.view'] as $permission) {
+        // `inventory.manage` because this actor DISPATCHES: the Store performs the
+        // final dispatch action, not Sales (DEC-20260901-005, resolving Q78).
+        foreach (['production.view', 'production.manage', 'sales.manage', 'sales.view', 'inventory.manage'] as $permission) {
             Permission::findOrCreate($permission, 'web');
             $user->givePermissionTo($permission);
         }

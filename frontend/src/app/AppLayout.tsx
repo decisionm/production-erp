@@ -138,12 +138,17 @@ export const allNavItems: readonly NavGroup[] = [
         label: 'Procurement',
         module: 'procurement',
         children: [
-            { key: '/procurement/vendors', label: 'Vendors' },
-            // Owner/Accounts only, on the same footing as Supplier Bills
-            // below and for the same reason: supplier identity is FC-06, so
-            // the API gates on module:finance while the Finance MODULE itself
-            // stays unadopted and must not become visible through a child.
-            { key: '/procurement/tally-vendor-review', label: 'Tally Vendor Review', permissionModule: 'finance' },
+            // ONE vendor entry, not two. The Tally vendor review is a TAB of
+            // this page (?tab=tally-review), gated inside it on the same
+            // finance predicate the separate entry used — supplier identity
+            // is FC-06, and the API keeps refusing everyone else regardless.
+            //
+            // The list is an OR because the page is now two modules' surfaces
+            // under one key, and it must match the OR the ROUTES grant or the
+            // menu and the server disagree about who may look: a finance-only
+            // Accounts login still needs a sidebar path to the review, which
+            // is the very regression the comment above this group records.
+            { key: '/procurement/vendors', label: 'Vendors', permissionModule: ['procurement', 'finance'] },
             { key: '/procurement/purchase-requisitions', label: 'Purchase Requisitions' },
             { key: '/procurement/purchase-orders', label: 'Purchase Orders' },
             { key: '/procurement/goods-receipts', label: 'Goods Receipts' },
@@ -215,7 +220,7 @@ export const allNavItems: readonly NavGroup[] = [
             // moved straight back when review found that (Cursor, ac56e12).
             // Neither screen moves stock and neither gates dispatch (Q27).
             { key: '/inventory/fulfilment', label: 'Store Fulfilment' },
-            { key: '/inventory/planning', label: 'Fulfilment Planning' },
+            { key: '/inventory/planning', label: 'Production Planning' },
             // WAREHOUSES IS SETUP AND SITS LAST, which is what this group's
             // own header already said it should ("daily-use first, masters
             // after") — it was sitting between Store ↔ Production and Stock
@@ -339,7 +344,15 @@ export const allNavItems: readonly NavGroup[] = [
         children: [
             { key: '/sales/customers', label: 'Customers' },
             { key: '/sales/sales-orders', label: 'Sales Orders' },
-            { key: '/sales/deliveries', label: 'Deliveries' },
+            {
+                key: '/sales/deliveries',
+                label: 'Deliveries',
+                // The STORE dispatches, Sales only reads (DEC-20260901-005).
+                // Both therefore need the screen, so it is shown to either —
+                // mirroring the route, which is `module:sales,inventory` to
+                // read and `module:inventory` to post.
+                permissionModule: ['sales', 'inventory'],
+            },
             { key: '/sales/invoices', label: 'Invoices' },
             {
                 key: '/sales/fulfilment-control',

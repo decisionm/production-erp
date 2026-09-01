@@ -130,6 +130,14 @@ class CustomerService
                 ->label('quotation'),
             DependencyCheck::table('leads', 'converted_customer_id')
                 ->label('converted lead'),
+            // A Tally Sales voucher IMPORTED against this customer
+            // (DEC-20260831-012). Its FK is ON DELETE SET NULL, so without
+            // this check a hard delete would silently un-name the party on a
+            // voucher the factory's own accounts raised — the ERP could then
+            // no longer say whose invoice it was. It is a real reference and
+            // blocks a delete exactly like a sales order does.
+            DependencyCheck::table('tally_sales_invoices', 'customer_id')
+                ->label('imported Tally sales invoice'),
         ];
     }
 

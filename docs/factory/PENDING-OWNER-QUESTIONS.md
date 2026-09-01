@@ -2106,7 +2106,7 @@ a bag.
 
 *Was open 2026-08-30 → 2026-08-31.*
 
-## Q78 · Is there a store-acceptance step for finished goods, and may the Storekeeper approve dispatch?
+## Q78 · Is there a store-acceptance step for finished goods, and may the Storekeeper approve dispatch? — PARTLY RESOLVED
 
 The Storekeeper role now exists as a definition
 (`roles:define-storekeeper`, dry-run first). Two of the capabilities asked
@@ -2125,8 +2125,23 @@ What is asked: should a store-acceptance step exist for finished goods, and
 who performs it? And should dispatch approval be separable from the rest of
 Sales, or does the Storekeeper simply not do it?
 
-**Blocks:** those two capabilities only. The rest of the Storekeeper role
-works without them. *Open since 2026-08-30.*
+**The dispatch half is ANSWERED — DEC-20260901-001, 01-Sep-2026.** The STORE
+performs the final dispatch action and Sales does not. Dispatch was separated
+from the rest of Sales exactly as this question asked: raising a delivery is
+now gated on the Store's own `inventory.manage`, so the Storekeeper dispatches
+without being handed `sales.manage` and without gaining sales orders,
+customers or invoices. Sales keeps its READ of deliveries — reading is not
+dispatching. Every gate already in the sequence stands unchanged: held in
+full, then Quality's recorded approval, then dispatch, then Sales invoices.
+
+**The store-acceptance half is STILL OPEN.** Nothing has been said about
+whether the finished-goods chain (complete → quality-check → pm-approve →
+accountant-approve) should gain a store-acceptance stage, or who would
+perform it. That is a new stage in how the factory works and is not implied
+by the dispatch answer.
+
+**Blocks:** the store-acceptance capability only. *Open since 2026-08-30;
+dispatch half closed 2026-09-01.*
 
 ## Q79 · What should the stock screen call the quantity a storekeeper may act on? — RESOLVED (DEC-20260831-002)
 

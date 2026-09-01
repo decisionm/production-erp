@@ -133,7 +133,7 @@ class GenericEnqueueReplayTest extends TestCase
 
     private function salesDesk(): static
     {
-        return $this->actingWith(['sales.view', 'sales.manage'], 'Sales Desk');
+        return $this->actingWith(['sales.view', 'sales.manage', 'inventory.manage'], 'Sales Desk'); // dispatch is the STORE's act (DEC-20260901-005)
     }
 
     // ---- sources, each through its own module's endpoint ------------------
