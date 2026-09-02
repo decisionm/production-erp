@@ -2,6 +2,7 @@
 
 namespace App\Modules\Procurement\Http\Resources;
 
+use App\Modules\Compliance\Services\GstStateCodes;
 use App\Modules\Procurement\Models\Vendor;
 use App\Modules\Procurement\Services\VendorService;
 use App\Modules\TallySync\Models\Ledger;
@@ -24,6 +25,7 @@ class VendorResource extends JsonResource
             'address' => $this->address,
             'gstin' => $this->gstin,
             'state_code' => $this->state_code,
+            'state_name' => GstStateCodes::name($this->state_code),
             // The vendor's ledger name in Tally (Phase 6) — null until Accounts sets it.
             'tally_ledger_name' => $this->tally_ledger_name,
             /*
