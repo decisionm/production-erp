@@ -963,20 +963,37 @@ describe('purchasableItemOptions', () => {
 });
 
 /**
- * DEC-20260902-023 composed onto `purchasableItemOptions`. What broke once
- * and is pinned here: composing on a category-narrowed item list (instead
- * of the full one) makes `purchasableItemOptions`'s own `keepIds` branch
- * unreachable, because an archived item never survives to be seen by that
- * call — a kept, since-archived line on an amended draft would render
- * blank instead of "(Retired)". `purchaseOrderItemOptions` must give
- * `purchasableItemOptions` the FULL list and narrow only the OFFERED set
- * afterward.
+ * DEC-20260902-023 composed onto `purchasableItemOptions`. Two things broke
+ * once and are pinned here, both found in review:
+ *
+ * 1. Composing on a category-narrowed item list (instead of the full one)
+ *    makes `purchasableItemOptions`'s own `keepIds` branch unreachable,
+ *    because an archived item never survives to be seen by that call — a
+ *    kept, since-archived line on an amended draft would render blank
+ *    instead of "(Retired)". Fixed by giving `purchasableItemOptions` the
+ *    FULL list and narrowing only the OFFERED set afterward.
+ *
+ * 2. That fix alone still let an ACTIVE kept item through as a normal,
+ *    choosable option — `purchasableItemOptions`'s "offered" bucket checks
+ *    only `is_active`, not category, so a kept finished good or a kept
+ *    item the default filter excludes rendered exactly like a real new
+ *    choice, offered on every OTHER line too. Fixed by marking an option
+ *    `disabled` whenever it survives only via `keepIds`, not because
+ *    `purchasePickerItems` is offering it.
+ *
+ * 3. The "Unclassified — reason required" flag, read off
+ *    `purchasePickerItems`'s already-filtered output, silently disappeared
+ *    for a kept unclassified item whenever `showAdditional` was off (the
+ *    Amend default) — an existing unclassified line lost its warning.
+ *    Fixed by reading `isUnclassified` off the RAW item for every id this
+ *    function can emit, independent of `showAdditional`.
  */
 describe('purchaseOrderItemOptions (DEC-20260902-023, composed with purchasableItemOptions)', () => {
     const RESIN = { id: 1, sku: 'RESIN', name: 'Relpet', is_active: true, category: 'raw_material' } as Item;
     const ARCHIVED_RESIN = { id: 2, sku: 'OLD-RESIN', name: 'Old Relpet', is_active: false, category: 'raw_material' } as Item;
     const FINISHED_GOOD = { id: 3, sku: 'BTL', name: 'Bottle', is_active: true, category: 'finished_good' } as Item;
     const UNCLASSIFIED = { id: 4, sku: 'MYST', name: 'Mystery Item', is_active: true, category: null } as Item;
+    const OTHER = { id: 5, sku: 'SPARE', name: 'Spare Part', is_active: true, category: 'other' } as Item;
 
     it('keeps an archived raw-material item the order being amended already names, marked (Retired)', () => {
         const options = purchaseOrderItemOptions([RESIN, ARCHIVED_RESIN], false, [2]);
@@ -990,10 +1007,27 @@ describe('purchaseOrderItemOptions (DEC-20260902-023, composed with purchasableI
         expect(purchaseOrderItemOptions([RESIN, ARCHIVED_RESIN], false, []).map((o) => o.value)).toEqual([1]);
     });
 
-    it('never offers a finished good for a NEW selection, whatever the choice — but keeps one already on the amended order', () => {
+    it('never offers a finished good for a NEW selection, whatever the choice — but keeps one already on the amended order, disabled', () => {
         expect(purchaseOrderItemOptions([RESIN, FINISHED_GOOD], false, []).some((o) => o.value === 3)).toBe(false);
         expect(purchaseOrderItemOptions([RESIN, FINISHED_GOOD], true, []).some((o) => o.value === 3)).toBe(false);
-        expect(purchaseOrderItemOptions([RESIN, FINISHED_GOOD], false, [3]).some((o) => o.value === 3)).toBe(true);
+
+        const kept = purchaseOrderItemOptions([RESIN, FINISHED_GOOD], false, [3]);
+        expect(kept.some((o) => o.value === 3)).toBe(true);
+        // Shown, not choosable — the same treatment an archived-kept item
+        // gets, because it survives only via `keepIds`, not because it is
+        // offered for a NEW selection on this or any other line.
+        expect(kept.find((o) => o.value === 3)?.disabled).toBe(true);
+    });
+
+    it('disables a kept ACTIVE item the default filter excludes, while a kept item that IS offered stays enabled', () => {
+        // OTHER is active and category `other` — excluded while
+        // showAdditional is off, so kept-only here too.
+        const options = purchaseOrderItemOptions([RESIN, OTHER], false, [1, 5]);
+
+        expect(options.find((o) => o.value === 5)?.disabled).toBe(true);
+        // RESIN is both offered (raw_material, always default) AND kept —
+        // offered wins; nothing about being on the amended order disables it.
+        expect(options.find((o) => o.value === 1)?.disabled).toBeUndefined();
     });
 
     it('flags an offered unclassified item, and leaves a kept archived item\'s (Retired) label alone', () => {
@@ -1002,6 +1036,15 @@ describe('purchaseOrderItemOptions (DEC-20260902-023, composed with purchasableI
         expect(options.find((o) => o.value === 4)?.label).toContain('Unclassified — reason required');
         expect(options.find((o) => o.value === 2)?.label).not.toContain('Unclassified');
         expect(options.find((o) => o.value === 2)?.label).toContain('(Retired)');
+    });
+
+    it('still flags a kept unclassified item while the checkbox is off (Amend default) — the pre-Task-3 line does not lose its warning', () => {
+        const options = purchaseOrderItemOptions([RESIN, UNCLASSIFIED], false, [4]);
+
+        expect(options.find((o) => o.value === 4)?.label).toContain('Unclassified — reason required');
+        // Kept only because the amended order names it (showAdditional is
+        // off, so it is not otherwise offered) — still shown, not choosable.
+        expect(options.find((o) => o.value === 4)?.disabled).toBe(true);
     });
 });
 

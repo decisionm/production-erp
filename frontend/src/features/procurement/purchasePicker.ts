@@ -17,6 +17,14 @@ export interface PurchasePickerItem {
 
 export const DEFAULT_PURCHASE_CATEGORIES = ['raw_material', 'packing_material'] as const;
 
+/**
+ * The one wording for "this line needs a reason" — spelled once so a
+ * caller that re-derives the flag from `isUnclassified` on its own (a kept
+ * item a category/showAdditional filter would otherwise have dropped, for
+ * instance) cannot drift from what this file prints for an offered one.
+ */
+export const UNCLASSIFIED_WARNING = 'Unclassified — reason required';
+
 export function isUnclassified(item: Pick<Item, 'category'>): boolean {
     return item.category === null || item.category === undefined;
 }
@@ -28,7 +36,7 @@ export function purchasePickerItems(items: readonly Item[] | undefined | null, s
         if (item.category === 'finished_good') continue;
         const isDefault = (DEFAULT_PURCHASE_CATEGORIES as readonly string[]).includes(item.category ?? '');
         if (!isDefault && !showAdditional) continue;
-        out.push(isUnclassified(item) ? { id: item.id, item, warning: 'Unclassified — reason required' } : { id: item.id, item });
+        out.push(isUnclassified(item) ? { id: item.id, item, warning: UNCLASSIFIED_WARNING } : { id: item.id, item });
     }
     return out;
 }
