@@ -1621,7 +1621,9 @@ Store re-points on its own judgement, no approval, audited. **(c) resolved
 never ranks customers or infers priority. **(d) resolved 2026-09-02 by
 DEC-20260902-031:** pending requests sort by promised date, earliest first, as
 a queue order only; manual positions stick; started jobs never reorder; a
-re-sort is flagged. (e) and (f) still open. The original entry follows.
+re-sort is flagged. **(e) resolved 2026-09-02 by DEC-20260902-032:** covered
+is delivered plus held; a queued request retires when covered; a started job
+is never retired by paperwork. (f) still open. The original entry follows.
 
 Store fulfilment lets the store hold FG stock against a confirmed sales-order
 line. The build refuses to hold more than exists, but it does not decide WHOSE

@@ -495,8 +495,11 @@ record's source.
   by a date change is flagged and the date is shown.
 - **GAP:** the queue today is raised order with manual reordering; the build
   adds the date sort, the sticky manual position and the moved flag.
-- **OPEN (one at a time):** Q62(e) when a request is answered; (f) parallel
-  lines for planning dates.
+- **VERIFIED as a decision:** DEC-20260902-032, Q62(e). Covered is delivered
+  plus held, never double-counted; a queued request retires when its line is
+  covered; a started job is never retired by paperwork. Confirms the shipped
+  formula.
+- **OPEN:** Q62(f) parallel lines for planning dates.
 
 ## Sections still to capture
 
