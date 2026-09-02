@@ -15,6 +15,7 @@ export interface Vendor {
     address: string | null;
     gstin: string | null;
     state_code: string | null;
+    state_name: string | null;
     /**
      * DEC-20260902-026: which of the five procurement categories this
      * vendor is classified under — zero, one or many. Sorted values; an

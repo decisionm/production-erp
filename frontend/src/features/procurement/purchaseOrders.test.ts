@@ -85,6 +85,7 @@ const po = (over: Partial<PurchaseOrder> = {}): PurchaseOrder => ({
         address: null,
         gstin: null,
         state_code: null,
+        state_name: null,
         classifications: [],
         is_active: true,
         created_at: '2026-08-01T00:00:00Z',

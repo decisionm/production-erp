@@ -275,7 +275,7 @@ export default function VendorsPage() {
                     { title: 'Email', dataIndex: 'email' },
                     { title: 'Phone', dataIndex: 'phone' },
                     { title: 'GSTIN', dataIndex: 'gstin' },
-                    { title: 'State', dataIndex: 'state_code' },
+                    { title: 'State', dataIndex: 'state_code', render: (code: string | null, row: Vendor) => (code ? `${code} — ${row.state_name ?? 'Unknown code'}` : '') },
                     {
                         title: 'Tally ledger',
                         // vendorLedgerWords: most imported vendors carry a
