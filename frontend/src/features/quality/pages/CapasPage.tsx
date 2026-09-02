@@ -6,7 +6,15 @@ import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { listAllEmployees } from '@/features/hrms/api';
 import { closeCapa, createCapa, listCapas, listNonConformanceReports, startCapa, updateCapa } from '@/features/quality/api';
+import { CAPA_DEFAULT_SORT, CAPA_LIST, CAPA_SORT_FIELDS, type SortedListParams } from '@/features/quality/qualityLists';
 import type { Capa, CapaStatus } from '@/features/quality/types';
+import { compactParams } from '@/lib/listParams';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
+
+/** The register's URL keys beyond page / per_page (CAPA_LIST, qualityLists.ts). Module-level: useListParams memoises on it. */
+const CAPA_LIST_SPEC = CAPA_LIST.spec;
 
 const createSchema = z.object({
     non_conformance_report_id: z.number().optional(),
@@ -37,8 +45,18 @@ export default function CapasPage() {
     const [verifiedEffective, setVerifiedEffective] = useState(true);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['quality', 'capas'], queryFn: listCapas });
-    const { data: ncrs } = useQuery({ queryKey: ['quality', 'ncrs'], queryFn: listNonConformanceReports });
+    // THE URL IS THE LIST'S STATE (sort, page, page size) and the SERVER
+    // cuts the page: this table used to draw the server's first twenty rows
+    // under pagination={false}, with nothing on screen to say a twenty-first
+    // existed.
+    const { params, setParams, setPage } = useListParams<SortedListParams>(CAPA_LIST_SPEC);
+    const request = compactParams(params);
+    const { data, isLoading } = useQuery({
+        queryKey: ['quality', 'capas', request],
+        queryFn: () => listCapas(params),
+        placeholderData: (previous) => previous,
+    });
+    const { data: ncrs } = useQuery({ queryKey: ['quality', 'ncrs'], queryFn: () => listNonConformanceReports() });
     const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
 
     const ncrOptions = ncrs?.data.map((n) => ({ value: n.id, label: `NCR #${n.id} — ${n.description.slice(0, 40)}` })) ?? [];
@@ -108,19 +126,44 @@ export default function CapasPage() {
 
             <Table<Capa>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries the whole register.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, CAPA_SORT_FIELDS, CAPA_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'CAPAs')}
                 columns={[
-                    { title: 'Title', dataIndex: 'title' },
+                    {
+                        title: 'Title',
+                        key: 'title',
+                        dataIndex: 'title',
+                        sorter: true,
+                        sortOrder: columnSortOrder('title', params.sort, CAPA_DEFAULT_SORT),
+                    },
                     {
                         title: 'Status',
+                        key: 'status',
                         dataIndex: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, CAPA_DEFAULT_SORT),
                         render: (status: CapaStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
+                    // Owner shows the employee's NAME (a relation), which the
+                    // server has no column to sort on — so no sorter here.
                     { title: 'Owner', render: (_, row) => row.owner?.name },
-                    { title: 'Due', dataIndex: 'due_date' },
+                    {
+                        // Nullable: an undated CAPA sorts last either way (server-side).
+                        title: 'Due',
+                        key: 'due_date',
+                        dataIndex: 'due_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('due_date', params.sort, CAPA_DEFAULT_SORT),
+                    },
                     {
                         title: 'Actions',
                         render: (_, row) => (

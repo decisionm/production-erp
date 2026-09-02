@@ -6,6 +6,8 @@ import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { createAgentToken, listAgentTokens, revokeAgentToken } from '@/features/tally-sync/api';
 import type { AgentToken } from '@/features/tally-sync/types';
+import { columnSorter } from '@/lib/clientSort';
+import { TABLE_STICKY } from '@/lib/tableProps';
 
 const tokenSchema = z.object({
     name: z.string().min(1, 'Name is required').max(100),
@@ -64,23 +66,32 @@ export default function AgentTokensPage() {
 
             <Table<AgentToken>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 rowKey="id"
                 loading={isLoading}
+                // A handful of tokens, all in the browser: honest client sorts.
                 dataSource={data?.data}
                 pagination={false}
                 columns={[
-                    { title: 'Name', dataIndex: 'name' },
+                    { title: 'Name', dataIndex: 'name', sorter: columnSorter((row: AgentToken) => row.name, 'text') },
                     {
                         title: 'Abilities',
                         dataIndex: 'abilities',
                         render: (abilities: string[]) => abilities.map((a) => <Tag key={a}>{a}</Tag>),
                     },
                     {
+                        // "Never" is an empty value and sorts last either way.
                         title: 'Last Used',
                         dataIndex: 'last_used_at',
+                        sorter: columnSorter((row: AgentToken) => row.last_used_at, 'date'),
                         render: (v: string | null) => (v ? v.slice(0, 19).replace('T', ' ') : 'Never'),
                     },
-                    { title: 'Created', dataIndex: 'created_at', render: (v: string) => v.slice(0, 10) },
+                    {
+                        title: 'Created',
+                        dataIndex: 'created_at',
+                        sorter: columnSorter((row: AgentToken) => row.created_at, 'date'),
+                        render: (v: string) => v.slice(0, 10),
+                    },
                     {
                         title: 'Actions',
                         render: (_, row) => (

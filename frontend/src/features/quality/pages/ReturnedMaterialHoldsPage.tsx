@@ -4,7 +4,9 @@ import { useMemo, useState } from 'react';
 import { listAllWarehouses } from '@/features/inventory/api';
 import { apiRefusalMessage } from '@/features/material-flow/api';
 import { formatQuantity, permitsFractions } from '@/features/material-flow/words';
+import { columnSorter } from '@/lib/clientSort';
 import { ListEmpty } from '@/lib/ListEmpty';
+import { TABLE_STICKY } from '@/lib/tableProps';
 import {
     confirmReturnedMaterialDamage,
     listReturnedMaterialHolds,
@@ -160,6 +162,9 @@ export default function ReturnedMaterialHoldsPage() {
             <Table<ReturnedMaterialHold>
                 rowKey="item_id"
                 size="small"
+                sticky={TABLE_STICKY}
+                // The whole hold is in the browser (an unpaged read), so the
+                // column sorters are honest client sorts over every row.
                 dataSource={holds.data ?? []}
                 loading={holds.isPending}
                 pagination={false}
@@ -176,6 +181,7 @@ export default function ReturnedMaterialHoldsPage() {
                     {
                         title: 'Material',
                         key: 'material',
+                        sorter: columnSorter((row: ReturnedMaterialHold) => row.item_name ?? `#${row.item_id}`, 'text'),
                         render: (row: ReturnedMaterialHold) => (
                             <Space size={4}>
                                 <span>{row.item_name ?? `#${row.item_id}`}</span>
@@ -192,6 +198,7 @@ export default function ReturnedMaterialHoldsPage() {
                         title: 'Waiting',
                         key: 'quantity',
                         align: 'right' as const,
+                        sorter: columnSorter((row: ReturnedMaterialHold) => row.quantity, 'number'),
                         render: (row: ReturnedMaterialHold) => formatQuantity(row.quantity, row.uom ?? ''),
                     },
                     {

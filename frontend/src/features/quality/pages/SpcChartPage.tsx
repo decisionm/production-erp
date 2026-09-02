@@ -9,6 +9,15 @@ import { z } from 'zod';
 import { CONFIGURATION_STATUS_WORDS } from '@/components/configuration/configurationWords';
 import { getSpcChart, listSpcCharacteristics, recordSpcMeasurement } from '@/features/quality/api';
 import type { SpcChartPoint } from '@/features/quality/types';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
+import { TABLE_STICKY } from '@/lib/tableProps';
+
+/** The Status cell's words for a point — the value its column filter offers. */
+function pointStatus(point: SpcChartPoint): string {
+    if (!point.beyond_limits && !point.run_violation) return 'In control';
+
+    return [point.beyond_limits ? 'Beyond limits' : '', point.run_violation ? 'Run of 8' : ''].filter(Boolean).join(' + ');
+}
 
 const measurementSchema = z.object({
     value: z.number({ error: 'Value is required' }),
@@ -159,25 +168,35 @@ export default function SpcChartPage() {
                     <Card title="Points" style={{ marginTop: 16 }}>
                         <Table<SpcChartPoint>
                             scroll={{ x: 'max-content' }}
+                            sticky={TABLE_STICKY}
                             rowKey="id"
                             size="small"
+                            // Every point is in the browser (the chart's own
+                            // read), so these are honest client sorts and
+                            // filters over the whole series.
                             dataSource={chart.points}
                             pagination={false}
                             columns={[
-                                { title: 'Measured At', dataIndex: 'measured_at' },
-                                { title: 'Value', dataIndex: 'value' },
-                                { title: 'Moving Range', dataIndex: 'moving_range' },
+                                {
+                                    title: 'Measured At',
+                                    dataIndex: 'measured_at',
+                                    sorter: columnSorter((row: SpcChartPoint) => row.measured_at, 'date'),
+                                },
+                                { title: 'Value', dataIndex: 'value', sorter: columnSorter((row: SpcChartPoint) => row.value, 'number') },
+                                {
+                                    title: 'Moving Range',
+                                    dataIndex: 'moving_range',
+                                    sorter: columnSorter((row: SpcChartPoint) => row.moving_range, 'number'),
+                                },
                                 {
                                     title: 'Status',
+                                    filters: filterOptions(chart.points, pointStatus),
+                                    onFilter: onFilterBy(pointStatus),
                                     render: (_, row) =>
                                         row.beyond_limits || row.run_violation ? (
-                                            <Tag color="red">
-                                                {row.beyond_limits ? 'Beyond limits' : ''}
-                                                {row.beyond_limits && row.run_violation ? ' + ' : ''}
-                                                {row.run_violation ? 'Run of 8' : ''}
-                                            </Tag>
+                                            <Tag color="red">{pointStatus(row)}</Tag>
                                         ) : (
-                                            <Tag color="green">In control</Tag>
+                                            <Tag color="green">{pointStatus(row)}</Tag>
                                         ),
                                 },
                             ]}

@@ -4,6 +4,7 @@ namespace App\Modules\Quality\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Quality\Http\Requests\CloseNonConformanceReportRequest;
+use App\Modules\Quality\Http\Requests\ListNonConformanceReportsRequest;
 use App\Modules\Quality\Http\Requests\StoreNonConformanceReportRequest;
 use App\Modules\Quality\Http\Resources\NonConformanceReportResource;
 use App\Modules\Quality\Models\NonConformanceReport;
@@ -14,9 +15,12 @@ class NonConformanceReportController extends Controller
 {
     public function __construct(private readonly NonConformanceReportService $reports) {}
 
-    public function index(): AnonymousResourceCollection
+    public function index(ListNonConformanceReportsRequest $request): AnonymousResourceCollection
     {
-        return NonConformanceReportResource::collection($this->reports->paginate());
+        return NonConformanceReportResource::collection($this->reports->paginate(
+            perPage: $request->perPage(),
+            sort: $request->sort(),
+        ));
     }
 
     public function store(StoreNonConformanceReportRequest $request): NonConformanceReportResource

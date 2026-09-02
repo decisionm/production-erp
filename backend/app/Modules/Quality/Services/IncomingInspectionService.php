@@ -9,6 +9,7 @@ use App\Modules\Procurement\Models\GoodsReceiptNoteLine;
 use App\Modules\Quality\Exceptions\InvalidInspectionQuantityException;
 use App\Modules\Quality\Models\Enums\InspectionResult;
 use App\Modules\Quality\Models\IncomingInspection;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -23,6 +24,9 @@ use Illuminate\Validation\ValidationException;
  */
 class IncomingInspectionService
 {
+    /** The columns the register sorts on besides id (ListIncomingInspectionsRequest validates the same list). */
+    public const SORTABLE = ['inspected_quantity', 'accepted_quantity', 'rejected_quantity', 'result', 'inspection_date'];
+
     public function __construct(private readonly StockMovementService $stock) {}
 
     /**
@@ -36,18 +40,20 @@ class IncomingInspectionService
      * with `%` and `_` taken literally ('!' escapes). A bare number is an
      * INSPECTION or GRN id ("12", "#12"); "GRN-12" / "grn 12" is the GRN
      * alone. Notes are deliberately not searched. The id is the tie-breaker
-     * and the whole order, so two reads of one page agree.
+     * and, with no `$sort`, the whole order, so two reads of one page agree.
+     * `$sort` is a validated column in the ListSort spelling (bare
+     * ascending, "-" descending) and re-orders the same matching set.
      */
-    public function paginate(int $perPage = 20, ?string $q = null, ?InspectionResult $result = null): LengthAwarePaginator
+    public function paginate(int $perPage = 20, ?string $q = null, ?InspectionResult $result = null, ?string $sort = null): LengthAwarePaginator
     {
         $term = trim((string) $q);
 
-        return IncomingInspection::query()
+        $query = IncomingInspection::query()
             ->with(['goodsReceiptNoteLine.goodsReceiptNote', 'item', 'inspectedBy'])
             ->when($result, fn ($query) => $query->where('result', $result->value))
-            ->when($term !== '', fn ($query) => $this->whereMatchesTerm($query, $term))
-            ->orderByDesc('id')
-            ->paginate($perPage);
+            ->when($term !== '', fn ($query) => $this->whereMatchesTerm($query, $term));
+
+        return ListSort::apply($query, $sort, self::SORTABLE, '-id')->paginate($perPage);
     }
 
     /**
