@@ -2821,7 +2821,18 @@ from the day-bin load to the Store Issue) cannot be designed until (a) is
 answered, because (a) decides which ledger the scan feeds.
 *Open since 2026-09-02.*
 
-## Q95 · Live batches consume "Pet Resin" (item 592) while the Store issues "Relpet" (item 606) — which item is the resin, and what happens to the 15.5 t already booked?
+## Q95 · Live batches consume "Pet Resin" (item 592) while the Store issues "Relpet" (item 606) — which item is the resin, and what happens to the 15.5 t already booked? — RESOLVED
+
+**Resolved 2026-09-03: (a) and (b) by DEC-20260903-001 — "Pet Resin" is demo
+data, the batches since 04-Aug ran on Relpet, the 15.5 t is corrected to Relpet
+by append-only correction movements with the accountant's matching Tally entry,
+and the Master Batch Amber negative is examined and corrected with it; (c) by
+DEC-20260903-002 — the 23-Jul demo rows on the Production/WIP row are removed
+by exact record through the sanctioned reset path; (d) by DEC-20260903-003 — a
+batch whose resin the Store has not issued closes and is shown as a warning at
+approval, never refused. Owed builds: the correction movements and statement
+(-001), the by-id removal migration (-002), the approval warning (-003).** The
+original question follows.
 
 What the read-only spot check of the live database found (03-Sep-2026 03:41 IST,
 893 movements, 289 balances, 20-Jul to 02-Sep; report:
