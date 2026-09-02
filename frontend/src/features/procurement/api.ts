@@ -4,6 +4,7 @@ import type { Paginated } from '@/lib/types';
 import { buildPurchaseOrderQuery, unwrapTraceResponse } from './purchaseOrders';
 import type { VendorClassification } from './vendorClassification';
 import type {
+    GoodsReceiptLineQc,
     GoodsReceiptListFilters,
     GoodsReceiptListParams,
     GoodsReceiptNote,
@@ -432,10 +433,19 @@ export async function listSupplierBillOrderOptions(vendorId: number): Promise<{ 
 }
 
 /** An order's arrival lines for the bill's optional matching — finance-gated. */
+export interface SupplierBillReceiptLineOption {
+    id: number;
+    goods_receipt_note_id: number;
+    item: { id: number; sku: string; name: string; uom: string | null } | null;
+    quantity: string;
+    /** The line's Incoming QC disposition (DEC-20260902-015) — `.inspection` is null when uninspected. */
+    qc: Pick<GoodsReceiptLineQc, 'inspection'>;
+}
+
 export async function listSupplierBillReceiptLineOptions(
     purchaseOrderId: number,
-): Promise<{ id: number; goods_receipt_note_id: number; item: { id: number; sku: string; name: string; uom: string | null } | null; quantity: string }[]> {
-    const { data } = await api.get<{ data: { id: number; goods_receipt_note_id: number; item: { id: number; sku: string; name: string; uom: string | null } | null; quantity: string }[] }>(
+): Promise<SupplierBillReceiptLineOption[]> {
+    const { data } = await api.get<{ data: SupplierBillReceiptLineOption[] }>(
         '/procurement/supplier-bills/receipt-line-options',
         { params: { purchase_order_id: purchaseOrderId } },
     );

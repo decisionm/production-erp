@@ -150,11 +150,17 @@ export default function SupplierBillsPage() {
     const itemOptions = (itemsQuery.data ?? []).map((item) => ({ value: item.id, label: itemPickerLabel(item) }));
     const grnLineOptions = useMemo(
         () =>
-            (receiptsQuery.data ?? []).map((line) => ({
-                value: line.id,
-                label: `${grnNumber({ id: line.goods_receipt_note_id })} · ${itemLabel(line.item)} · received ${line.quantity}`,
-                item_id: line.item?.id,
-            })),
+            (receiptsQuery.data ?? []).map((line) => {
+                const inspection = line.qc?.inspection;
+                const rejected = inspection && Number(inspection.rejected_quantity) > 0
+                    ? ` · rejected ${inspection.rejected_quantity}${inspection.rejections_out_reference ? ` · ${inspection.rejections_out_reference}` : ''}`
+                    : '';
+                return {
+                    value: line.id,
+                    label: `${grnNumber({ id: line.goods_receipt_note_id })} · ${itemLabel(line.item)} · received ${line.quantity}${rejected}`,
+                    item_id: line.item?.id,
+                };
+            }),
         [receiptsQuery.data],
     );
 

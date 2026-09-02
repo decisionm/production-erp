@@ -374,6 +374,8 @@ export interface GoodsReceiptLineQc {
         inspected_quantity: string;
         accepted_quantity: string;
         rejected_quantity: string;
+        /** The bag-out reference for what QC rejected, when one was recorded. */
+        rejections_out_reference: string | null;
         inspection_date: string | null;
     } | null;
     /** The physical hold, counted from the line's lots; null when the line has no bag-tracked lots. */
