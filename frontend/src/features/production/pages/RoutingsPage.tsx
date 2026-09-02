@@ -1,13 +1,24 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { listAllItems } from '@/features/inventory/api';
 import { createRouting, listRoutings, listWorkCenters } from '@/features/production/api';
+import {
+    ROUTING_DEFAULT_SORT,
+    ROUTING_LIST_SPEC,
+    ROUTING_SORT_FIELDS,
+    type RoutingListParams,
+    routingServerFilters,
+    routingsQueryKey,
+} from '@/features/production/routingsList';
 import type { Routing } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const operationSchema = z.object({
     work_center_id: z.number({ error: 'Work center is required' }),
@@ -28,7 +39,14 @@ export default function RoutingsPage() {
     const [detailRouting, setDetailRouting] = useState<Routing | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['production', 'routings'], queryFn: () => listRoutings() });
+    // THE REGISTER'S VIEW IS ITS URL (useListParams): sort, page, page size.
+    const { params, setParams, setPage } = useListParams<RoutingListParams>(ROUTING_LIST_SPEC);
+    const filters = useMemo(() => routingServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: routingsQueryKey(filters),
+        queryFn: () => listRoutings(filters),
+        placeholderData: (previous) => previous,
+    });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     // A routing step is production setup — a retired machine must not be
     // selectable for one.
@@ -69,14 +87,27 @@ export default function RoutingsPage() {
             </Space>
 
             <Table<Routing>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queries the
+                // whole paginated register rather than the loaded page.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, ROUTING_SORT_FIELDS, ROUTING_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'routings')}
                 columns={[
                     { title: 'Item', render: (_, row) => itemLabel(row.item) },
-                    { title: 'Name', dataIndex: 'name' },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, ROUTING_DEFAULT_SORT),
+                    },
                     {
                         title: 'Operations',
                         render: (_, row) => row.operations.map((o) => `${o.sequence}. ${o.name} (${o.work_center.code})`).join(', '),

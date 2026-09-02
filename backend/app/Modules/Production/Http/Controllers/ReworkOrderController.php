@@ -4,6 +4,7 @@ namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Production\Http\Requests\CompleteReworkOrderRequest;
+use App\Modules\Production\Http\Requests\ListReworkOrdersRequest;
 use App\Modules\Production\Http\Requests\StoreReworkOrderRequest;
 use App\Modules\Production\Http\Resources\ReworkOrderResource;
 use App\Modules\Production\Models\ReworkOrder;
@@ -14,9 +15,9 @@ class ReworkOrderController extends Controller
 {
     public function __construct(private readonly ReworkOrderService $reworkOrders) {}
 
-    public function index(): AnonymousResourceCollection
+    public function index(ListReworkOrdersRequest $request): AnonymousResourceCollection
     {
-        return ReworkOrderResource::collection($this->reworkOrders->paginate());
+        return ReworkOrderResource::collection($this->reworkOrders->paginate($request->perPage(), $request->sort()));
     }
 
     public function store(StoreReworkOrderRequest $request): ReworkOrderResource

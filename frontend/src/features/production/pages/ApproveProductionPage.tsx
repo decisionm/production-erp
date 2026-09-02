@@ -40,8 +40,10 @@ import {
     readStockShortfalls,
 } from '@/features/production/types';
 import { type PackingRounding, roundPer, useProductionSettings } from '@/features/production/packing';
+import { type ColumnKind, columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 import { itemLabel } from '@/lib/itemLabel';
 import { showApiError } from '@/lib/showApiError';
+import { TABLE_STICKY, pageRangeLine, serverPagination } from '@/lib/tableProps';
 
 const statusColor: Record<ShiftProductionEntryStatus, string> = {
     pending: 'processing',
@@ -1441,10 +1443,22 @@ export default function ApproveProductionPage() {
     // from the very page that waits on it.
     const fetchStatus: ShiftProductionEntryStatus = status === 'awaiting_quality' ? 'pending' : status;
 
+    // HONEST ABOUT SIZE (03-Sep-2026). This read used to take the server's
+    // default page of 20 and draw no pager, so the 21st waiting batch was
+    // simply not on the screen. It now asks for the server's ceiling (100)
+    // and, when the queue is bigger than that, draws the server's own pager
+    // in place of the column sorters — sorting a hundred of three hundred
+    // rows in the browser would misorder the queue.
+    const [page, setPage] = useState(1);
+    const [perPage, setPerPage] = useState(100);
+
     const { data, isLoading } = useQuery({
-        queryKey: ['production', 'shift-production-entries', fetchStatus],
-        queryFn: () => listShiftProductionEntries(fetchStatus),
+        queryKey: ['production', 'shift-production-entries', fetchStatus, { page, per_page: perPage }],
+        queryFn: () => listShiftProductionEntries({ status: fetchStatus, page, per_page: perPage }),
     });
+
+    /** True when every row of this status is loaded — only then may the browser sort and filter. */
+    const wholeSetLoaded = data !== undefined && data.meta.total <= data.data.length;
 
     // Does any row in this queue carry the gate? Drives whether the Quality
     // column is drawn at all — with the gate off the table is column-for-column
@@ -1570,13 +1584,36 @@ export default function ApproveProductionPage() {
         return 3; // approved / synced / failed — accountant done, Tally next/done
     };
 
+    // Both quality tabs read the same pending fetch and split on the check's
+    // existence, so they can never disagree with the server about what
+    // pending means. Other tabs pass through.
+    const visibleRows: ShiftProductionEntry[] =
+        status === 'awaiting_quality'
+            ? (data?.data ?? []).filter(awaitingQuality)
+            : status === 'pending'
+              ? (data?.data ?? []).filter((row) => !awaitingQuality(row))
+              : (data?.data ?? []);
+
+    // Column sorters and filters exist only while the whole set is on
+    // screen; with the server pager drawn they would sort one page of many.
+    const sortable = (get: (row: ShiftProductionEntry) => unknown, kind: ColumnKind) =>
+        wholeSetLoaded ? { sorter: columnSorter(get, kind) } : {};
+    const filterable = (get: (row: ShiftProductionEntry) => unknown, label?: (value: unknown) => string) =>
+        wholeSetLoaded ? { filters: filterOptions(visibleRows, get, label), onFilter: onFilterBy(get) } : {};
+    const qualityWord = (row: ShiftProductionEntry) =>
+        isQualityChecked(row) ? 'Checked' : awaitingQuality(row) ? 'Awaiting quality' : null;
+    const machineCode = (row: ShiftProductionEntry) => row.work_center?.code ?? row.work_center?.name ?? null;
+
     return (
         <>
             <Typography.Title level={3} style={{ marginBottom: 4 }}>Approve Production</Typography.Title>
 
             <Segmented
                 value={status}
-                onChange={(v) => setStatus(v as QueueTab)}
+                onChange={(v) => {
+                    setStatus(v as QueueTab);
+                    setPage(1);
+                }}
                 options={[
                     // First because it is first in the chain. Read-only here —
                     // the check itself happens on the Production QC page; this
@@ -1593,40 +1630,57 @@ export default function ApproveProductionPage() {
                 style={{ marginBottom: 16, maxWidth: '100%', overflowX: 'auto' }}
             />
 
+            <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+                {wholeSetLoaded ? `${visibleRows.length} batches` : pageRangeLine(data?.meta, 'batches')}
+            </Typography.Text>
+
             <Table<ShiftProductionEntry>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
-                dataSource={
-                    // Both tabs read the same pending fetch and split on the
-                    // check's existence, so they can never disagree with the
-                    // server about what pending means. Other tabs pass through.
-                    status === 'awaiting_quality'
-                        ? (data?.data ?? []).filter(awaitingQuality)
-                        : status === 'pending'
-                          ? (data?.data ?? []).filter((row) => !awaitingQuality(row))
-                          : data?.data
+                dataSource={visibleRows}
+                pagination={
+                    wholeSetLoaded
+                        ? false
+                        : serverPagination(
+                              data?.meta,
+                              (nextPage, nextPerPage) => {
+                                  setPage(nextPage);
+                                  setPerPage(nextPerPage);
+                              },
+                              'batches',
+                          )
                 }
-                pagination={false}
                 locale={{ emptyText: `Nothing waiting here.` }}
                 columns={[
-                    { title: 'Date', dataIndex: 'production_date' },
-                    { title: 'Shift', render: (_, row) => row.shift?.name ?? '—' },
+                    { title: 'Date', dataIndex: 'production_date', ...sortable((row) => row.production_date, 'date') },
+                    {
+                        title: 'Shift',
+                        ...sortable((row) => row.shift?.name, 'text'),
+                        render: (_, row) => row.shift?.name ?? '—',
+                    },
                     // The code — ASB-3, the identity on the paper's M/C NO.
                     // column — with the office name only as a fallback for a
                     // row whose code never loaded.
-                    { title: 'Machine', render: (_, row) => row.work_center?.code ?? row.work_center?.name ?? '—' },
-                    { title: 'Item', render: (_, row) => itemLabel(row.item) },
-                    { title: 'Batch #', dataIndex: 'batch_number', render: (v: string | null) => v ?? '—' },
-                    { title: 'Produced', dataIndex: 'quantity_produced' },
+                    { title: 'Machine', ...sortable(machineCode, 'text'), render: (_, row) => machineCode(row) ?? '—' },
+                    { title: 'Item', ...sortable((row) => itemLabel(row.item), 'text'), render: (_, row) => itemLabel(row.item) },
+                    {
+                        title: 'Batch #',
+                        dataIndex: 'batch_number',
+                        ...sortable((row) => row.batch_number, 'text'),
+                        render: (v: string | null) => v ?? '—',
+                    },
+                    { title: 'Produced', dataIndex: 'quantity_produced', ...sortable((row) => row.quantity_produced, 'number') },
                     { title: 'Produced (Kg)', dataIndex: 'quantity_produced_kg', render: (v: string | null) => v ?? '—' },
-                    { title: 'Rejected', dataIndex: 'quantity_scrap' },
+                    { title: 'Rejected', dataIndex: 'quantity_scrap', ...sortable((row) => row.quantity_scrap, 'number') },
                     // Only rendered when the gate is switched on — with it off
                     // the table is column-for-column what it has always been.
                     ...(qualityStageEnabled
                         ? [
                               {
                                   title: 'Quality',
+                                  ...filterable(qualityWord),
                                   render: (_: unknown, row: ShiftProductionEntry) => <QualityCell row={row} awaiting={awaitingQuality(row)} />,
                               },
                           ]
@@ -1634,6 +1688,7 @@ export default function ApproveProductionPage() {
                     {
                         title: 'Status',
                         dataIndex: 'status',
+                        ...filterable((row) => row.status, (value) => statusLabel[value as ShiftProductionEntryStatus] ?? String(value)),
                         // The shortfall rides in the status cell rather than in a
                         // column of its own: a column would be blank on almost
                         // every row and would shift the layout for everyone, while

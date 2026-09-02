@@ -2,19 +2,21 @@
 
 namespace App\Modules\Production\Services;
 
+use App\Modules\Production\Http\Requests\ListBomsRequest;
 use App\Modules\Production\Models\Bom;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
 class BomService
 {
-    public function paginate(?int $itemId, int $perPage = 20): LengthAwarePaginator
+    public function paginate(?int $itemId, int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return Bom::query()
+        $query = Bom::query()
             ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
-            ->with(['item', 'lines.component'])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+            ->with(['item', 'lines.component']);
+
+        return ListSort::apply($query, $sort, ListBomsRequest::SORTABLE)->paginate($perPage);
     }
 
     /**

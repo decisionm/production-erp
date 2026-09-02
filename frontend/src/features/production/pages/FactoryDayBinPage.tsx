@@ -38,6 +38,8 @@ import {
     setDayBinWarehouse,
 } from '@/features/production/api';
 import { useProductionSettings } from '@/features/production/packing';
+import { columnSorter } from '@/lib/clientSort';
+import { TABLE_STICKY } from '@/lib/tableProps';
 import { BALANCE_ACK_REASON_OPTIONS } from '@/features/production/types';
 import type {
     BalanceAckReason,
@@ -479,10 +481,13 @@ export default function FactoryDayBinPage() {
 
     // ----- Tables ----------------------------------------------------------
 
+    // Every table below holds its whole set (one bin, one day), so each
+    // column sorts here, on the value the cell shows.
     const balanceColumns = [
         {
             title: 'Material',
             key: 'material',
+            sorter: columnSorter((row: BalanceRow) => row.item?.name, 'text'),
             render: (_: unknown, row: BalanceRow) =>
                 row.item ? (
                     <Space direction="vertical" size={0}>
@@ -501,6 +506,7 @@ export default function FactoryDayBinPage() {
             title: 'On the floor',
             key: 'in_bin',
             align: 'right' as const,
+            sorter: columnSorter((row: BalanceRow) => row.bin_kg, 'number'),
             render: (_: unknown, row: BalanceRow) => (
                 <Typography.Text strong style={{ fontSize: 18 }}>
                     {fmtQty(row.bin_kg)} <Typography.Text type="secondary">{row.item?.uom ?? 'Kg'}</Typography.Text>
@@ -511,6 +517,7 @@ export default function FactoryDayBinPage() {
             title: 'In store',
             key: 'in_store',
             align: 'right' as const,
+            sorter: columnSorter((row: BalanceRow) => row.store_kg, 'number'),
             // "—" (not 0) for a material the summary doesn't cover — an
             // unknown store balance must never read as an empty store.
             render: (_: unknown, row: BalanceRow) =>
@@ -526,6 +533,7 @@ export default function FactoryDayBinPage() {
             title: 'Unopened bags',
             key: 'unopened',
             align: 'right' as const,
+            sorter: columnSorter((row: BalanceRow) => row.unopened_bags?.count, 'number'),
             render: (_: unknown, row: BalanceRow) =>
                 row.unopened_bags === null ? (
                     <Typography.Text type="secondary">—</Typography.Text>
@@ -553,6 +561,7 @@ export default function FactoryDayBinPage() {
         {
             title: 'Material',
             key: 'material',
+            sorter: columnSorter((row: CommonResinMaterial) => row.item.name, 'text'),
             render: (_: unknown, row: CommonResinMaterial) => (
                 <Space direction="vertical" size={0}>
                     <Typography.Text strong>{row.item.name}</Typography.Text>
@@ -568,18 +577,21 @@ export default function FactoryDayBinPage() {
             title: 'Loaded',
             key: 'loaded',
             align: 'right' as const,
+            sorter: columnSorter((row: CommonResinMaterial) => row.loaded_kg, 'number'),
             render: (_: unknown, row: CommonResinMaterial) => fmtQty(row.loaded_kg),
         },
         {
             title: 'Consumed (all batches)',
             key: 'consumed',
             align: 'right' as const,
+            sorter: columnSorter((row: CommonResinMaterial) => row.consumed_kg, 'number'),
             render: (_: unknown, row: CommonResinMaterial) => fmtQty(row.consumed_kg),
         },
         {
             title: 'Estimated remaining (never counted — drifts)',
             key: 'remaining',
             align: 'right' as const,
+            sorter: columnSorter((row: CommonResinMaterial) => row.estimated_remaining_kg, 'number'),
             render: (_: unknown, row: CommonResinMaterial) => {
                 const remaining = parseFloat(row.estimated_remaining_kg);
                 const short = !Number.isNaN(remaining) && remaining < 0;
@@ -603,6 +615,7 @@ export default function FactoryDayBinPage() {
         {
             title: 'Last load',
             key: 'last_load',
+            sorter: columnSorter((row: CommonResinMaterial) => row.last_load_at, 'date'),
             render: (_: unknown, row: CommonResinMaterial) =>
                 row.last_load_at === null ? (
                     <Typography.Text type="secondary">—</Typography.Text>
@@ -616,6 +629,7 @@ export default function FactoryDayBinPage() {
         {
             title: 'Time',
             key: 'time',
+            sorter: columnSorter((row: FactoryDayBinLoadRow) => row.time, 'date'),
             // Guarded: dayjs(null) silently means "now", which would print a
             // believable but invented clock time.
             render: (_: unknown, row: FactoryDayBinLoadRow) =>
@@ -624,6 +638,7 @@ export default function FactoryDayBinPage() {
         {
             title: 'Material',
             key: 'material',
+            sorter: columnSorter((row: FactoryDayBinLoadRow) => (row.item ? itemLabel(row.item) : null), 'text'),
             render: (_: unknown, row: FactoryDayBinLoadRow) =>
                 row.item ? itemLabel(row.item) : <Typography.Text type="secondary">—</Typography.Text>,
         },
@@ -631,17 +646,20 @@ export default function FactoryDayBinPage() {
             title: 'Kg',
             key: 'kg',
             align: 'right' as const,
+            sorter: columnSorter((row: FactoryDayBinLoadRow) => row.quantity_kg, 'number'),
             render: (_: unknown, row: FactoryDayBinLoadRow) => fmtQty(row.quantity_kg),
         },
         {
             title: 'Bag',
             key: 'bag',
+            sorter: columnSorter((row: FactoryDayBinLoadRow) => row.bag_barcode, 'text'),
             render: (_: unknown, row: FactoryDayBinLoadRow) =>
                 row.bag_barcode ?? <Typography.Text type="secondary">no barcode</Typography.Text>,
         },
         {
             title: 'Who',
             key: 'who',
+            sorter: columnSorter((row: FactoryDayBinLoadRow) => row.user, 'text'),
             render: (_: unknown, row: FactoryDayBinLoadRow) =>
                 row.user ?? <Typography.Text type="secondary">—</Typography.Text>,
         },
@@ -892,6 +910,7 @@ export default function FactoryDayBinPage() {
                             <Table<CommonResinMaterial>
                                 rowKey={(row) => row.item_id}
                                 size="small"
+                                sticky={TABLE_STICKY}
                                 columns={commonResinColumns}
                                 dataSource={commonResin ?? []}
                                 pagination={false}
@@ -938,6 +957,7 @@ export default function FactoryDayBinPage() {
                         <Table<BalanceRow>
                             rowKey={(row) => row.item_id}
                             size="middle"
+                            sticky={TABLE_STICKY}
                             loading={isLoading}
                             columns={balanceColumns}
                             dataSource={balanceRows}
@@ -1097,6 +1117,7 @@ export default function FactoryDayBinPage() {
                         <Table<FactoryDayBinLoadRow>
                             rowKey={(row) => row.id}
                             size="small"
+                            sticky={TABLE_STICKY}
                             loading={isLoading}
                             columns={loadColumns}
                             dataSource={dayBin?.todays_loads ?? []}

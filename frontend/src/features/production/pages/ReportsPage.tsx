@@ -28,8 +28,10 @@ import type {
 } from '@/features/production/types';
 import { exportErrorSentence, runExport } from '@/features/exports/api';
 import { listAllItems } from '@/features/inventory/api';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 import { downloadBlob } from '@/lib/csv';
 import { itemLabel } from '@/lib/itemLabel';
+import { TABLE_STICKY } from '@/lib/tableProps';
 
 // Bands are ruled server-side (config/production.php tolerances) — the UI
 // only colour-maps them. Same mapping as ApproveProductionPage.
@@ -194,23 +196,55 @@ function ProductionTab() {
 
             <Table<ProductionReportRow>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 size="small"
                 rowKey="entry_id"
                 loading={isLoading}
                 pagination={false}
                 dataSource={rows}
                 locale={{ emptyText: 'No completed batches for this date/filter.' }}
+                // The whole day's report is in the browser; each column sorts
+                // on the value it shows, and the two identity columns filter.
                 columns={[
-                    { title: 'Shift', render: (_, r) => r.shift.name },
-                    { title: 'Machine', render: (_, r) => r.work_center.code },
-                    { title: 'Item', render: (_, r) => itemLabel(r.item) },
-                    { title: 'Batch', dataIndex: 'batch_number', render: (v: string | null) => v ?? '—' },
-                    { title: 'Hrs', dataIndex: 'running_hours', align: 'right', render: fmtKg },
-                    { title: 'Exp. Boxes', dataIndex: 'expected_boxes', align: 'right', render: (v: number | null) => v ?? '—' },
-                    { title: 'Act. Boxes', dataIndex: 'actual_boxes', align: 'right', render: (v: number | null) => v ?? '—' },
-                    { title: 'Act. Pcs', dataIndex: 'actual_pieces', align: 'right', render: fmtKg },
-                    { title: 'Good Kg', dataIndex: 'good_production_kg', align: 'right', render: fmtKg },
-                    { title: 'Rej. Kg', dataIndex: 'rejection_kg_production', align: 'right', render: fmtKg },
+                    {
+                        title: 'Shift',
+                        sorter: columnSorter((r: ProductionReportRow) => r.shift.name, 'text'),
+                        filters: filterOptions(rows, (r) => r.shift.name),
+                        onFilter: onFilterBy((r: ProductionReportRow) => r.shift.name),
+                        render: (_, r) => r.shift.name,
+                    },
+                    {
+                        title: 'Machine',
+                        sorter: columnSorter((r: ProductionReportRow) => r.work_center.code, 'text'),
+                        filters: filterOptions(rows, (r) => r.work_center.code),
+                        onFilter: onFilterBy((r: ProductionReportRow) => r.work_center.code),
+                        render: (_, r) => r.work_center.code,
+                    },
+                    { title: 'Item', sorter: columnSorter((r: ProductionReportRow) => itemLabel(r.item), 'text'), render: (_, r) => itemLabel(r.item) },
+                    {
+                        title: 'Batch',
+                        dataIndex: 'batch_number',
+                        sorter: columnSorter((r: ProductionReportRow) => r.batch_number, 'text'),
+                        render: (v: string | null) => v ?? '—',
+                    },
+                    { title: 'Hrs', dataIndex: 'running_hours', align: 'right', sorter: columnSorter((r: ProductionReportRow) => r.running_hours, 'number'), render: fmtKg },
+                    {
+                        title: 'Exp. Boxes',
+                        dataIndex: 'expected_boxes',
+                        align: 'right',
+                        sorter: columnSorter((r: ProductionReportRow) => r.expected_boxes, 'number'),
+                        render: (v: number | null) => v ?? '—',
+                    },
+                    {
+                        title: 'Act. Boxes',
+                        dataIndex: 'actual_boxes',
+                        align: 'right',
+                        sorter: columnSorter((r: ProductionReportRow) => r.actual_boxes, 'number'),
+                        render: (v: number | null) => v ?? '—',
+                    },
+                    { title: 'Act. Pcs', dataIndex: 'actual_pieces', align: 'right', sorter: columnSorter((r: ProductionReportRow) => r.actual_pieces, 'number'), render: fmtKg },
+                    { title: 'Good Kg', dataIndex: 'good_production_kg', align: 'right', sorter: columnSorter((r: ProductionReportRow) => r.good_production_kg, 'number'), render: fmtKg },
+                    { title: 'Rej. Kg', dataIndex: 'rejection_kg_production', align: 'right', sorter: columnSorter((r: ProductionReportRow) => r.rejection_kg_production, 'number'), render: fmtKg },
                     // The two quality columns — deliberately two, not a
                     // dashboard. NOTE THE UNITS DIFFER, which is why both say
                     // so in the heading: the reviewed count is pieces, while
@@ -223,10 +257,11 @@ function ProductionTab() {
                     // headed plainly "Reviewed" would read as "quality
                     // reviewed nothing", which is the opposite of the truth.
                     // Drop the suffix the day the service serves the field.
-                    { title: 'Reviewed (pcs, not served)', dataIndex: 'qc_reviewed_pieces', align: 'right', render: fmtPcs },
-                    { title: 'Rej. by QC (kg)', dataIndex: 'rejection_kg_qc', align: 'right', render: fmtKg },
-                    { title: 'Lumps Kg', dataIndex: 'lumps_kg', align: 'right', render: fmtKg },
+                    { title: 'Reviewed (pcs, not served)', dataIndex: 'qc_reviewed_pieces', align: 'right', sorter: columnSorter((r: ProductionReportRow) => r.qc_reviewed_pieces, 'number'), render: fmtPcs },
+                    { title: 'Rej. by QC (kg)', dataIndex: 'rejection_kg_qc', align: 'right', sorter: columnSorter((r: ProductionReportRow) => r.rejection_kg_qc, 'number'), render: fmtKg },
+                    { title: 'Lumps Kg', dataIndex: 'lumps_kg', align: 'right', sorter: columnSorter((r: ProductionReportRow) => r.lumps_kg, 'number'), render: fmtKg },
                     {
+                        sorter: columnSorter((r: ProductionReportRow) => r.efficiency_pct, 'number'),
                         // The one place the grain is named — rows and the
                         // pinned Day total are both pieces ÷ pieces — and,
                         // beside it, WHAT THE RATIO DIVIDES BY (Phase 7):
@@ -338,22 +373,42 @@ function ReconciliationTab() {
 
             <Table<ReconciliationReportRow>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 size="small"
                 rowKey="entry_id"
                 loading={isLoading}
                 pagination={false}
                 dataSource={dataSource}
                 locale={{ emptyText: 'Nothing to reconcile in this range.' }}
+                // The whole range is in the browser; each column sorts on the
+                // value it shows, and the two identity columns filter.
                 columns={[
-                    { title: 'Date', dataIndex: 'production_date' },
-                    { title: 'Shift', render: (_, r) => r.shift.name },
-                    { title: 'Machine', render: (_, r) => r.work_center.code },
-                    { title: 'Item', render: (_, r) => itemLabel(r.item) },
-                    { title: 'Batch', dataIndex: 'batch_number', render: (v: string | null) => v ?? '—' },
-                    { title: 'Good Kg', dataIndex: 'good_production_kg', align: 'right', render: fmtKg },
-                    { title: 'Rej. Kg', dataIndex: 'confirmed_rejection_kg', align: 'right', render: fmtKg },
-                    { title: 'Lumps Kg', dataIndex: 'lumps_kg', align: 'right', render: fmtKg },
-                    { title: 'Consumed Kg', dataIndex: 'issued_kg', align: 'right', render: fmtKg },
+                    { title: 'Date', dataIndex: 'production_date', sorter: columnSorter((r: ReconciliationReportRow) => r.production_date, 'date') },
+                    {
+                        title: 'Shift',
+                        sorter: columnSorter((r: ReconciliationReportRow) => r.shift.name, 'text'),
+                        filters: filterOptions(dataSource, (r) => r.shift.name),
+                        onFilter: onFilterBy((r: ReconciliationReportRow) => r.shift.name),
+                        render: (_, r) => r.shift.name,
+                    },
+                    {
+                        title: 'Machine',
+                        sorter: columnSorter((r: ReconciliationReportRow) => r.work_center.code, 'text'),
+                        filters: filterOptions(dataSource, (r) => r.work_center.code),
+                        onFilter: onFilterBy((r: ReconciliationReportRow) => r.work_center.code),
+                        render: (_, r) => r.work_center.code,
+                    },
+                    { title: 'Item', sorter: columnSorter((r: ReconciliationReportRow) => itemLabel(r.item), 'text'), render: (_, r) => itemLabel(r.item) },
+                    {
+                        title: 'Batch',
+                        dataIndex: 'batch_number',
+                        sorter: columnSorter((r: ReconciliationReportRow) => r.batch_number, 'text'),
+                        render: (v: string | null) => v ?? '—',
+                    },
+                    { title: 'Good Kg', dataIndex: 'good_production_kg', align: 'right', sorter: columnSorter((r: ReconciliationReportRow) => r.good_production_kg, 'number'), render: fmtKg },
+                    { title: 'Rej. Kg', dataIndex: 'confirmed_rejection_kg', align: 'right', sorter: columnSorter((r: ReconciliationReportRow) => r.confirmed_rejection_kg, 'number'), render: fmtKg },
+                    { title: 'Lumps Kg', dataIndex: 'lumps_kg', align: 'right', sorter: columnSorter((r: ReconciliationReportRow) => r.lumps_kg, 'number'), render: fmtKg },
+                    { title: 'Consumed Kg', dataIndex: 'issued_kg', align: 'right', sorter: columnSorter((r: ReconciliationReportRow) => r.issued_kg, 'number'), render: fmtKg },
                 ]}
             />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
@@ -511,18 +566,31 @@ function TraceabilityTab() {
             </Row>
             <Table<TraceabilityReportRow>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 size="small"
                 rowKey="id"
                 loading={isLoading}
                 dataSource={dataSource}
                 locale={{ emptyText: 'No material lots received in this range.' }}
                 expandable={{ expandedRowRender: (lot) => bagsTable(lot.bags) }}
+                // The lots of the window are all in the browser; the bag and
+                // feed tables inside a lot keep their own order.
                 columns={[
-                    { title: 'Supplier Lot', dataIndex: 'supplier_lot_no', render: (v: string | null) => v ?? '—' },
-                    { title: 'Material', render: (_, lot) => itemLabel(lot.item) },
-                    { title: 'Received', dataIndex: 'received_date', render: (v: string | null) => v ?? '—' },
-                    { title: 'Bags', dataIndex: 'bag_count', align: 'right' },
-                    { title: 'Received Kg', dataIndex: 'total_received_kg', align: 'right', render: fmtKg },
+                    {
+                        title: 'Supplier Lot',
+                        dataIndex: 'supplier_lot_no',
+                        sorter: columnSorter((lot: TraceabilityReportRow) => lot.supplier_lot_no, 'text'),
+                        render: (v: string | null) => v ?? '—',
+                    },
+                    { title: 'Material', sorter: columnSorter((lot: TraceabilityReportRow) => itemLabel(lot.item), 'text'), render: (_, lot) => itemLabel(lot.item) },
+                    {
+                        title: 'Received',
+                        dataIndex: 'received_date',
+                        sorter: columnSorter((lot: TraceabilityReportRow) => lot.received_date, 'date'),
+                        render: (v: string | null) => v ?? '—',
+                    },
+                    { title: 'Bags', dataIndex: 'bag_count', align: 'right', sorter: columnSorter((lot: TraceabilityReportRow) => lot.bag_count, 'number') },
+                    { title: 'Received Kg', dataIndex: 'total_received_kg', align: 'right', sorter: columnSorter((lot: TraceabilityReportRow) => lot.total_received_kg, 'number'), render: fmtKg },
                 ]}
             />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>

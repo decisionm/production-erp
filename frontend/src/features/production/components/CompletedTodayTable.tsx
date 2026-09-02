@@ -12,6 +12,7 @@ import {
 import { useProductionSettings } from '@/features/production/packing';
 import type { ShiftProductionEntry, ShiftProductionEntryStatus } from '@/features/production/types';
 import type { TallySyncStatus } from '@/features/tally-sync/types';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 
 /**
  * Completed Today (Phase 5.5, WS-C) — the day's completed batches as the
@@ -200,6 +201,8 @@ export default function CompletedTodayTable({
         );
     }
 
+    // The day's completed batches are all on screen (one server read, up to
+    // the page ceiling), so each column sorts on the value it shows.
     return (
         <Table<CompletedTodayRow>
             scroll={{ x: 'max-content' }}
@@ -212,6 +215,7 @@ export default function CompletedTodayTable({
             columns={[
                 {
                     title: 'Machine',
+                    sorter: columnSorter((row: CompletedTodayRow) => row.machine, 'text'),
                     render: (_, row) => (
                         <>
                             <Typography.Text strong>{row.machine}</Typography.Text>
@@ -221,9 +225,16 @@ export default function CompletedTodayTable({
                         </>
                     ),
                 },
-                { title: 'Shift', render: (_, row) => row.shift },
+                {
+                    title: 'Shift',
+                    sorter: columnSorter((row: CompletedTodayRow) => row.shift, 'text'),
+                    filters: filterOptions(rows, (row) => row.shift),
+                    onFilter: onFilterBy((row: CompletedTodayRow) => row.shift),
+                    render: (_, row) => row.shift,
+                },
                 {
                     title: 'SKU',
+                    sorter: columnSorter((row: CompletedTodayRow) => row.sku, 'text'),
                     render: (_, row) => (
                         <>
                             <Typography.Text>{row.sku}</Typography.Text>
@@ -243,12 +254,28 @@ export default function CompletedTodayTable({
                         </>
                     ),
                 },
-                { title: 'Expected', align: 'right', render: (_, row) => <span style={tabular}>{row.expectedPieces}</span> },
-                { title: 'Actual', align: 'right', render: (_, row) => <span style={tabular}>{row.actualPieces}</span> },
-                { title: 'Good', align: 'right', render: (_, row) => <span style={tabular}>{row.goodPieces}</span> },
+                {
+                    title: 'Expected',
+                    align: 'right',
+                    sorter: columnSorter((row: CompletedTodayRow) => row.expectedPieces, 'number'),
+                    render: (_, row) => <span style={tabular}>{row.expectedPieces}</span>,
+                },
+                {
+                    title: 'Actual',
+                    align: 'right',
+                    sorter: columnSorter((row: CompletedTodayRow) => row.actualPieces, 'number'),
+                    render: (_, row) => <span style={tabular}>{row.actualPieces}</span>,
+                },
+                {
+                    title: 'Good',
+                    align: 'right',
+                    sorter: columnSorter((row: CompletedTodayRow) => row.goodPieces, 'number'),
+                    render: (_, row) => <span style={tabular}>{row.goodPieces}</span>,
+                },
                 {
                     title: 'Reject',
                     align: 'right',
+                    sorter: columnSorter((row: CompletedTodayRow) => row.rejectPieces, 'number'),
                     render: (_, row) => (
                         <>
                             <span style={tabular}>{row.rejectPieces}</span>
@@ -260,9 +287,16 @@ export default function CompletedTodayTable({
                         </>
                     ),
                 },
-                { title: 'Efficiency', align: 'right', render: (_, row) => <EfficiencyCell row={row} /> },
+                {
+                    title: 'Efficiency',
+                    align: 'right',
+                    sorter: columnSorter((row: CompletedTodayRow) => row.efficiencyPct, 'number'),
+                    render: (_, row) => <EfficiencyCell row={row} />,
+                },
                 {
                     title: 'Approval · Tally',
+                    filters: filterOptions(rows, (row) => row.approval),
+                    onFilter: onFilterBy((row: CompletedTodayRow) => row.approval),
                     render: (_, row) => (
                         <>
                             <StateCell row={row} />

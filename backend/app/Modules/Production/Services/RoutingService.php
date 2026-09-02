@@ -2,19 +2,21 @@
 
 namespace App\Modules\Production\Services;
 
+use App\Modules\Production\Http\Requests\ListRoutingsRequest;
 use App\Modules\Production\Models\Routing;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
 class RoutingService
 {
-    public function paginate(?int $itemId, int $perPage = 20): LengthAwarePaginator
+    public function paginate(?int $itemId, int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return Routing::query()
+        $query = Routing::query()
             ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
-            ->with(['item', 'operations.workCenter'])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+            ->with(['item', 'operations.workCenter']);
+
+        return ListSort::apply($query, $sort, ListRoutingsRequest::SORTABLE)->paginate($perPage);
     }
 
     /**

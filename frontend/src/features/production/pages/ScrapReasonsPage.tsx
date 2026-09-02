@@ -1,12 +1,23 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Form, Input, Modal, Space, Table, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { createScrapReason, listScrapReasons, updateScrapReason } from '@/features/production/api';
+import {
+    SCRAP_REASON_DEFAULT_SORT,
+    SCRAP_REASON_LIST_SPEC,
+    SCRAP_REASON_SORT_FIELDS,
+    type ScrapReasonListParams,
+    scrapReasonServerFilters,
+    scrapReasonsQueryKey,
+} from '@/features/production/scrapReasonsList';
 import type { ScrapReason } from '@/features/production/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const scrapReasonSchema = z.object({
     code: z.string().min(1, 'Code is required').max(32),
@@ -32,7 +43,15 @@ export default function ScrapReasonsPage({ embedded = false }: { embedded?: bool
     const [editing, setEditing] = useState<ScrapReason | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['production', 'scrap-reasons'], queryFn: listScrapReasons });
+    // THE MASTER'S VIEW IS ITS URL (useListParams): sort, page, page size —
+    // beside the workspace's own `?tab=`, which the hook leaves untouched.
+    const { params, setParams, setPage } = useListParams<ScrapReasonListParams>(SCRAP_REASON_LIST_SPEC);
+    const filters = useMemo(() => scrapReasonServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: scrapReasonsQueryKey(filters),
+        queryFn: () => listScrapReasons(filters),
+        placeholderData: (previous) => previous,
+    });
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<ScrapReasonFormValues>({
         resolver: zodResolver(scrapReasonSchema),
@@ -82,14 +101,33 @@ export default function ScrapReasonsPage({ embedded = false }: { embedded?: bool
             </Space>
 
             <Table<ScrapReason>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queries the
+                // whole paginated master rather than the loaded page.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, SCRAP_REASON_SORT_FIELDS, SCRAP_REASON_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'scrap reasons')}
                 columns={[
-                    { title: 'Code', dataIndex: 'code' },
-                    { title: 'Name', dataIndex: 'name' },
+                    {
+                        title: 'Code',
+                        dataIndex: 'code',
+                        key: 'code',
+                        sorter: true,
+                        sortOrder: columnSortOrder('code', params.sort, SCRAP_REASON_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, SCRAP_REASON_DEFAULT_SORT),
+                    },
                     {
                         // One vocabulary: Active / Retired, the same two words
                         // on every master. The old control was a permanently
@@ -97,6 +135,9 @@ export default function ScrapReasonsPage({ embedded = false }: { embedded?: bool
                         // and then refused to let anyone change it.
                         title: 'Status',
                         dataIndex: 'is_active',
+                        key: 'is_active',
+                        sorter: true,
+                        sortOrder: columnSortOrder('is_active', params.sort, SCRAP_REASON_DEFAULT_SORT),
                         render: (_: boolean, row) => <ConfigurationStatusTag entity="scrap-reason" row={row} />,
                     },
                     {

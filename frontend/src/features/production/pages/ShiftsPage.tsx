@@ -2,12 +2,23 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Form, Input, Modal, Space, Table, TimePicker, Typography } from 'antd';
 import dayjs from 'dayjs';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { createShift, listShifts, updateShift } from '@/features/production/api';
+import {
+    SHIFT_DEFAULT_SORT,
+    SHIFT_LIST_SPEC,
+    SHIFT_SORT_FIELDS,
+    type ShiftListParams,
+    shiftServerFilters,
+    shiftsQueryKey,
+} from '@/features/production/shiftsList';
 import type { Shift } from '@/features/production/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const shiftSchema = z.object({
     name: z.string().min(1, 'Name is required').max(64),
@@ -38,10 +49,18 @@ export default function ShiftsPage({ embedded = false }: { embedded?: boolean })
     const [editing, setEditing] = useState<Shift | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['production', 'shifts'], queryFn: () => listShifts() });
+    // THE MASTER'S VIEW IS ITS URL (useListParams): sort, page, page size —
+    // beside the workspace's own `?tab=`, which the hook leaves untouched.
+    const { params, setParams, setPage } = useListParams<ShiftListParams>(SHIFT_LIST_SPEC);
+    const filters = useMemo(() => shiftServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: shiftsQueryKey(filters),
+        queryFn: () => listShifts(undefined, filters),
+        placeholderData: (previous) => previous,
+    });
 
-    // Running shifts first, then retired, each still in start-time order as the
-    // API returns them.
+    // Running shifts first, then retired, each still in the order the server
+    // returns them (the clock's, or the column the reader sorted on).
     const rows = [
         ...(data?.data.filter((shift) => shift.is_active) ?? []),
         ...(data?.data.filter((shift) => !shift.is_active) ?? []),
@@ -98,6 +117,7 @@ export default function ShiftsPage({ embedded = false }: { embedded?: boolean })
             </Typography.Paragraph>
 
             <Table<Shift>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
@@ -105,15 +125,30 @@ export default function ShiftsPage({ embedded = false }: { embedded?: boolean })
                 // ones reads as a fourth shift — which is exactly the complaint
                 // that got the duplicates merged: "THERE IS NOT NIGHT, SHIFT A TO C".
                 dataSource={rows}
-                pagination={false}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queries the
+                // whole paginated master rather than the loaded page.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, SHIFT_SORT_FIELDS, SHIFT_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'shifts')}
                 columns={[
                     {
                         title: 'Name',
                         dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, SHIFT_DEFAULT_SORT),
                         render: (name: string, shift) =>
                             shift.is_active ? name : <Typography.Text type="secondary" delete>{name}</Typography.Text>,
                     },
-                    { title: 'Start Time', dataIndex: 'start_time' },
+                    {
+                        title: 'Start Time',
+                        dataIndex: 'start_time',
+                        key: 'start_time',
+                        sorter: true,
+                        sortOrder: columnSortOrder('start_time', params.sort, SHIFT_DEFAULT_SORT),
+                    },
                     { title: 'End Time', dataIndex: 'end_time' },
                     {
                         // The tag says the word. A switch that is merely off does not
