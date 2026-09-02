@@ -440,6 +440,14 @@ record's source.
   existing item; the build adds the default filter, the deliberate choice, the
   finished-goods refusal and the unclassified reason.
 
+- **VERIFIED as a decision:** DEC-20260902-024, the requisition approver. Any
+  procurement-write holder except the requester; self-approval refused with a
+  clear message; requester, approver and time recorded; no Administrator
+  bypass; the Store raises but cannot approve its own. A role restriction
+  would be a separate decision.
+- **GAP:** approval records the approver but never compares them with the
+  requester; the build adds the comparison and the message.
+
 ## Sections still to capture
 
 - Store and held stock: governed by DEC-20260831-012 (hold, quality approval,
