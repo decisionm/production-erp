@@ -143,18 +143,23 @@ export type AttendanceImportListParams = ListParams;
 export type AttendanceImportLineListParams = ListParams & { issue?: AttendanceImportLineFilter };
 
 /**
- * The three lists' query strings — exactly what the server's
- * ListEmployeesRequest / ListLeaveRequestsRequest / ListAttendanceRequest
- * validate. `q`, `page` and `per_page` come with ListParams; the rest is
- * each list's own. `from` / `to` are Y-m-d on the attendance DATE.
+ * The five lists' query strings — exactly what the server's List*Request
+ * classes validate. `q`, `page` and `per_page` come with ListParams; `sort`
+ * is the server's spelling (`name`, `-date`); the rest is each list's own.
+ * `from` / `to` are Y-m-d on the attendance DATE.
  */
-export type EmployeeListParams = ListParams & { status?: EmployeeStatus };
+export type EmployeeListParams = ListParams & { status?: EmployeeStatus; sort?: string };
 
-export type LeaveRequestListParams = ListParams & { status?: LeaveRequestStatus; employee_id?: number };
+export type LeaveRequestListParams = ListParams & { status?: LeaveRequestStatus; employee_id?: number; sort?: string };
 
 export type AttendanceListParams = ListParams & {
     status?: AttendanceStatus;
     employee_id?: number;
     from?: string;
     to?: string;
+    sort?: string;
 };
+
+export type LeaveTypeListParams = ListParams & { sort?: string };
+
+export type LeaveBalanceListParams = ListParams & { sort?: string };

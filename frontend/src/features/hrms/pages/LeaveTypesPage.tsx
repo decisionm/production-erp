@@ -1,11 +1,16 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Form, Input, InputNumber, Modal, Space, Switch, Table, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { createLeaveType, listLeaveTypes, updateLeaveType } from '@/features/hrms/api';
-import type { LeaveType } from '@/features/hrms/types';
+import { LEAVE_TYPE_DEFAULT_SORT, LEAVE_TYPE_LIST_SPEC, LEAVE_TYPE_SORT_FIELDS } from '@/features/hrms/list';
+import type { LeaveType, LeaveTypeListParams } from '@/features/hrms/types';
+import { compactParams } from '@/lib/listParams';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const leaveTypeSchema = z.object({
     code: z.string().min(1, 'Code is required').max(16),
@@ -14,12 +19,27 @@ const leaveTypeSchema = z.object({
 });
 type LeaveTypeFormValues = z.infer<typeof leaveTypeSchema>;
 
+/**
+ * THE LEAVE TYPE MASTER'S LIST. Sort, page and page size live in the URL
+ * (useListParams) and the SERVER orders and pages (ListLeaveTypesRequest);
+ * the pager is wired to the server's meta — this table drew the server's
+ * first 20 with the pager off, so a 21st type existed and nothing on
+ * screen said so.
+ */
 export default function LeaveTypesPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [editingLeaveType, setEditingLeaveType] = useState<LeaveType | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['hrms', 'leave-types'], queryFn: listLeaveTypes });
+    const { params, setParams, setPage } = useListParams<LeaveTypeListParams>(LEAVE_TYPE_LIST_SPEC);
+    const listParams = useMemo(() => compactParams(params), [params]);
+
+    const { data, isFetching } = useQuery({
+        // Still under the ['hrms', 'leave-types'] prefix every mutation invalidates.
+        queryKey: ['hrms', 'leave-types', 'list', listParams],
+        queryFn: () => listLeaveTypes(listParams),
+        placeholderData: (previous) => previous,
+    });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['hrms', 'leave-types'] });
 
@@ -68,18 +88,45 @@ export default function LeaveTypesPage() {
             </Space>
 
             <Table<LeaveType>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
-                loading={isLoading}
+                loading={isFetching}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queried.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, LEAVE_TYPE_SORT_FIELDS, LEAVE_TYPE_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'leave types')}
                 columns={[
-                    { title: 'Code', dataIndex: 'code' },
-                    { title: 'Name', dataIndex: 'name' },
-                    { title: 'Default Annual Days', dataIndex: 'default_annual_days' },
+                    {
+                        title: 'Code',
+                        dataIndex: 'code',
+                        key: 'code',
+                        sorter: true,
+                        sortOrder: columnSortOrder('code', params.sort, LEAVE_TYPE_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, LEAVE_TYPE_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Default Annual Days',
+                        dataIndex: 'default_annual_days',
+                        key: 'default_annual_days',
+                        sorter: true,
+                        sortOrder: columnSortOrder('default_annual_days', params.sort, LEAVE_TYPE_DEFAULT_SORT),
+                    },
                     {
                         title: 'Active',
                         dataIndex: 'is_active',
+                        key: 'is_active',
+                        sorter: true,
+                        sortOrder: columnSortOrder('is_active', params.sort, LEAVE_TYPE_DEFAULT_SORT),
                         render: (active: boolean, row) => (
                             <Switch
                                 checked={active}

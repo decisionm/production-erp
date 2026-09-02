@@ -3,7 +3,9 @@ import { Button, Empty, Input, Select, Space, Table, Tag, Typography } from 'ant
 import { useEffect, useMemo, useState } from 'react';
 import { listAllPayrollRuns, listPayslips } from '@/features/payroll/api';
 import {
+    PAYSLIPS_DEFAULT_SORT,
     PAYSLIPS_LIST_SPEC,
+    PAYSLIPS_SORT_FIELDS,
     payslipsQueryKey,
     payslipsServerFilters,
     periodLabel,
@@ -12,6 +14,7 @@ import type { Payslip, PayslipLineType, PayslipListFilters } from '@/features/pa
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { narrowingKeys } from '@/lib/listParams';
 import { TABLE_STICKY, noMatchLine, pageRangeLine, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { useListParams } from '@/lib/useListParams';
 
 const lineTypeColor: Record<PayslipLineType, string> = {
@@ -109,12 +112,40 @@ export default function PayslipsPage() {
                 loading={isLoading}
                 dataSource={data?.data ?? []}
                 locale={{ emptyText: <ListEmpty state={payslipsQuery} entity="payslips" empty={emptyText} /> }}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queried. The
+                // expanded lines keep the payslip's own order.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, PAYSLIPS_SORT_FIELDS, PAYSLIPS_DEFAULT_SORT) });
+                }}
                 pagination={serverPagination(data?.meta, setPage, 'payslips')}
                 columns={[
+                    // A name through the relation, not a column of this table: no server sort.
                     { title: 'Employee', render: (_, row) => row.employee?.name ?? '—' },
-                    { title: 'Gross Earnings', dataIndex: 'gross_earnings', align: 'right' },
-                    { title: 'Total Deductions', dataIndex: 'total_deductions', align: 'right' },
-                    { title: 'Net Pay', dataIndex: 'net_pay', align: 'right' },
+                    {
+                        title: 'Gross Earnings',
+                        dataIndex: 'gross_earnings',
+                        key: 'gross_earnings',
+                        align: 'right',
+                        sorter: true,
+                        sortOrder: columnSortOrder('gross_earnings', params.sort, PAYSLIPS_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Total Deductions',
+                        dataIndex: 'total_deductions',
+                        key: 'total_deductions',
+                        align: 'right',
+                        sorter: true,
+                        sortOrder: columnSortOrder('total_deductions', params.sort, PAYSLIPS_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Net Pay',
+                        dataIndex: 'net_pay',
+                        key: 'net_pay',
+                        align: 'right',
+                        sorter: true,
+                        sortOrder: columnSortOrder('net_pay', params.sort, PAYSLIPS_DEFAULT_SORT),
+                    },
                 ]}
                 expandable={{
                     expandedRowRender: (row) => (

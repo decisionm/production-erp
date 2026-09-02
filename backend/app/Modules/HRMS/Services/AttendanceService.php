@@ -2,7 +2,9 @@
 
 namespace App\Modules\HRMS\Services;
 
+use App\Modules\HRMS\Http\Requests\ListAttendanceRequest;
 use App\Modules\HRMS\Models\Attendance;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -14,8 +16,9 @@ class AttendanceService
      * The list page's read. Every filter is ListAttendanceRequest's — `q`
      * THROUGH the employee (code, name, department, designation), `status`
      * and `employee_id` exact, `from`/`to` inclusive on the attendance date.
-     * Newest date first, as it always was, with id breaking ties so a day
-     * with thirty marks reads in one order on every load.
+     * Ordered by `sort` (ListSort), newest date first as it always was when
+     * absent, with id breaking ties so a day with thirty marks reads in one
+     * order on every load.
      *
      * @param  array<string, mixed>  $filters
      */
@@ -37,9 +40,7 @@ class AttendanceService
 
         $this->query->applyDateRange($query, 'date', $filters['from'] ?? null, $filters['to'] ?? null);
 
-        return $query
-            ->orderByDesc('date')
-            ->orderByDesc('id')
+        return ListSort::apply($query, $filters['sort'] ?? null, ListAttendanceRequest::SORTABLE, '-date')
             ->paginate($perPage)
             ->withQueryString();
     }

@@ -2,18 +2,22 @@
 
 namespace App\Modules\HRMS\Services;
 
+use App\Modules\HRMS\Http\Requests\ListLeaveBalancesRequest;
 use App\Modules\HRMS\Models\LeaveBalance;
 use App\Modules\HRMS\Models\LeaveType;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 class LeaveBalanceService
 {
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /** Ordered by `sort` (ListSort; validated by ListLeaveBalancesRequest), newest year first as it always was when absent. */
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return LeaveBalance::query()
-            ->with(['employee', 'leaveType'])
-            ->orderByDesc('year')
-            ->paginate($perPage);
+        $query = LeaveBalance::query()->with(['employee', 'leaveType']);
+
+        return ListSort::apply($query, $sort, ListLeaveBalancesRequest::SORTABLE, '-year')
+            ->paginate($perPage)
+            ->withQueryString();
     }
 
     /**
