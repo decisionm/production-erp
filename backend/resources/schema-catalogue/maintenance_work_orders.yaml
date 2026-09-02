@@ -1,72 +1,102 @@
 table: maintenance_work_orders
-module: production
+module: maintenance
 label: 'Maintenance Work Orders'
-purpose: ''
+purpose: 'One row per maintenance job on an asset — preventive (raised from a schedule) or corrective (a breakdown or repair) — with who is doing it, when it started and finished, and its labour and parts cost.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'row id'
   -
     name: asset_id
     type: integer
+    meaning: 'the asset being worked on (assets)'
     references: assets.id
   -
     name: maintenance_schedule_id
     type: integer
     nullable: true
+    meaning: 'the preventive schedule that raised this job (maintenance_schedules); null for a breakdown / corrective job'
     references: maintenance_schedules.id
   -
     name: type
     type: string
+    meaning: "'preventive' (planned service) or 'corrective' (breakdown / repair)"
   -
     name: status
     type: string
+    meaning: "'open', 'in_progress', 'completed', 'cancelled'"
   -
     name: description
     type: string
     nullable: true
+    meaning: 'the fault or work to be done'
   -
     name: reported_date
     type: date
+    meaning: 'date the job was raised'
   -
     name: started_at
     type: datetime
     nullable: true
+    meaning: 'when work began'
   -
     name: completed_at
     type: datetime
     nullable: true
+    meaning: 'when the job was completed'
   -
     name: assigned_to
     type: integer
     nullable: true
+    meaning: 'the employee (technician) doing the job (employees)'
     references: employees.id
   -
     name: labor_cost
     type: decimal
+    meaning: 'labour cost entered when the job is completed'
+    sensitive: rates
   -
     name: parts_cost
     type: decimal
+    meaning: 'sum of quantity x unit cost of the parts issued to the job'
+    sensitive: rates
   -
     name: total_cost
     type: decimal
+    meaning: 'labor_cost plus parts_cost'
+    sensitive: rates
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'the user who raised the job (users)'
     references: users.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'when the job was created in the ERP'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'when the row was last edited'
 joins:
   - 'maintenance_work_orders.created_by = users.id'
   - 'maintenance_work_orders.assigned_to = employees.id'
   - 'maintenance_work_orders.maintenance_schedule_id = maintenance_schedules.id'
   - 'maintenance_work_orders.asset_id = assets.id'
-keywords: {}
-questions: {}
+keywords:
+  - maintenance
+  - breakdown
+  - repair
+  - 'work order'
+  - 'service job'
+  - corrective
+  - preventive
+  - technician
+questions:
+  - 'Which maintenance work orders are still open?'
+  - 'How much did repairs cost last month?'
+  - 'Which machine had the most breakdowns this year?'

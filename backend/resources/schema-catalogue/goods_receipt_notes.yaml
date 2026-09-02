@@ -1,66 +1,90 @@
 table: goods_receipt_notes
 module: procurement
 label: 'Goods Receipt Notes'
-purpose: ''
+purpose: 'One goods receipt (GRN): a physical arrival of material against a purchase order into a warehouse. Its item lines are in goods_receipt_note_lines; a receipt needs a purchase order (DEC-20260902-034).'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key; the GRN number'
   -
     name: purchase_order_id
     type: integer
+    meaning: 'The purchase order this arrival is received against (purchase_orders)'
     references: purchase_orders.id
   -
     name: warehouse_id
     type: integer
+    meaning: 'The store/warehouse the material was received into (warehouses)'
     references: warehouses.id
   -
     name: reference
     type: string
     nullable: true
+    meaning: 'Free-text reference typed at receipt (e.g. supplier delivery challan / invoice number)'
   -
     name: received_date
     type: datetime
+    meaning: 'When the material physically arrived'
   -
     name: notes
     type: string
     nullable: true
+    meaning: 'Free-text remarks on the receipt'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who recorded the receipt (users)'
     references: users.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
   -
     name: receipt_key
     type: string
     nullable: true
+    meaning: 'Client-supplied idempotency key; the same key resubmitted returns the existing receipt instead of creating a duplicate'
   -
     name: receipt_payload_hash
     type: string
     nullable: true
+    meaning: 'SHA-256 of the submitted receipt data; a reused receipt_key with different data is refused'
   -
     name: receipt_note_reference
     type: string
     nullable: true
+    meaning: 'The reference a Tally Receipt Note (and any later Rejections Out) would carry for this arrival'
   -
     name: tracking_number
     type: string
     nullable: true
+    meaning: 'Tally tracking number for the arrival, recorded at receipt'
   -
     name: tally_staging
     type: string
     nullable: true
+    meaning: 'JSON: what the Tally side made of this receipt — {state: disabled|refused|enqueued, reasons: [{code, detail}], entry_id?, at}; NULL on receipts older than the column'
 joins:
   - 'goods_receipt_notes.created_by = users.id'
   - 'goods_receipt_notes.warehouse_id = warehouses.id'
   - 'goods_receipt_notes.purchase_order_id = purchase_orders.id'
-keywords: {}
-questions: {}
+keywords:
+  - grn
+  - receipt
+  - inward
+  - 'material received'
+  - 'goods receipt'
+  - arrival
+  - 'receipt note'
+questions:
+  - 'What material was received this week and into which store?'
+  - 'Which GRNs were recorded against PO 12?'
+  - 'How many receipts did we book last month?'

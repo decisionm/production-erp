@@ -1,35 +1,47 @@
 table: subcontract_order_materials
 module: production
 label: 'Subcontract Order Materials'
-purpose: ''
+purpose: 'One row is one material to be sent to the subcontractor for a subcontract order: how much the BOM says is needed for the planned quantity, and how much has actually been sent out of our stock.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: subcontract_order_id
     type: integer
+    meaning: 'The subcontract order this material line belongs to -> subcontract_orders'
     references: subcontract_orders.id
   -
     name: component_item_id
     type: integer
+    meaning: 'The material item sent to the vendor -> items'
     references: items.id
   -
     name: quantity_required
     type: decimal
+    meaning: "BOM quantity_per x subcontract order quantity_planned, in the component item's unit of measure"
   -
     name: quantity_sent
     type: decimal
+    meaning: 'Quantity actually issued from our warehouse to the vendor (0 while draft)'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
 joins:
   - 'subcontract_order_materials.component_item_id = items.id'
   - 'subcontract_order_materials.subcontract_order_id = subcontract_orders.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'job work material'
+  - 'material sent'
+  - subcontract
+  - component
+questions:
+  - 'What materials were sent to the vendor on this subcontract order?'

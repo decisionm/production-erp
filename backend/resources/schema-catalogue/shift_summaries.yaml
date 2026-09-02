@@ -1,51 +1,68 @@
 table: shift_summaries
 module: production
 label: 'Shift Summaries'
-purpose: ''
+purpose: 'One row is the close-of-shift roll-up for one shift on one production date (unique per shift + date): who supervised, the production target in kg, power units consumed and remarks. Written when someone closes the shift.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: shift_id
     type: integer
+    meaning: 'The shift summarised -> shifts'
     references: shifts.id
   -
     name: production_date
     type: date
+    meaning: 'Production date of the shift'
   -
     name: supervisor_id
     type: integer
     nullable: true
+    meaning: 'Supervisor responsible for the shift -> employees'
     references: employees.id
   -
     name: target_production_kg
     type: decimal
     nullable: true
+    meaning: 'Planned production target for the shift in kg'
   -
     name: power_consumption_units
     type: decimal
     nullable: true
+    meaning: 'Electricity consumed during the shift in units (kWh)'
   -
     name: remarks
     type: string
     nullable: true
+    meaning: 'Free-text shift remarks'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who closed the shift -> users'
     references: users.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the shift was closed'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
 joins:
   - 'shift_summaries.created_by = users.id'
   - 'shift_summaries.supervisor_id = employees.id'
   - 'shift_summaries.shift_id = shifts.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'shift summary'
+  - 'close shift'
+  - 'power consumption'
+  - units
+  - target
+questions:
+  - 'How many power units were consumed per shift last week?'
+  - 'What was the production target versus actual per shift?'

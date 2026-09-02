@@ -1,40 +1,49 @@
 table: purchase_requisition_lines
 module: procurement
 label: 'Purchase Requisition Lines'
-purpose: ''
+purpose: 'One item line on a purchase requisition: an item and the quantity someone asked to have bought. Its parent is purchase_requisitions.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: purchase_requisition_id
     type: integer
+    meaning: 'The requisition this line belongs to (purchase_requisitions)'
     references: purchase_requisitions.id
   -
     name: item_id
     type: integer
+    meaning: 'The item requested (items)'
     references: items.id
   -
     name: quantity
     type: decimal
+    meaning: 'Quantity requested, in the item unit'
   -
     name: notes
     type: string
     nullable: true
+    meaning: 'Free-text remark on the line'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the line was created'
   -
     name: updated_at
     type: datetime
     nullable: true
-  -
-    name: unclassified_reason
-    type: string
-    nullable: true
+    meaning: 'When the line was last changed'
 joins:
   - 'purchase_requisition_lines.item_id = items.id'
   - 'purchase_requisition_lines.purchase_requisition_id = purchase_requisitions.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'requisition line'
+  - 'item requested'
+  - 'indent line'
+  - 'requested quantity'
+questions:
+  - 'Which items were requested on approved requisitions this month?'
+  - 'What quantity of packaging is on open requisitions?'

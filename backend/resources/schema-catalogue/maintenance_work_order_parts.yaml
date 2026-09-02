@@ -1,40 +1,57 @@
 table: maintenance_work_order_parts
-module: production
+module: maintenance
 label: 'Maintenance Work Order Parts'
-purpose: ''
+purpose: 'One spare part or consumable issued from a store against a maintenance work order, with the quantity used and its unit cost. Issuing a part also moves that stock out of the store.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'row id'
   -
     name: maintenance_work_order_id
     type: integer
+    meaning: 'the maintenance job the part was used on (maintenance_work_orders)'
     references: maintenance_work_orders.id
   -
     name: item_id
     type: integer
+    meaning: 'the spare part / consumable item issued (items)'
     references: items.id
   -
     name: warehouse_id
     type: integer
+    meaning: 'the store the part was issued from (warehouses)'
     references: warehouses.id
   -
     name: quantity
     type: decimal
+    meaning: 'quantity of the part used'
   -
     name: unit_cost
     type: decimal
+    meaning: 'cost per unit at the time of issue'
+    sensitive: rates
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'when the part was issued'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'when the row was last edited'
 joins:
   - 'maintenance_work_order_parts.warehouse_id = warehouses.id'
   - 'maintenance_work_order_parts.item_id = items.id'
   - 'maintenance_work_order_parts.maintenance_work_order_id = maintenance_work_orders.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'spare parts'
+  - spares
+  - 'consumables used'
+  - 'parts issued'
+  - 'maintenance parts'
+  - 'repair parts'
+questions:
+  - 'Which spare parts were used on a given work order?'
+  - 'Which spares does maintenance consume most?'

@@ -1,39 +1,55 @@
 table: purchase_order_revisions
 module: procurement
 label: 'Purchase Order Revisions'
-purpose: ''
+purpose: 'One append-only history entry of a purchase order: either an amendment of a draft (holding the lines as they were before) or a short-close (holding what was still open). Never edited or deleted.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: purchase_order_id
     type: integer
+    meaning: 'The purchase order this revision belongs to (purchase_orders)'
     references: purchase_orders.id
   -
     name: revision_no
     type: integer
+    meaning: 'Sequence number of this revision within the order, counting from 1 across both kinds'
   -
     name: kind
     type: string
+    meaning: 'What happened: amend (draft lines replaced; prior lines kept) or close (order short-closed; open balances kept)'
   -
     name: lines_json
     type: string
+    meaning: 'JSON: for amend, the PRIOR lines (item, quantity, rate, schedules); for close, what was still open per line (quantity, received, remaining)'
+    sensitive: rates
   -
     name: amended_by
     type: integer
     nullable: true
+    meaning: 'User who made the amendment or close (users); NULL for an internal caller'
     references: users.id
   -
     name: reason
     type: string
     nullable: true
+    meaning: 'Reason given for the amendment or close'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the revision was recorded'
 joins:
   - 'purchase_order_revisions.amended_by = users.id'
   - 'purchase_order_revisions.purchase_order_id = purchase_orders.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'po amendment'
+  - 'po revision'
+  - 'po history'
+  - 'short close'
+  - 'order changed'
+questions:
+  - 'How many times was PO 12 amended, and by whom?'
+  - 'Which purchase orders were short-closed last month?'

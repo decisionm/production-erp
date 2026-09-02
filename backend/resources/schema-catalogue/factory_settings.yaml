@@ -1,61 +1,84 @@
 table: factory_settings
 module: users
 label: 'Factory Settings'
-purpose: ''
+purpose: 'One row per typed factory rule the factory can change without a code deploy (limits, tolerances, the masterbatch colour map); a row overrides the default in config/production.php. Most rows are reference values loaded from the System Config workbook and are not read by any screen.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'row id'
   -
     name: key
     type: string
+    meaning: "setting name, e.g. 'masterbatch_colour_map' (the one key the software reads); other keys are workbook reference rows"
   -
     name: value
     type: string
     nullable: true
+    meaning: 'the setting value stored as text; cast on read using data_type'
   -
     name: data_type
     type: string
+    meaning: "how value is read: 'string', 'integer', 'decimal', 'boolean', 'json'"
   -
     name: scope
     type: string
+    meaning: "area the setting belongs to (currently 'production')"
   -
     name: label
     type: string
     nullable: true
+    meaning: 'display name shown on the Factory Rules screen'
   -
     name: description
     type: string
     nullable: true
+    meaning: 'what the setting controls, in plain words'
   -
     name: confirmation_status
     type: string
     nullable: true
+    meaning: "workbook status text: 'Discussion Confirmed', 'To Confirm', 'Recommended', 'Added in app', 'Observed, awaiting approval', 'Factory master 29-Jul'"
   -
     name: is_active
     type: integer
+    meaning: '1 = the override is in force; 0 = ignored'
   -
     name: effective_from
     type: date
     nullable: true
+    meaning: 'date from which the value applies'
   -
     name: changed_by
     type: integer
     nullable: true
+    meaning: 'the user who last changed the value (users)'
     references: users.id
   -
     name: change_reason
     type: string
     nullable: true
+    meaning: 'reason given for the last change'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'when the setting row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'when the setting was last changed'
 joins:
   - 'factory_settings.changed_by = users.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'factory rules'
+  - 'factory settings'
+  - 'system config'
+  - tolerance
+  - parameters
+  - thresholds
+  - configuration
+questions:
+  - 'Which factory settings are still marked To Confirm?'
+  - 'Who last changed the masterbatch colour map, and why?'

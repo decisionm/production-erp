@@ -1,42 +1,64 @@
 table: users
 module: users
 label: Users
-purpose: ''
+purpose: 'One row per ERP login account — the people who sign in, plus non-human service accounts such as the Tally Sync Agent. This is not the staff list; that is employees.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'row id'
   -
     name: name
     type: string
+    meaning: 'display name of the account'
   -
     name: email
     type: string
+    meaning: 'login email address (unique)'
+    sensitive: personal
   -
     name: email_verified_at
     type: datetime
     nullable: true
+    meaning: 'when the email was verified (not used by this ERP)'
   -
     name: password
     type: string
+    meaning: 'hashed login password — a secret, never readable'
+    sensitive: personal
   -
     name: remember_token
     type: string
     nullable: true
+    meaning: 'browser remember-me token — a secret'
+    sensitive: personal
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'when the account was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'when the account was last edited'
   -
     name: is_active
     type: integer
+    meaning: '1 = may log in; 0 = deactivated'
   -
     name: is_system
     type: integer
+    meaning: '1 = non-human service account (e.g. the Tally Sync Agent), hidden from the Users page; 0 = a person'
 joins: {}
-keywords: {}
-questions: {}
+keywords:
+  - users
+  - login
+  - account
+  - 'user account'
+  - 'system user'
+  - access
+  - 'who can log in'
+questions:
+  - 'Which user accounts are deactivated?'
+  - 'How many people can log in to the ERP?'

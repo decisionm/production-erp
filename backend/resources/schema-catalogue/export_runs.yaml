@@ -1,43 +1,61 @@
 table: export_runs
 module: users
 label: 'Export Runs'
-purpose: ''
+purpose: 'One row per download attempted from the Export Center: who asked for which export with which filters, and whether the file streamed to the end, was refused (blocked kind or row cap), or never finished.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'row id'
   -
     name: user_id
     type: integer
+    meaning: 'the user who requested the export (users)'
     references: users.id
   -
     name: kind
     type: string
+    meaning: "export key, e.g. 'sales_orders', 'invoices', 'deliveries', 'purchase_orders', 'purchase_order_lines', 'goods_receipts', 'goods_receipt_lines', 'production_report', 'shift_summary', 'traceability_report', 'reconciliation_report', 'tally_sync_entries', 'tally_sync_history', 'cec'"
   -
     name: filters
     type: string
+    meaning: 'the filters the export was asked with, as JSON'
   -
     name: row_count
     type: integer
+    meaning: 'rows streamed on success; rows that matched when refused for exceeding the cap; 0 for a blocked kind'
   -
     name: file_name
     type: string
+    meaning: 'name of the file handed to the user'
   -
     name: sha256
     type: string
     nullable: true
+    meaning: 'checksum of the streamed bytes; null until the file completes and on every refusal'
   -
     name: completed
     type: integer
+    meaning: '1 = file streamed to its last byte; 0 = refused or never finished'
   -
     name: refusal_reason
     type: string
     nullable: true
+    meaning: 'why the server refused the export (null when the file streamed)'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'when the export was requested'
 joins:
   - 'export_runs.user_id = users.id'
-keywords: {}
-questions: {}
+keywords:
+  - export
+  - download
+  - CSV
+  - 'report download'
+  - 'export history'
+  - 'download center'
+questions:
+  - 'Who downloaded the invoices export this week?'
+  - 'Which exports were refused, and why?'

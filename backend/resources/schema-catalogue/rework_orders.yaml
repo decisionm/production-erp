@@ -1,73 +1,99 @@
 table: rework_orders
 module: production
 label: 'Rework Orders'
-purpose: ''
+purpose: 'One row is a rework order: a job to recover good units from a quantity of defective units of one item, optionally using a rework BOM for extra materials. Releasing it issues those materials; completing it receives the recovered quantity into stock at (material + labour cost) per recovered unit.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: item_id
     type: integer
+    meaning: 'The item being reworked and recovered -> items'
     references: items.id
   -
     name: source_work_order_id
     type: integer
     nullable: true
+    meaning: 'The work order the defective units came from; NULL if not tied to one -> work_orders'
     references: work_orders.id
   -
     name: bom_id
     type: integer
     nullable: true
+    meaning: 'Rework BOM for extra materials needed; NULL when the rework needs no materials -> boms'
     references: boms.id
   -
     name: warehouse_id
     type: integer
+    meaning: 'Warehouse the materials are issued from and the recovered units are received into -> warehouses'
     references: warehouses.id
   -
     name: quantity_input
     type: decimal
+    meaning: "Number of defective units going into rework, in the item's unit of measure (informational; the defective units were already costed on their original work order)"
   -
     name: quantity_recovered
     type: decimal
+    meaning: 'Good units recovered and received into stock (0 until completed)'
   -
     name: material_cost
     type: decimal
+    meaning: 'Value of extra materials issued at release (quantity x stock unit cost)'
+    sensitive: rates
   -
     name: labor_cost
     type: decimal
+    meaning: 'Labour cost entered at completion'
+    sensitive: rates
   -
     name: total_cost
     type: decimal
+    meaning: 'material_cost + labor_cost; recovered unit cost = total_cost / quantity_recovered'
+    sensitive: rates
   -
     name: status
     type: string
+    meaning: 'Lifecycle: draft (created), released (materials issued), completed (recovered units received)'
   -
     name: released_at
     type: datetime
     nullable: true
+    meaning: 'When the order was released and materials issued'
   -
     name: completed_at
     type: datetime
     nullable: true
+    meaning: 'When the order was completed'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who created the order -> users'
     references: users.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
 joins:
   - 'rework_orders.created_by = users.id'
   - 'rework_orders.warehouse_id = warehouses.id'
   - 'rework_orders.bom_id = boms.id'
   - 'rework_orders.source_work_order_id = work_orders.id'
   - 'rework_orders.item_id = items.id'
-keywords: {}
-questions: {}
+keywords:
+  - rework
+  - 'rework order'
+  - recovery
+  - 'defective units'
+  - repair
+questions:
+  - 'How many units were recovered through rework this month?'
+  - 'Which rework orders are still open?'

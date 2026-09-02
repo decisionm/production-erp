@@ -1,48 +1,67 @@
 table: material_bags
 module: inventory
 label: 'Material Bags'
-purpose: ''
+purpose: 'One row is one physical bag of a received material lot (a resin or masterbatch bag), identified by its unique barcode, with how much is still in it, its status and where it is standing.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: material_lot_id
     type: integer
+    meaning: 'Lot the bag was received in (material_lots.id)'
     references: material_lots.id
   -
     name: barcode
     type: string
+    meaning: 'Unique bag barcode: the supplier barcode when scannable, else app-generated LOT{lot}-B{seq}'
   -
     name: original_kg
     type: decimal
+    meaning: 'Weight of the bag when received (kg)'
   -
     name: remaining_kg
     type: decimal
+    meaning: 'Material still in the bag (kg); decremented by loads, restored by returns'
   -
     name: status
     type: string
+    meaning: 'in_store | in_day_bin | consumed | returned | waiting_qc | rejected_qc'
   -
     name: current_warehouse_id
     type: integer
     nullable: true
+    meaning: 'Warehouse the bag is currently standing in (warehouses.id)'
     references: warehouses.id
   -
     name: day_bin_work_center_id
     type: integer
     nullable: true
+    meaning: 'Machine whose day bin holds the bag (work_centers.id); null when not at a machine (the day-bin flow is retired, DEC-20260817-001)'
     references: work_centers.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last updated'
 joins:
   - 'material_bags.day_bin_work_center_id = work_centers.id'
   - 'material_bags.current_warehouse_id = warehouses.id'
   - 'material_bags.material_lot_id = material_lots.id'
-keywords: {}
-questions: {}
+keywords:
+  - bag
+  - 'resin bag'
+  - barcode
+  - 'lot bag'
+  - scan
+  - 'masterbatch bag'
+questions:
+  - 'How many resin bags are in the store?'
+  - 'Which bags are waiting for QC?'
+  - 'How many kg remain across the bags of a lot?'

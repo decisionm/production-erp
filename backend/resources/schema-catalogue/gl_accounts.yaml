@@ -1,35 +1,50 @@
 table: gl_accounts
 module: finance
-label: 'Gl Accounts'
-purpose: ''
+label: 'GL Accounts'
+purpose: "One account in the ERP's own chart of accounts (general ledger), used by journal_entry_lines. Distinct from the mirrored Tally ledgers table."
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: code
     type: string
+    meaning: 'Unique account code'
   -
     name: name
     type: string
+    meaning: 'Account name'
   -
     name: type
     type: string
+    meaning: 'Account class: asset, liability, equity, revenue, expense'
   -
     name: is_active
     type: integer
+    meaning: '1 = active and postable; 0 = deactivated'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the account was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the account was last changed'
   -
     name: deleted_at
     type: datetime
     nullable: true
+    meaning: 'Soft-delete timestamp; NULL means the account is live'
 joins: {}
-keywords: {}
-questions: {}
+keywords:
+  - 'gl account'
+  - 'chart of accounts'
+  - 'general ledger'
+  - 'account head'
+  - coa
+questions:
+  - 'Which GL accounts are expense accounts?'
+  - 'How many active GL accounts are there by type?'

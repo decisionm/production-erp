@@ -1,42 +1,54 @@
 table: purchase_order_lines
 module: procurement
 label: 'Purchase Order Lines'
-purpose: ''
+purpose: 'One item line on a purchase order: the item, the ordered quantity, its rate and how much has been received so far. Its parent is purchase_orders; delivery dates are in purchase_order_schedules.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: purchase_order_id
     type: integer
+    meaning: 'The purchase order this line belongs to (purchase_orders)'
     references: purchase_orders.id
   -
     name: item_id
     type: integer
+    meaning: 'The item ordered (items)'
     references: items.id
   -
     name: quantity
     type: decimal
+    meaning: 'Quantity ordered, in the item unit'
   -
     name: unit_price
     type: decimal
+    meaning: 'Purchase rate per unit agreed with the vendor'
+    sensitive: rates
   -
     name: quantity_received
     type: decimal
+    meaning: 'Quantity received so far against this line (sum of its GRN lines)'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the line was created'
   -
     name: updated_at
     type: datetime
     nullable: true
-  -
-    name: unclassified_reason
-    type: string
-    nullable: true
+    meaning: 'When the line was last changed'
 joins:
   - 'purchase_order_lines.item_id = items.id'
   - 'purchase_order_lines.purchase_order_id = purchase_orders.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'po line'
+  - 'ordered quantity'
+  - 'pending receipt'
+  - 'item ordered'
+  - 'po item'
+questions:
+  - 'How much resin is on order and not yet received?'
+  - 'Which PO lines are fully received?'

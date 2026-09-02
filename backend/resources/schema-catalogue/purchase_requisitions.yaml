@@ -1,66 +1,77 @@
 table: purchase_requisitions
 module: procurement
 label: 'Purchase Requisitions'
-purpose: ''
+purpose: 'One purchase requisition (indent): a request that certain items be bought, raised by a user and then approved, rejected or withdrawn. Its item lines are in purchase_requisition_lines; purchase orders raised from it point back via purchase_orders.purchase_requisition_id.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key; the requisition number'
   -
     name: status
     type: string
+    meaning: 'Lifecycle state: draft, approved, rejected, withdrawn'
   -
     name: requested_by
     type: integer
     nullable: true
+    meaning: 'User who raised the requisition (users)'
     references: users.id
   -
     name: needed_by_date
     type: date
     nullable: true
+    meaning: 'Date by which the material is needed'
   -
     name: notes
     type: string
     nullable: true
+    meaning: 'Free-text remarks on the requisition'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the requisition was raised'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
   -
     name: approved_by
     type: integer
     nullable: true
+    meaning: 'User who approved it (users); NULL if not approved or approved before the stamp existed'
     references: users.id
   -
     name: approved_at
     type: datetime
     nullable: true
+    meaning: 'When it was approved'
   -
     name: rejected_by
     type: integer
     nullable: true
+    meaning: 'User who rejected it (users)'
     references: users.id
   -
     name: rejected_at
     type: datetime
     nullable: true
-  -
-    name: withdrawn_by
-    type: integer
-    nullable: true
-    references: users.id
-  -
-    name: withdrawn_at
-    type: datetime
-    nullable: true
+    meaning: 'When it was rejected'
 joins:
   - 'purchase_requisitions.withdrawn_by = users.id'
   - 'purchase_requisitions.requested_by = users.id'
   - 'purchase_requisitions.approved_by = users.id'
   - 'purchase_requisitions.rejected_by = users.id'
-keywords: {}
-questions: {}
+keywords:
+  - requisition
+  - indent
+  - 'purchase request'
+  - pr
+  - 'material request'
+  - 'pending approval'
+questions:
+  - 'Which requisitions are waiting for approval?'
+  - 'How many requisitions did each user raise this month?'
+  - 'Which approved requisitions have no purchase order yet?'

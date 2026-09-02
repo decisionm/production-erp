@@ -1,33 +1,51 @@
 table: payslip_lines
 module: payroll
 label: 'Payslip Lines'
-purpose: ''
+purpose: 'One earning, deduction or employer-contribution line on an employee payslip — Basic, HRA, PF (employee and employer), ESI and so on — with its amount for that month.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'row id'
   -
     name: payslip_id
     type: integer
+    meaning: 'the payslip this line belongs to (payslips)'
     references: payslips.id
   -
     name: label
     type: string
+    meaning: 'component name as printed on the payslip (e.g. Basic, HRA, Provident Fund (Employee), ESI (Employer))'
   -
     name: type
     type: string
+    meaning: "'earning' (adds to gross), 'deduction' (taken from gross), 'employer_contribution' (company cost, not part of net pay)"
   -
     name: amount
     type: decimal
+    meaning: 'amount of this line for the month'
+    sensitive: pay
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'when the line was generated'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'when the row was last edited'
 joins:
   - 'payslip_lines.payslip_id = payslips.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'payslip line'
+  - basic
+  - HRA
+  - PF
+  - ESI
+  - deduction
+  - allowance
+  - earning
+questions:
+  - 'What was the total PF deducted in July?'
+  - 'Break down an employee payslip for August by component.'

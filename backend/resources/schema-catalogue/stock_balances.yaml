@@ -1,35 +1,53 @@
 table: stock_balances
 module: inventory
 label: 'Stock Balances'
-purpose: ''
+purpose: 'One row is the current on-hand quantity and moving-average cost of one item in one warehouse; one row per item/warehouse pair, maintained by the stock ledger (stock_movements).'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: item_id
     type: integer
+    meaning: 'Item (items.id)'
     references: items.id
   -
     name: warehouse_id
     type: integer
+    meaning: 'Location the stock is in (warehouses.id)'
     references: warehouses.id
   -
     name: quantity
     type: decimal
+    meaning: "On-hand quantity in the item's uom; can go negative when consumption outran recorded stock"
   -
     name: average_cost
     type: decimal
+    meaning: 'Moving-average cost per unit (INR)'
+    sensitive: rates
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last updated'
 joins:
   - 'stock_balances.warehouse_id = warehouses.id'
   - 'stock_balances.item_id = items.id'
-keywords: {}
-questions: {}
+keywords:
+  - stock
+  - 'on hand'
+  - balance
+  - 'stock level'
+  - 'closing stock'
+  - inventory
+  - available
+questions:
+  - 'What is the current stock of each item in the RM store?'
+  - 'Which items are below their reorder level?'
+  - 'Which balances are negative?'

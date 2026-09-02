@@ -1,49 +1,66 @@
 table: invoices
 module: sales
 label: Invoices
-purpose: ''
+purpose: 'One row is a sales invoice the ERP itself raised against a sales order (numbered INV-{id}). On this factory the real sales invoices are raised in Tally and mirrored into tally_sales_invoices (DEC-20260831-008), so this table is nearly empty; ask tally_sales_invoices for what customers were billed.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Row id; the invoice number shown as INV-{id}'
   -
     name: sales_order_id
     type: integer
+    meaning: 'The sales order this invoice bills'
     references: sales_orders.id
   -
     name: customer_id
     type: integer
+    meaning: 'The customer billed'
     references: customers.id
   -
     name: status
     type: string
+    meaning: 'Invoice state: draft, issued, paid'
   -
     name: invoice_date
     type: date
+    meaning: 'Invoice date'
   -
     name: due_date
     type: date
     nullable: true
+    meaning: 'Payment due date'
   -
     name: notes
     type: string
     nullable: true
+    meaning: 'Free-text notes on the invoice'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who raised the invoice'
     references: users.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
 joins:
   - 'invoices.created_by = users.id'
   - 'invoices.customer_id = customers.id'
   - 'invoices.sales_order_id = sales_orders.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'erp invoice'
+  - invoice
+  - bill
+  - billing
+  - unpaid
+questions:
+  - 'Which ERP-raised invoices are still unpaid?'
+  - 'How many invoices has the ERP itself issued this year?'

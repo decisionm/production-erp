@@ -1,32 +1,44 @@
 table: grn_schedule_allocations
 module: procurement
-label: 'Grn Schedule Allocations'
-purpose: ''
+label: 'GRN Schedule Allocations'
+purpose: 'One allocation of a goods-receipt line quantity against one purchase-order delivery schedule (item + due date). A single received line can be split across several schedules; oldest due date is filled first by default.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: goods_receipt_note_line_id
     type: integer
+    meaning: 'The received line being allocated (goods_receipt_note_lines)'
     references: goods_receipt_note_lines.id
   -
     name: purchase_order_schedule_id
     type: integer
+    meaning: 'The PO delivery schedule this quantity is counted against (purchase_order_schedules)'
     references: purchase_order_schedules.id
   -
     name: quantity
     type: decimal
+    meaning: 'Quantity of the receipt line allocated to this schedule, in the item unit'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the allocation was recorded'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the allocation was last changed'
 joins:
   - 'grn_schedule_allocations.purchase_order_schedule_id = purchase_order_schedules.id'
   - 'grn_schedule_allocations.goods_receipt_note_line_id = goods_receipt_note_lines.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'grn allocation'
+  - 'schedule allocation'
+  - 'delivery schedule received'
+  - 'arrival against schedule'
+questions:
+  - 'How much of each delivery schedule on PO 12 has been received?'
+  - 'Which GRN lines were allocated to overdue schedules?'

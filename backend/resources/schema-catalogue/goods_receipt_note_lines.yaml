@@ -1,46 +1,63 @@
 table: goods_receipt_note_lines
 module: procurement
 label: 'Goods Receipt Note Lines'
-purpose: ''
+purpose: 'One item line on a goods receipt: the quantity of one item received against one purchase-order line, and the stock movement it wrote. Its parent is goods_receipt_notes.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: goods_receipt_note_id
     type: integer
+    meaning: 'The receipt this line belongs to (goods_receipt_notes)'
     references: goods_receipt_notes.id
   -
     name: purchase_order_line_id
     type: integer
+    meaning: 'The purchase-order line being received against (purchase_order_lines)'
     references: purchase_order_lines.id
   -
     name: item_id
     type: integer
+    meaning: 'The item received (items)'
     references: items.id
   -
     name: quantity
     type: decimal
+    meaning: 'Quantity received on this line, in the item unit'
   -
     name: unit_cost
     type: decimal
+    meaning: 'Cost per unit booked for this receipt, copied from the PO line rate'
+    sensitive: rates
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the line was recorded'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the line was last changed'
   -
     name: stock_movement_id
     type: integer
     nullable: true
+    meaning: 'The inventory ledger row this receipt line wrote (stock_movements); NULL on lines booked before the column existed'
     references: stock_movements.id
 joins:
   - 'goods_receipt_note_lines.stock_movement_id = stock_movements.id'
   - 'goods_receipt_note_lines.goods_receipt_note_id = goods_receipt_notes.id'
   - 'goods_receipt_note_lines.purchase_order_line_id = purchase_order_lines.id'
   - 'goods_receipt_note_lines.item_id = items.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'grn line'
+  - 'received quantity'
+  - 'item received'
+  - 'inward line'
+  - 'receipt line'
+questions:
+  - 'How much of each item was received in August?'
+  - 'Which items on GRN 5 were received and in what quantity?'

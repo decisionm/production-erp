@@ -1,39 +1,55 @@
 table: work_order_scraps
 module: production
-label: 'Work Order Scraps'
-purpose: ''
+label: 'Work Order Scrap'
+purpose: 'One row is a scrap entry recorded when a work order is completed: how many units were lost to one scrap reason and the share of material cost that reason accounts for. Shift-batch scrap on the live floor is in shift_scraps, not here.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: work_order_id
     type: integer
+    meaning: 'The work order the scrap arose on -> work_orders'
     references: work_orders.id
   -
     name: scrap_reason_id
     type: integer
+    meaning: 'Why the units were scrapped -> scrap_reasons'
     references: scrap_reasons.id
   -
     name: quantity
     type: decimal
+    meaning: "Number of units scrapped for this reason, in the work order item's unit of measure"
   -
     name: cost_impact
     type: decimal
+    meaning: 'Material cost attributed to this scrap (material_cost per planned unit x quantity); reporting only, does not change the finished goods unit cost'
+    sensitive: rates
   -
     name: notes
     type: string
     nullable: true
+    meaning: 'Free-text note about the scrap'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
 joins:
   - 'work_order_scraps.scrap_reason_id = scrap_reasons.id'
   - 'work_order_scraps.work_order_id = work_orders.id'
-keywords: {}
-questions: {}
+keywords:
+  - scrap
+  - rejection
+  - wastage
+  - 'work order scrap'
+  - 'scrap cost'
+questions:
+  - 'Which scrap reason caused the most units lost on work orders this month?'
+  - 'What was the scrap cost on this work order?'

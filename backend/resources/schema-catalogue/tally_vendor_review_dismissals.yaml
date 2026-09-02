@@ -1,38 +1,55 @@
 table: tally_vendor_review_dismissals
 module: procurement
 label: 'Tally Vendor Review Dismissals'
-purpose: ''
+purpose: 'One dismissal on the Tally vendor review screen: a person set aside a proposed new vendor (field "*") or a conflicting detail on one field of a mirrored Tally ledger, recording the exact value dismissed so a later different value from Tally surfaces again.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: tally_ledger_guid
     type: string
+    meaning: 'GUID of the mirrored Tally ledger the dismissal is about (matches ledgers.tally_guid)'
   -
     name: field
     type: string
+    meaning: 'The field set aside: name, email, phone, gstin, state_code, tally_ledger_name, or "*" meaning the whole ledger is not a vendor'
   -
     name: dismissed_value
     type: string
     nullable: true
+    meaning: 'The exact Tally value that was dismissed; NULL means Tally had nothing in that field at the time'
+    sensitive: supplier-identity
   -
     name: dismissed_by
     type: integer
     nullable: true
+    meaning: 'User who dismissed it (users)'
     references: users.id
   -
     name: dismissed_at
     type: datetime
+    meaning: 'When it was dismissed'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
 joins:
   - 'tally_vendor_review_dismissals.dismissed_by = users.id'
-keywords: {}
-questions: {}
+  - 'tally_vendor_review_dismissals.tally_ledger_guid = ledgers.tally_guid'
+keywords:
+  - 'vendor review'
+  - 'dismissed ledger'
+  - 'ignored tally vendor'
+  - 'not a vendor'
+  - 'review queue'
+questions:
+  - 'How many Tally ledgers were dismissed as not vendors, and by whom?'
+  - 'Which vendor detail conflicts were set aside last month?'

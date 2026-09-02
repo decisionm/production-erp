@@ -1,55 +1,76 @@
 table: leave_requests
 module: hrms
 label: 'Leave Requests'
-purpose: ''
+purpose: 'One row per leave application: an employee asking for a kind of leave over a date range, and whether it was approved or rejected, by whom and when.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'row id'
   -
     name: employee_id
     type: integer
+    meaning: 'the employee applying for leave (employees)'
     references: employees.id
   -
     name: leave_type_id
     type: integer
+    meaning: 'the kind of leave requested (leave_types)'
     references: leave_types.id
   -
     name: start_date
     type: date
+    meaning: 'first day of leave'
   -
     name: end_date
     type: date
+    meaning: 'last day of leave'
   -
     name: days
     type: decimal
+    meaning: 'number of leave days requested (half days allowed)'
   -
     name: reason
     type: string
     nullable: true
+    meaning: 'reason given by the employee'
   -
     name: status
     type: string
+    meaning: "decision state: 'pending', 'approved', 'rejected'"
   -
     name: approved_by
     type: integer
     nullable: true
+    meaning: 'the user who approved or rejected the request (users)'
     references: users.id
   -
     name: decided_at
     type: datetime
     nullable: true
+    meaning: 'when the approve/reject decision was recorded'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'when the request was submitted'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'when the row was last edited'
 joins:
   - 'leave_requests.approved_by = users.id'
   - 'leave_requests.leave_type_id = leave_types.id'
   - 'leave_requests.employee_id = employees.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'leave application'
+  - 'leave request'
+  - 'time off'
+  - holiday
+  - 'pending leave'
+  - 'approved leave'
+questions:
+  - 'Which leave requests are pending approval?'
+  - 'Who is on leave next week?'
+  - 'How many leave requests were rejected this month?'

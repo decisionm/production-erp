@@ -1,39 +1,52 @@
 table: batches
 module: production
-label: Batches
-purpose: ''
+label: 'Inventory Lot Batches'
+purpose: 'One row is a generic inventory batch/lot identity for a batch-tracked item (batch number, manufactured and expiry dates) that stock movements can reference. NOT the production batch — a production run is a row in shift_production_entries. Sparsely used on this factory.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: item_id
     type: integer
+    meaning: 'The batch-tracked item -> items'
     references: items.id
   -
     name: batch_number
     type: string
+    meaning: 'Batch/lot number, unique per item'
   -
     name: manufactured_date
     type: date
     nullable: true
+    meaning: 'Date the lot was manufactured'
   -
     name: expiry_date
     type: date
     nullable: true
+    meaning: 'Date the lot expires'
   -
     name: notes
     type: string
     nullable: true
+    meaning: 'Free-text notes'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
 joins:
   - 'batches.item_id = items.id'
-keywords: {}
-questions: {}
+keywords:
+  - lot
+  - 'batch number'
+  - expiry
+  - 'batch tracked item'
+questions:
+  - 'Which inventory lots expire this month?'

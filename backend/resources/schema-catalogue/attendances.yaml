@@ -1,42 +1,62 @@
 table: attendances
 module: hrms
-label: Attendances
-purpose: ''
+label: Attendance
+purpose: 'One row per employee per calendar day: whether that person was present, absent, half day or on leave, with the clock-in and clock-out times when recorded. This is the daily muster.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'row id'
   -
     name: employee_id
     type: integer
+    meaning: 'the employee this attendance day belongs to (employees)'
     references: employees.id
   -
     name: date
     type: date
+    meaning: 'the calendar day the attendance is for (one row per employee per day)'
   -
     name: status
     type: string
+    meaning: "attendance for the day: 'present', 'absent', 'half_day', 'on_leave'"
   -
     name: check_in
     type: datetime
     nullable: true
+    meaning: 'time the employee clocked in that day, if recorded'
   -
     name: check_out
     type: datetime
     nullable: true
+    meaning: 'time the employee clocked out that day, if recorded'
   -
     name: notes
     type: string
     nullable: true
+    meaning: 'free-text remark about the day (late, permission, reason)'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'when the row was created in the ERP'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'when the row was last edited'
 joins:
   - 'attendances.employee_id = employees.id'
-keywords: {}
-questions: {}
+keywords:
+  - attendance
+  - muster
+  - present
+  - absent
+  - check-in
+  - punch
+  - 'on leave'
+  - 'half day'
+questions:
+  - 'Who was absent yesterday?'
+  - 'How many days was each employee present in August?'
+  - 'Which employees have not clocked out today?'

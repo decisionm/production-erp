@@ -1,40 +1,57 @@
 table: item_groups
 module: inventory
 label: 'Item Groups'
-purpose: ''
+purpose: 'One row is a Tally stock group mirrored into the ERP (Raw Material, Finished Goods, ...), the grouping Tally files stock items under. Nested through parent_id; written only by the Tally masters pull.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: tally_guid
     type: string
     nullable: true
+    meaning: 'Tally GUID of the stock group; null for a group not from Tally'
   -
     name: name
     type: string
+    meaning: 'Group name exactly as spelled in Tally'
   -
     name: tally_parent_name
     type: string
     nullable: true
+    meaning: 'Name of the parent group in Tally, kept so the parent link can be re-resolved on every pull'
   -
     name: parent_id
     type: integer
     nullable: true
+    meaning: 'Parent group (item_groups.id) for nested Tally groups; null at the top level'
     references: item_groups.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last updated'
   -
     name: deleted_at
     type: datetime
     nullable: true
+    meaning: 'Soft-delete timestamp; null means the row is live'
 joins:
   - 'item_groups.parent_id = item_groups.id'
-keywords: {}
-questions: {}
+  - 'items.item_group_id = item_groups.id'
+keywords:
+  - 'stock group'
+  - 'tally group'
+  - 'item group'
+  - group
+  - hierarchy
+  - category
+questions:
+  - 'Which item groups come from Tally?'
+  - 'How many items are in each item group?'

@@ -1,60 +1,82 @@
 table: non_conformance_reports
 module: quality
-label: 'Non Conformance Reports'
-purpose: ''
+label: 'Non-Conformance Reports'
+purpose: 'One row is one non-conformance report (NCR) raised on an item, usually from a failed incoming inspection: what was wrong, how severe, how much was affected, and how it was resolved.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: incoming_inspection_id
     type: integer
     nullable: true
+    meaning: 'Incoming inspection that raised it (incoming_inspections.id); null when raised directly'
     references: incoming_inspections.id
   -
     name: item_id
     type: integer
+    meaning: 'Item concerned (items.id)'
     references: items.id
   -
     name: description
     type: string
+    meaning: 'What was found wrong'
   -
     name: severity
     type: string
+    meaning: 'minor | major | critical'
   -
     name: status
     type: string
+    meaning: 'open | closed'
   -
     name: quantity_affected
     type: decimal
     nullable: true
+    meaning: "Quantity affected, in the item's uom"
   -
     name: raised_by
     type: integer
     nullable: true
+    meaning: 'User who raised the NCR (users.id)'
     references: users.id
   -
     name: raised_date
     type: date
+    meaning: 'Date raised'
   -
     name: resolution
     type: string
     nullable: true
+    meaning: 'How it was resolved'
   -
     name: closed_date
     type: date
     nullable: true
+    meaning: 'Date closed'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last updated'
 joins:
   - 'non_conformance_reports.raised_by = users.id'
   - 'non_conformance_reports.item_id = items.id'
   - 'non_conformance_reports.incoming_inspection_id = incoming_inspections.id'
-keywords: {}
-questions: {}
+  - 'capas.non_conformance_report_id = non_conformance_reports.id'
+keywords:
+  - ncr
+  - 'non conformance'
+  - defect
+  - 'quality issue'
+  - rejection
+  - complaint
+questions:
+  - 'How many NCRs are open?'
+  - 'Which items have the most critical NCRs?'

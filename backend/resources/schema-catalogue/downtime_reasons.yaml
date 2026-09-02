@@ -1,60 +1,82 @@
 table: downtime_reasons
 module: production
 label: 'Downtime Reasons'
-purpose: ''
+purpose: 'One row is a reason from the downtime reason master (e.g. mould change, power outage, machine breakdown) that a batch downtime event can be booked against. The planned/unplanned split lets the shift report running efficiency separately from attainment. Seeded rows carry the "To Confirm" marker until the factory confirms them.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: code
     type: string
+    meaning: 'Unique short code, e.g. DT-MOULD, DT-POWER, DT-BREAKDOWN'
   -
     name: category
     type: string
     nullable: true
+    meaning: 'Grouping label: Changeover, Maintenance, Setup, Utilities, Machine, Material, Quality, People, Other'
   -
     name: description
     type: string
+    meaning: 'Reason as shown to the floor, e.g. Mould change, Power outage, Material shortage'
   -
     name: planning_type
     type: string
+    meaning: 'Default classification: planned or unplanned (an event may still be recorded against the other type)'
   -
     name: reduces_runtime
     type: integer
+    meaning: '1 = minutes booked to this reason reduce net runtime for the runtime target, 0 = they do not'
   -
     name: requires_note
     type: integer
+    meaning: '1 = a note is mandatory when booking this reason'
   -
     name: selectable_at_start
     type: integer
+    meaning: '1 = offered in the Start Batch planned-downtime picker'
   -
     name: is_active
     type: integer
+    meaning: '1 = selectable, 0 = retired'
   -
     name: confirmation_status
     type: string
     nullable: true
+    meaning: 'Provenance marker for seeded rows: "To Confirm" (factory has not yet confirmed), "Discussion Confirmed", "Recommended"; NULL when entered by a person'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who created the master row; NULL if seeded -> users'
     references: users.id
   -
     name: updated_by
     type: integer
     nullable: true
+    meaning: 'User who last edited the master row -> users'
     references: users.id
 joins:
   - 'downtime_reasons.updated_by = users.id'
   - 'downtime_reasons.created_by = users.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'downtime reason'
+  - planned
+  - unplanned
+  - stoppage
+  - 'reason code'
+  - 'to confirm'
+questions:
+  - 'Which downtime reasons are still marked To Confirm?'
+  - 'Which reasons count as planned downtime?'

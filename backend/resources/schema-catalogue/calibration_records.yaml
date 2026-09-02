@@ -1,42 +1,58 @@
 table: calibration_records
 module: quality
 label: 'Calibration Records'
-purpose: ''
+purpose: 'One row is one calibration event of a measuring instrument: the date, the result, the certificate and who performed it.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: measuring_instrument_id
     type: integer
+    meaning: 'Instrument calibrated (measuring_instruments.id)'
     references: measuring_instruments.id
   -
     name: calibrated_date
     type: date
+    meaning: 'Date of calibration'
   -
     name: certificate_number
     type: string
     nullable: true
+    meaning: 'Calibration certificate number'
   -
     name: result
     type: string
+    meaning: 'pass | fail | adjusted'
   -
     name: performed_by
     type: string
     nullable: true
+    meaning: 'Name of the person or agency that performed the calibration (free text)'
   -
     name: notes
     type: string
     nullable: true
+    meaning: 'Free-text note'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last updated'
 joins:
   - 'calibration_records.measuring_instrument_id = measuring_instruments.id'
-keywords: {}
-questions: {}
+keywords:
+  - calibration
+  - calibrated
+  - certificate
+  - 'instrument check'
+  - 'gauge calibration'
+questions:
+  - 'When was each instrument last calibrated?'
+  - 'Which calibrations failed this year?'

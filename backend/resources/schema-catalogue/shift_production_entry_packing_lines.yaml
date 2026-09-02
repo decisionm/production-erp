@@ -1,60 +1,82 @@
 table: shift_production_entry_packing_lines
 module: production
-label: 'Shift Production Entry Packing Lines'
-purpose: ''
+label: 'Batch Packing Lines'
+purpose: 'One row is one packing line of a completed batch: how many cartons of a given mode (pouch, tray or direct box) were packed, at how many pieces per box, plus any loose inner containers. Stored exactly as the supervisor typed it at Complete Batch, in order, and replaced when a completion is amended.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: shift_production_entry_id
     type: integer
+    meaning: 'The batch this packing line belongs to -> shift_production_entries'
     references: shift_production_entries.id
   -
     name: production_standard_packaging_id
     type: integer
     nullable: true
+    meaning: 'The packaging option the line cited, for trace only -> production_standard_packagings'
     references: production_standard_packagings.id
   -
     name: position
     type: integer
+    meaning: 'Order the line was typed in (1-based)'
   -
     name: mode
     type: string
+    meaning: 'How pieces reach the carton: pouch, tray or direct_box'
   -
     name: boxes
     type: integer
+    meaning: 'Full cartons packed on this line (cartons)'
   -
     name: nos_per_box
     type: integer
+    meaning: 'Pieces per carton on this line (Nos)'
   -
     name: loose_inner
     type: integer
     nullable: true
+    meaning: 'Loose pouches or trays not yet in a carton; null on direct-box lines'
   -
     name: nos_per_inner
     type: integer
     nullable: true
+    meaning: 'Pieces per pouch or tray (Nos); null on direct-box lines'
   -
     name: derived_pieces
     type: integer
+    meaning: 'Computed pieces = boxes x nos_per_box + loose_inner x nos_per_inner'
   -
     name: actual_pieces
     type: integer
+    meaning: 'Pieces the supervisor actually counted for this line (may differ from derived_pieces with an override_reason)'
   -
     name: override_reason
     type: string
     nullable: true
+    meaning: 'Why actual_pieces differs from derived_pieces'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the line was written (the completion instant)'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
 joins:
   - 'shift_production_entry_packing_lines.production_standard_packaging_id = production_standard_packagings.id'
   - 'shift_production_entry_packing_lines.shift_production_entry_id = shift_production_entries.id'
-keywords: {}
-questions: {}
+keywords:
+  - packing
+  - 'cartons packed'
+  - boxes
+  - pouch
+  - tray
+  - loose
+questions:
+  - 'How many cartons were packed per batch yesterday?'
+  - 'Which batches were packed in pouches versus trays last week?'

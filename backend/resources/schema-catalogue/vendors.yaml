@@ -1,72 +1,105 @@
 table: vendors
 module: procurement
 label: Vendors
-purpose: ''
+purpose: 'One supplier (vendor) master record the factory buys from, with its contact details, GSTIN and link to its Tally ledger. Soft-deleted, never hard-deleted; classifications are in vendor_classifications.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: code
     type: string
+    meaning: 'Unique vendor code'
   -
     name: name
     type: string
+    meaning: 'Supplier name'
+    sensitive: supplier-identity
   -
     name: email
     type: string
     nullable: true
+    meaning: 'Supplier contact email'
+    sensitive: supplier-identity
   -
     name: phone
     type: string
     nullable: true
+    meaning: 'Supplier contact phone'
+    sensitive: supplier-identity
   -
     name: address
     type: string
     nullable: true
+    meaning: 'Supplier postal address'
+    sensitive: supplier-identity
   -
     name: is_active
     type: integer
+    meaning: '1 = active and selectable on new orders; 0 = deactivated'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the vendor was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the vendor was last changed'
   -
     name: deleted_at
     type: datetime
     nullable: true
+    meaning: 'Soft-delete timestamp; NULL means the vendor is live'
   -
     name: gstin
     type: string
     nullable: true
+    meaning: 'Supplier GST identification number (15 characters)'
+    sensitive: supplier-identity
   -
     name: state_code
     type: string
     nullable: true
+    meaning: 'Two-digit GST state code of the supplier; decides local (CGST+SGST) vs interstate (IGST)'
+    sensitive: supplier-identity
   -
     name: tally_ledger_name
     type: string
     nullable: true
+    meaning: 'The name of the vendor ledger in Tally, the party a Purchase Order voucher would name; typed by Accounts'
+    sensitive: supplier-identity
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who created the vendor (users); NULL for rows predating the stamp'
     references: users.id
   -
     name: updated_by
     type: integer
     nullable: true
+    meaning: 'User who last changed the vendor (users)'
     references: users.id
   -
     name: tally_ledger_guid
     type: string
     nullable: true
+    meaning: 'GUID of the linked Tally ledger (matches ledgers.tally_guid); set only by the Tally import, NULL when not linked'
 joins:
   - 'vendors.updated_by = users.id'
   - 'vendors.created_by = users.id'
-keywords: {}
-questions: {}
+  - 'vendors.tally_ledger_guid = ledgers.tally_guid'
+keywords:
+  - supplier
+  - party
+  - 'sundry creditor'
+  - vendor
+  - 'vendor master'
+  - 'supplier list'
+questions:
+  - 'How many active vendors do we have?'
+  - 'Which vendors have no GSTIN recorded?'
+  - 'Which vendors are not linked to a Tally ledger?'

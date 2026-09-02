@@ -1,80 +1,109 @@
 table: stock_movements
 module: inventory
 label: 'Stock Movements'
-purpose: ''
+purpose: 'One row is one line of the stock ledger: a quantity of an item entering or leaving one warehouse, with the document it came from and why it moved. A transfer between locations is a pair of rows sharing transfer_group.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: item_id
     type: integer
+    meaning: 'Item moved (items.id)'
     references: items.id
   -
     name: warehouse_id
     type: integer
+    meaning: 'Location the stock entered or left (warehouses.id)'
     references: warehouses.id
   -
     name: type
     type: string
+    meaning: 'Direction: receipt | issue | transfer_in | transfer_out'
   -
     name: quantity
     type: decimal
+    meaning: "Quantity moved in the item's uom; type gives the direction"
   -
     name: unit_cost
     type: decimal
     nullable: true
+    meaning: 'Cost per unit (INR) carried by the movement'
+    sensitive: rates
   -
     name: reference
     type: string
     nullable: true
+    meaning: 'Source document, e.g. GRN-00012, SI-000034, SPE #12 (shift production entry), "Tally opening 2026-08-01"'
   -
     name: transfer_group
     type: string
     nullable: true
+    meaning: 'UUID shared by the transfer_out and transfer_in halves of one transfer'
   -
     name: movement_date
     type: datetime
+    meaning: 'When the stock moved'
   -
     name: notes
     type: string
     nullable: true
+    meaning: 'Free-text note'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who recorded the movement (users.id)'
     references: users.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last updated'
   -
     name: batch_id
     type: integer
     nullable: true
+    meaning: 'Production batch for batch-tracked items (batches.id)'
     references: batches.id
   -
     name: serial_number_id
     type: integer
     nullable: true
+    meaning: 'Serial number for serial-tracked items (serial_numbers.id)'
     references: serial_numbers.id
   -
     name: purpose
     type: string
     nullable: true
+    meaning: 'Why it moved: opening | receipt | issue_to_production | return_from_production | consumption | output | dispatch | adjustment | scrap | quality_release | reconcile | unknown; null on rows the Aug-2026 backfill could not classify'
   -
     name: quality_state
     type: string
     nullable: true
+    meaning: 'Condition material came back in: good | damaged; set only on return_from_production, null elsewhere'
 joins:
   - 'stock_movements.serial_number_id = serial_numbers.id'
   - 'stock_movements.batch_id = batches.id'
   - 'stock_movements.item_id = items.id'
   - 'stock_movements.warehouse_id = warehouses.id'
   - 'stock_movements.created_by = users.id'
-keywords: {}
-questions: {}
+keywords:
+  - ledger
+  - 'stock in'
+  - 'stock out'
+  - transfer
+  - movement
+  - consumption
+  - issue
+  - receipt
+questions:
+  - 'How much resin was consumed in August?'
+  - 'Which damaged returns came back from production?'
+  - 'What left the FG store yesterday?'

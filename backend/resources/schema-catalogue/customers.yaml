@@ -1,72 +1,101 @@
 table: customers
 module: sales
 label: Customers
-purpose: ''
+purpose: 'One row is a customer (buyer) the factory sells finished goods to. The customer master is imported from Tally sundry-debtor ledgers (DEC-20260902-050); a customer created in the ERP stays pending until Accounts links it to a Tally ledger.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Row id'
   -
     name: code
     type: string
+    meaning: 'Short unique customer code; ledger-imported customers carry TL-{ledger id}'
   -
     name: name
     type: string
+    meaning: 'Customer (party) name'
   -
     name: email
     type: string
     nullable: true
+    meaning: 'Customer contact email'
+    sensitive: personal
   -
     name: phone
     type: string
     nullable: true
+    meaning: 'Customer contact phone number'
+    sensitive: personal
   -
     name: address
     type: string
     nullable: true
+    meaning: 'Postal / billing address'
+    sensitive: personal
   -
     name: is_active
     type: integer
+    meaning: '1 = active and selectable on new orders, 0 = deactivated'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
   -
     name: deleted_at
     type: datetime
     nullable: true
+    meaning: 'Soft-delete timestamp; non-null means the customer is deleted'
   -
     name: gstin
     type: string
     nullable: true
+    meaning: '15-character GST identification number; null for an unregistered customer'
   -
     name: state_code
     type: string
     nullable: true
+    meaning: 'Two-digit GST state code of the customer (drives IGST vs CGST/SGST)'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who created the customer in the ERP; null when imported or pre-dates audit stamps'
     references: users.id
   -
     name: updated_by
     type: integer
     nullable: true
+    meaning: 'User who last edited the customer'
     references: users.id
   -
     name: tally_ledger_guid
     type: string
     nullable: true
+    meaning: 'GUID of the Tally sundry-debtor ledger this customer posts as; null until Accounts links it'
   -
     name: tally_ledger_name
     type: string
     nullable: true
+    meaning: 'Name of the linked Tally ledger as it reads in Tally'
 joins:
   - 'customers.updated_by = users.id'
   - 'customers.created_by = users.id'
-keywords: {}
-questions: {}
+keywords:
+  - customer
+  - client
+  - buyer
+  - party
+  - 'sundry debtor'
+  - gstin
+  - ledger
+questions:
+  - 'Which customers are not yet linked to a Tally ledger?'
+  - 'How many active customers do we have in each state?'
+  - 'Which customers have no GSTIN?'

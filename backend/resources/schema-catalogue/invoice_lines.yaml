@@ -1,40 +1,53 @@
 table: invoice_lines
 module: sales
 label: 'Invoice Lines'
-purpose: ''
+purpose: 'One row is one item billed on an ERP-raised invoice, with the quantity and rate billed, tied to the sales order line it invoices. Sparse on this factory because invoices are raised in Tally.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Row id'
   -
     name: invoice_id
     type: integer
+    meaning: 'The invoice this line belongs to'
     references: invoices.id
   -
     name: sales_order_line_id
     type: integer
+    meaning: 'The sales order line being billed'
     references: sales_order_lines.id
   -
     name: item_id
     type: integer
+    meaning: 'The finished-good item billed'
     references: items.id
   -
     name: quantity
     type: decimal
+    meaning: "Quantity billed, in the item's unit of measure"
   -
     name: unit_price
     type: decimal
+    meaning: 'Sale rate per unit billed (INR)'
+    sensitive: rates
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
 joins:
   - 'invoice_lines.item_id = items.id'
   - 'invoice_lines.sales_order_line_id = sales_order_lines.id'
   - 'invoice_lines.invoice_id = invoices.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'invoice line'
+  - 'billed quantity'
+  - 'billed rate'
+questions:
+  - 'What quantity of each product has been billed through ERP invoices?'

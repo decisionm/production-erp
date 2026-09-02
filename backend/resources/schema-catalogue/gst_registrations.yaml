@@ -1,38 +1,54 @@
 table: gst_registrations
 module: compliance
-label: 'Gst Registrations'
-purpose: ''
+label: 'GST Registrations'
+purpose: 'One row per GSTIN the company holds (one per state of registration), with which one is the primary registration.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'row id'
   -
     name: gstin
     type: string
+    meaning: 'the 15-character GST registration number'
   -
     name: state_code
     type: string
+    meaning: 'two-digit GST state code (e.g. 33 = Tamil Nadu)'
   -
     name: state_name
     type: string
+    meaning: 'name of the state the registration is in'
   -
     name: is_primary
     type: integer
+    meaning: '1 = the main registration used on documents'
   -
     name: is_active
     type: integer
+    meaning: '1 = registration in force; 0 = surrendered/retired'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'when the row was created in the ERP'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'when the row was last edited'
   -
     name: deleted_at
     type: datetime
     nullable: true
+    meaning: 'when the registration was soft-deleted (null = still live); deleted rows are hidden from lists'
 joins: {}
-keywords: {}
-questions: {}
+keywords:
+  - GSTIN
+  - 'GST registration'
+  - 'GST number'
+  - 'state registration'
+  - 'tax registration'
+questions:
+  - 'What is the company primary GSTIN?'
+  - 'In which states is the company GST-registered?'

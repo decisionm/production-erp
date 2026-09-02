@@ -1,33 +1,47 @@
 table: resin_pool_balances
 module: production
 label: 'Resin Pool Balances'
-purpose: ''
+purpose: 'One row per resin/masterbatch item: the running balance of the common input pool in kg and its weighted-average purchase rate, used to price batch consumption. Kg loaded from lots with no known rate are tracked separately as unpriced. Costing analytics only; the stock ledger and Tally valuation are separate.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: item_id
     type: integer
+    meaning: 'The exact resin/material item, one pool each -> items'
     references: items.id
   -
     name: quantity_kg
     type: decimal
+    meaning: 'Priced kg standing in the common input pool (grows on load, shrinks on batch allocation)'
   -
     name: avg_rate_per_kg
     type: decimal
+    meaning: 'Weighted-average purchase rate per kg of the priced kg'
+    sensitive: rates
   -
     name: unpriced_kg
     type: decimal
+    meaning: 'Kg loaded from lots with no recorded rate (e.g. opening stock), kept out of the average'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the pool row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the balance last moved'
 joins:
   - 'resin_pool_balances.item_id = items.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'resin pool'
+  - 'resin balance'
+  - 'average rate'
+  - 'resin cost'
+  - 'common input'
+questions:
+  - 'How much resin is in the pool right now and at what average rate?'

@@ -1,60 +1,85 @@
 table: warehouses
 module: inventory
 label: Warehouses
-purpose: ''
+purpose: 'One row is one stock location: a Tally godown mirrored into the ERP or an ERP-only location. The live factory uses the RM store, Production/WIP (code WIP), the FG store and a QC hold location (code QC-HOLD).'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: code
     type: string
+    meaning: 'Short location code, e.g. RM-STORE, WIP, FG-STORE, QC-HOLD'
   -
     name: name
     type: string
+    meaning: 'Location name; matches the Tally godown name when mirrored'
   -
     name: is_active
     type: integer
+    meaning: '1 = active, 0 = deactivated (demo/foreign locations are deactivated, never deleted)'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last updated'
   -
     name: deleted_at
     type: datetime
     nullable: true
+    meaning: 'Soft-delete timestamp; null means the row is live'
   -
     name: tally_guid
     type: string
     nullable: true
+    meaning: 'Tally godown GUID; null for an ERP-only location'
   -
     name: tally_parent_name
     type: string
     nullable: true
+    meaning: 'Name of the parent godown in Tally, used to re-resolve parent_id on each pull'
   -
     name: parent_id
     type: integer
     nullable: true
+    meaning: 'Parent godown (warehouses.id, no FK) for nested Tally godowns; null at the top level'
   -
     name: tally_company
     type: string
     nullable: true
+    meaning: 'Which Tally company the godown came from; null = provenance unknown'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who created the row (users.id)'
     references: users.id
   -
     name: updated_by
     type: integer
     nullable: true
+    meaning: 'User who last updated the row (users.id)'
     references: users.id
 joins:
   - 'warehouses.updated_by = users.id'
   - 'warehouses.created_by = users.id'
-keywords: {}
-questions: {}
+  - 'warehouses.parent_id = warehouses.id'
+  - 'stock_balances.warehouse_id = warehouses.id'
+keywords:
+  - store
+  - 'rm store'
+  - 'fg store'
+  - location
+  - godown
+  - warehouse
+  - wip
+  - 'qc hold'
+questions:
+  - 'Which warehouses are active?'
+  - 'What stock is standing in Production/WIP?'

@@ -1,67 +1,82 @@
 table: mold_change_logs
 module: production
-label: 'Mold Change Logs'
-purpose: ''
+label: 'Mould Change Logs'
+purpose: 'One row is one mould change (changeover) on one machine during one shift: which mould / item came off, which went on, when it started, when it finished and how many minutes it took. It is a stopwatch record: opened when the change starts, closed when it ends.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: work_center_id
     type: integer
+    meaning: 'The machine (ASB-1..ASB-10) on which the mould was changed -> work_centers'
     references: work_centers.id
   -
     name: shift_id
     type: integer
+    meaning: 'The shift (A/B/C) during which the change happened -> shifts'
     references: shifts.id
   -
     name: production_date
     type: date
+    meaning: 'Production day the change belongs to (a Night shift can cross midnight, so this is the shift day, not the calendar date of to_time)'
   -
     name: changed_from_item_id
     type: integer
     nullable: true
+    meaning: 'Item (product) the machine was making before the change; NULL if the machine was idle -> items'
     references: items.id
   -
     name: changed_to_item_id
     type: integer
+    meaning: 'Item (product) the machine makes after the change (derived from the new mould at log time) -> items'
     references: items.id
   -
     name: from_time
     type: datetime
+    meaning: 'When the mould change started (full datetime)'
   -
     name: to_time
     type: datetime
     nullable: true
+    meaning: 'When the mould change finished; NULL while still in progress'
   -
     name: total_minutes
     type: decimal
     nullable: true
+    meaning: 'Changeover duration in minutes, computed from from_time and to_time at close; NULL while open'
   -
     name: status
     type: string
+    meaning: 'open (change in progress) or closed (finished, to_time and total_minutes filled)'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who logged the change -> users'
     references: users.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
   -
     name: changed_to_mold_id
     type: integer
     nullable: true
+    meaning: 'The physical mould that went ON the machine -> molds'
     references: molds.id
   -
     name: changed_from_mold_id
     type: integer
     nullable: true
+    meaning: 'The physical mould that came OFF the machine; NULL if none / unknown -> molds'
     references: molds.id
 joins:
   - 'mold_change_logs.changed_from_mold_id = molds.id'
@@ -71,5 +86,14 @@ joins:
   - 'mold_change_logs.shift_id = shifts.id'
   - 'mold_change_logs.work_center_id = work_centers.id'
   - 'mold_change_logs.changed_to_mold_id = molds.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'mould change'
+  - 'mold change'
+  - changeover
+  - 'die change'
+  - 'setup time'
+  - 'which mould is on which machine'
+questions:
+  - 'How many mould changes happened this week and how long did each take?'
+  - 'Which mould is currently on machine ASB-3?'
+  - 'Which machine lost the most minutes to mould changes this month?'

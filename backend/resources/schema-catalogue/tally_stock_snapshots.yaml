@@ -1,54 +1,76 @@
 table: tally_stock_snapshots
 module: inventory
 label: 'Tally Stock Snapshots'
-purpose: ''
+purpose: "One row is one reading of Tally's godown-wise closing stock for a company as at a date, stored so a person can review it; applying it posts the lines as opening stock movements exactly once."
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: company
     type: string
+    meaning: 'Tally company the reading came from'
   -
     name: as_of
     type: date
+    meaning: 'Closing date the stock is as at'
   -
     name: lines
     type: string
+    meaning: 'JSON list of lines, each with item_guid, tally_item_name, unit, godown, closing_quantity, closing_rate, closing_value, the matched erp_item_id / erp_warehouse_id, importable and problems'
+    sensitive: rates
   -
     name: totals
     type: string
+    meaning: 'JSON counts: lines, mapped, unmapped, foreign_godown, importable'
   -
     name: status
     type: string
+    meaning: 'pending | applied (never back)'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who stored the snapshot (users.id); null when the sync agent stored it'
     references: users.id
   -
     name: applied_at
     type: datetime
     nullable: true
+    meaning: 'When the snapshot was applied as opening stock'
   -
     name: applied_by
     type: integer
     nullable: true
+    meaning: 'User who applied it (users.id)'
     references: users.id
   -
     name: applied_line_count
     type: integer
     nullable: true
+    meaning: 'Number of lines posted as opening movements'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last updated'
 joins:
   - 'tally_stock_snapshots.applied_by = users.id'
   - 'tally_stock_snapshots.created_by = users.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'tally stock'
+  - 'opening stock'
+  - 'closing stock'
+  - snapshot
+  - godown
+  - 'tally sync'
+  - 'stock summary'
+questions:
+  - 'When was the last Tally stock snapshot applied?'
+  - 'How many snapshot lines could not be matched to an item?'

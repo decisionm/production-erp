@@ -1,62 +1,84 @@
 table: incoming_inspections
 module: quality
 label: 'Incoming Inspections'
-purpose: ''
+purpose: 'One row is one incoming QC inspection of a goods receipt line: how much was inspected, accepted and rejected, the result, and the Rejections Out reference for anything sent back.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: goods_receipt_note_line_id
     type: integer
+    meaning: 'GRN line inspected (goods_receipt_note_lines.id)'
     references: goods_receipt_note_lines.id
   -
     name: item_id
     type: integer
+    meaning: 'Item inspected (items.id)'
     references: items.id
   -
     name: inspected_quantity
     type: decimal
+    meaning: "Quantity inspected, in the item's uom"
   -
     name: accepted_quantity
     type: decimal
+    meaning: 'Quantity accepted into stock'
   -
     name: rejected_quantity
     type: decimal
+    meaning: 'Quantity rejected'
   -
     name: result
     type: string
+    meaning: 'pass | fail | partial'
   -
     name: inspection_date
     type: date
+    meaning: 'Date of inspection'
   -
     name: inspected_by
     type: integer
     nullable: true
+    meaning: 'User who inspected (users.id)'
     references: users.id
   -
     name: notes
     type: string
     nullable: true
+    meaning: 'Free-text note'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last updated'
   -
     name: rejections_out_reference
     type: string
     nullable: true
+    meaning: 'Tracking reference the Tally Rejections Out voucher will carry for the rejected quantity; recorded only, no voucher is created'
   -
     name: bag_disposition_note
     type: string
     nullable: true
+    meaning: 'What was done with the rejected bags'
 joins:
   - 'incoming_inspections.inspected_by = users.id'
   - 'incoming_inspections.item_id = items.id'
   - 'incoming_inspections.goods_receipt_note_line_id = goods_receipt_note_lines.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'incoming inspection'
+  - 'inward qc'
+  - 'grn inspection'
+  - accepted
+  - rejected
+  - 'rejections out'
+questions:
+  - 'How much material was rejected at incoming QC this month?'
+  - 'Which GRN lines failed inspection?'

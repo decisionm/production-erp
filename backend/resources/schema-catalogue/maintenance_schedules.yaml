@@ -1,40 +1,57 @@
 table: maintenance_schedules
 module: maintenance
 label: 'Maintenance Schedules'
-purpose: ''
+purpose: 'One row per recurring preventive-maintenance plan for an asset: what to do, how often in days, and when it is next due. Preventive work orders are generated from these.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'row id'
   -
     name: asset_id
     type: integer
+    meaning: 'the asset this plan services (assets)'
     references: assets.id
   -
     name: name
     type: string
+    meaning: 'name of the preventive task (e.g. Monthly lubrication)'
   -
     name: frequency_days
     type: integer
+    meaning: 'interval between services, in days'
   -
     name: next_due_date
     type: date
+    meaning: 'date the next service is due (overdue when before today)'
   -
     name: is_active
     type: integer
+    meaning: '1 = plan in force; 0 = paused or retired'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'when the row was created in the ERP'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'when the row was last edited'
   -
     name: deleted_at
     type: datetime
     nullable: true
+    meaning: 'when the plan was soft-deleted (null = still live); deleted rows are hidden from lists'
 joins:
   - 'maintenance_schedules.asset_id = assets.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'preventive maintenance'
+  - 'PM schedule'
+  - 'service due'
+  - 'maintenance plan'
+  - servicing
+  - 'due date'
+questions:
+  - 'Which preventive maintenance tasks are overdue?'
+  - 'What is due for service this week?'

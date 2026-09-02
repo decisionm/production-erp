@@ -1,43 +1,59 @@
 table: lead_activities
 module: crm
 label: 'Lead Activities'
-purpose: ''
+purpose: 'One row is one interaction logged against a lead - a call, email, meeting or note - with an optional next follow-up date. Part of the hidden CRM surface (DEC-20260902-052), so expected empty on the live instance.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Row id'
   -
     name: lead_id
     type: integer
+    meaning: 'The lead this activity was logged against'
     references: leads.id
   -
     name: type
     type: string
+    meaning: 'Kind of interaction: call, email, meeting, note'
   -
     name: notes
     type: string
+    meaning: 'What happened in the interaction'
   -
     name: activity_date
     type: datetime
+    meaning: 'When the interaction took place'
   -
     name: next_follow_up_date
     type: date
     nullable: true
+    meaning: 'Date the next follow-up is due; null if none planned'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who logged the activity'
     references: users.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
 joins:
   - 'lead_activities.created_by = users.id'
   - 'lead_activities.lead_id = leads.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'follow up'
+  - 'call log'
+  - 'lead activity'
+  - meeting
+  - interaction
+questions:
+  - 'Which leads have a follow-up due this week?'
+  - 'How many calls did each salesperson log last month?'

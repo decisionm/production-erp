@@ -1,51 +1,67 @@
 table: masterbatch_dosings
 module: production
 label: 'Masterbatch Dosings'
-purpose: ''
+purpose: 'One row is the dosing of one masterbatch (colour concentrate) in grams per bottle, either factory-wide or for one specific product. Master data with provenance; it only prefills the masterbatch line at Complete Batch — what the supervisor weighs is what gets consumed. Clear bottles take no masterbatch.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: masterbatch_item_id
     type: integer
+    meaning: 'The masterbatch material (e.g. Master Batch Amber) -> items'
     references: items.id
   -
     name: product_item_id
     type: integer
     nullable: true
+    meaning: 'Product this dosing is specific to -> items; null = applies to every product using this masterbatch'
     references: items.id
   -
     name: grams_per_bottle
     type: decimal
+    meaning: 'Grams of masterbatch per bottle (e.g. 0.25)'
   -
     name: note
     type: string
     nullable: true
+    meaning: 'Provenance note — who stated the figure and when'
   -
     name: set_by
     type: integer
     nullable: true
+    meaning: 'User who set the dosing -> users'
     references: users.id
   -
     name: set_at
     type: datetime
     nullable: true
+    meaning: 'When the dosing was set'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
   -
     name: deleted_at
     type: datetime
     nullable: true
+    meaning: 'Soft-delete timestamp (dosing withdrawn); null = in force'
 joins:
   - 'masterbatch_dosings.set_by = users.id'
   - 'masterbatch_dosings.product_item_id = items.id'
   - 'masterbatch_dosings.masterbatch_item_id = items.id'
-keywords: {}
-questions: {}
+keywords:
+  - masterbatch
+  - dosing
+  - colour
+  - 'grams per bottle'
+  - amber
+questions:
+  - 'What is the masterbatch dosing per bottle for each colour?'

@@ -1,64 +1,78 @@
 table: day_bin_movements
 module: production
 label: 'Day Bin Movements'
-purpose: ''
+purpose: "One row is one movement of resin or masterbatch at the factory's common input (day bin), in kg: a load (bag scanned in), a return (material sent back to store) or a count (an observed balance). A bag belongs to no machine or batch — a scan is a pour record; consumption is calculated, never claimed from the bag."
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: work_center_id
     type: integer
     nullable: true
+    meaning: 'Machine the movement was recorded at -> work_centers; null for the common resin input'
     references: work_centers.id
   -
     name: item_id
     type: integer
+    meaning: 'Material moved (resin or masterbatch) -> items'
     references: items.id
   -
     name: shift_production_entry_id
     type: integer
     nullable: true
+    meaning: 'Batch segment running when the movement was recorded -> shift_production_entries; null for bin activity outside a run'
     references: shift_production_entries.id
   -
     name: type
     type: string
+    meaning: 'load (bag poured into the bin), return (material back out to store), count (observed balance)'
   -
     name: material_bag_id
     type: integer
     nullable: true
+    meaning: 'The scanned bag -> material_bags; null when loaded without a barcode'
     references: material_bags.id
   -
     name: quantity_kg
     type: decimal
+    meaning: 'Quantity moved or counted, in kg'
   -
     name: recorded_by
     type: integer
     nullable: true
+    meaning: 'User who scanned/recorded it -> users'
     references: users.id
   -
     name: recorded_at
     type: datetime
+    meaning: 'When the movement physically happened'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
   -
     name: balance_ack_reason
     type: string
     nullable: true
+    meaning: 'Why a bag was loaded while the estimate still expected material: confirm_extra, spill, return_to_store or correction; null when not asked'
   -
     name: balance_ack_note
     type: string
     nullable: true
+    meaning: "Operator's optional note with the acknowledgement"
   -
     name: intended_shift_production_entry_id
     type: integer
     nullable: true
+    meaning: 'Unused — always null (withdrawn same day; a bag is never assigned to a batch) -> shift_production_entries'
     references: shift_production_entries.id
 joins:
   - 'day_bin_movements.intended_shift_production_entry_id = shift_production_entries.id'
@@ -67,5 +81,13 @@ joins:
   - 'day_bin_movements.shift_production_entry_id = shift_production_entries.id'
   - 'day_bin_movements.item_id = items.id'
   - 'day_bin_movements.work_center_id = work_centers.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'day bin'
+  - 'bag scan'
+  - 'resin loaded'
+  - 'bag load'
+  - 'return to store'
+  - hopper
+questions:
+  - 'How many resin bags were loaded per day last week?'
+  - 'How much resin was returned to store this month?'

@@ -1,44 +1,59 @@
 table: shift_stock_counts
 module: production
 label: 'Shift Stock Counts'
-purpose: ''
+purpose: 'One row is a physical count of one material at one floor location (Hoppers, Day Bin, Loose Bag, Store, or a masterbatch colour) taken during a shift, in kg. Informational only; it is not reconciled against the stock ledger.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: shift_id
     type: integer
+    meaning: 'Shift the count was taken in -> shifts'
     references: shifts.id
   -
     name: production_date
     type: date
+    meaning: 'Production date the count belongs to'
   -
     name: location_label
     type: string
+    meaning: 'Free-text floor location counted: Hoppers, Day Bin, Loose Bag, Store, or a masterbatch colour'
   -
     name: item_id
     type: integer
+    meaning: 'Material counted (resin or masterbatch) -> items'
     references: items.id
   -
     name: quantity_kg
     type: decimal
+    meaning: 'Counted quantity in kg'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who recorded the count -> users'
     references: users.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the count was recorded'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
 joins:
   - 'shift_stock_counts.created_by = users.id'
   - 'shift_stock_counts.item_id = items.id'
   - 'shift_stock_counts.shift_id = shifts.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'stock count'
+  - 'physical count'
+  - hopper
+  - 'day bin'
+  - 'resin stock'
+questions:
+  - 'What resin quantity was counted in the hoppers at the last shift?'

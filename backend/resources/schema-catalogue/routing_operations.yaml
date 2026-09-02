@@ -1,39 +1,55 @@
 table: routing_operations
 module: production
 label: 'Routing Operations'
-purpose: ''
+purpose: 'One row is one step of a routing: which work center (machine) performs it, in what order, and the standard time it should take.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: routing_id
     type: integer
+    meaning: 'The routing this step belongs to -> routings'
     references: routings.id
   -
     name: work_center_id
     type: integer
+    meaning: 'The work center / machine that performs this step -> work_centers'
     references: work_centers.id
   -
     name: sequence
     type: integer
+    meaning: 'Order of the step within the routing (1 = first); unique per routing'
   -
     name: name
     type: string
+    meaning: 'Name of the operation (e.g. blow moulding, packing)'
   -
     name: standard_time_minutes
     type: decimal
     nullable: true
+    meaning: 'Standard time for the operation in minutes; used for capacity load on the work-order scheduled date'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
 joins:
   - 'routing_operations.work_center_id = work_centers.id'
   - 'routing_operations.routing_id = routings.id'
-keywords: {}
-questions: {}
+keywords:
+  - operation
+  - 'routing step'
+  - 'standard time'
+  - 'work center'
+  - machine
+  - sequence
+questions:
+  - 'Which operations run on this machine and what is their standard time?'
+  - 'What is the total standard minutes per unit for this item?'

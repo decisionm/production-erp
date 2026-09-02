@@ -1,42 +1,60 @@
 table: material_cost_versions
 module: inventory
 label: 'Material Cost Versions'
-purpose: ''
+purpose: "One row is one version of a material lot's cost per kg: an append-only history that starts at the receipt rate and is revised by the purchase invoice, landed-cost workings or a correction. Analytic only; it never changes stock valuation or reaches Tally."
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: material_lot_id
     type: integer
+    meaning: 'Lot this cost version belongs to (material_lots.id)'
     references: material_lots.id
   -
     name: rate_per_kg
     type: decimal
+    meaning: 'Cost of the lot per kg (INR) in this version'
+    sensitive: rates
   -
     name: kind
     type: string
+    meaning: 'Where the figure came from: receipt | invoice | landed_cost | correction'
   -
     name: note
     type: string
     nullable: true
+    meaning: 'Why this version was recorded'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who recorded the version (users.id); null for receipt versions backfilled at deploy'
     references: users.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the version was recorded (rows are never updated)'
   -
     name: supersedes_id
     type: integer
     nullable: true
+    meaning: 'The version this one replaces (material_cost_versions.id); null on the original receipt version'
     references: material_cost_versions.id
 joins:
   - 'material_cost_versions.supersedes_id = material_cost_versions.id'
   - 'material_cost_versions.created_by = users.id'
   - 'material_cost_versions.material_lot_id = material_lots.id'
-keywords: {}
-questions: {}
+keywords:
+  - cost
+  - rate
+  - 'landed cost'
+  - 'invoice rate'
+  - 'resin price'
+  - 'cost history'
+  - 'per kg'
+questions:
+  - 'What is the latest cost per kg of a lot?'
+  - 'Which lots had their rate corrected after receipt?'

@@ -1,37 +1,52 @@
 table: purchase_order_schedules
 module: procurement
 label: 'Purchase Order Schedules'
-purpose: ''
+purpose: 'One delivery schedule on a purchase-order line: a quantity of the item due on a given date. A PO line may have several; receipts are allocated against them through grn_schedule_allocations.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: purchase_order_line_id
     type: integer
+    meaning: 'The purchase-order line this schedule splits (purchase_order_lines)'
     references: purchase_order_lines.id
   -
     name: due_date
     type: date
+    meaning: 'Date this quantity is due to arrive'
   -
     name: quantity
     type: decimal
+    meaning: 'Quantity due on this date, in the item unit'
   -
     name: quantity_received
     type: decimal
+    meaning: 'Quantity received so far against this schedule (sum of its GRN allocations)'
   -
     name: tally_reference
     type: string
     nullable: true
+    meaning: 'The Tally allocation identity (order no / tracking number) for a schedule mirrored from a Tally purchase order'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the schedule was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the schedule was last changed'
 joins:
   - 'purchase_order_schedules.purchase_order_line_id = purchase_order_lines.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'delivery schedule'
+  - 'due date'
+  - 'po schedule'
+  - 'expected delivery'
+  - 'overdue delivery'
+questions:
+  - 'Which purchase-order deliveries are overdue and still not fully received?'
+  - 'What is due to arrive next week?'

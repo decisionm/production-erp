@@ -1,32 +1,46 @@
 table: salary_structure_lines
 module: payroll
 label: 'Salary Structure Lines'
-purpose: ''
+purpose: 'One component amount inside an employee salary structure — e.g. Basic 15000, HRA 5000. Percentage-of-basic components are stored as the computed amount.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'row id'
   -
     name: salary_structure_id
     type: integer
+    meaning: 'the salary structure this line belongs to (salary_structures)'
     references: salary_structures.id
   -
     name: salary_component_id
     type: integer
+    meaning: 'which component the amount is for (salary_components)'
     references: salary_components.id
   -
     name: amount
     type: decimal
+    meaning: 'monthly amount of this component in the structure'
+    sensitive: pay
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'when the row was created in the ERP'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'when the row was last edited'
 joins:
   - 'salary_structure_lines.salary_component_id = salary_components.id'
   - 'salary_structure_lines.salary_structure_id = salary_structures.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'salary breakup'
+  - 'CTC breakup'
+  - 'basic amount'
+  - 'HRA amount'
+  - 'salary structure line'
+questions:
+  - 'What is the basic salary of a given employee?'
+  - 'Which employees have an HRA line above a given amount?'

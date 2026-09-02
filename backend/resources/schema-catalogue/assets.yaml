@@ -1,48 +1,69 @@
 table: assets
 module: maintenance
 label: Assets
-purpose: ''
+purpose: 'One row per maintainable asset the factory owns — machine, compressor, chiller, generator, mould — with its code, category, location, purchase details and current status. The asset register that maintenance schedules and work orders hang off.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'row id'
   -
     name: code
     type: string
+    meaning: 'unique asset code'
   -
     name: name
     type: string
+    meaning: 'asset name'
   -
     name: category
     type: string
     nullable: true
+    meaning: 'asset category as free text (e.g. Machine, Utility, Mould)'
   -
     name: location
     type: string
     nullable: true
+    meaning: 'where the asset is installed'
   -
     name: purchase_date
     type: date
     nullable: true
+    meaning: 'date the asset was bought'
   -
     name: purchase_cost
     type: decimal
     nullable: true
+    meaning: 'what the asset cost to buy'
+    sensitive: rates
   -
     name: status
     type: string
+    meaning: "'active', 'under_maintenance', 'retired'"
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'when the row was created in the ERP'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'when the row was last edited'
   -
     name: deleted_at
     type: datetime
     nullable: true
+    meaning: 'when the asset was soft-deleted (null = still live); deleted rows are hidden from lists'
 joins: {}
-keywords: {}
-questions: {}
+keywords:
+  - asset
+  - equipment
+  - machine
+  - plant
+  - utility
+  - 'asset register'
+  - 'capital item'
+questions:
+  - 'Which assets are under maintenance right now?'
+  - 'How many assets were bought this year, and at what cost?'

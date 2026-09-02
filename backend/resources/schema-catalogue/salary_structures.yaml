@@ -1,27 +1,39 @@
 table: salary_structures
 module: payroll
 label: 'Salary Structures'
-purpose: ''
+purpose: 'One row per employee per effective date: the salary structure (the set of component amounts, in salary_structure_lines) in force from that date. A new row is a salary revision; payroll uses the latest structure on or before the pay month.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'row id'
   -
     name: employee_id
     type: integer
+    meaning: 'the employee the structure belongs to (employees)'
     references: employees.id
   -
     name: effective_from
     type: date
+    meaning: 'date from which this structure applies (a later row supersedes it)'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'when the structure was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'when the row was last edited'
 joins:
   - 'salary_structures.employee_id = employees.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'salary structure'
+  - CTC
+  - 'pay structure'
+  - 'salary revision'
+  - increment
+questions:
+  - 'When was an employee salary last revised?'
+  - 'Which active employees have no salary structure?'

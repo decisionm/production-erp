@@ -1,71 +1,95 @@
 table: store_issue_lines
 module: inventory
 label: 'Store Issue Lines'
-purpose: ''
+purpose: 'One row is one item handed over on a store issue: from which warehouse to which, how much was requested, issued and later returned. A line with substitutes_item_id set stands in for a different requested material.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: store_issue_id
     type: integer
+    meaning: 'Store issue header (store_issues.id)'
     references: store_issues.id
   -
     name: material_request_line_id
     type: integer
     nullable: true
+    meaning: 'Request line this issue line fulfils (material_request_lines.id, no FK); null for a verbal ask'
   -
     name: quantity_requested
     type: decimal
     nullable: true
+    meaning: 'What the request line asked for, frozen at the moment of issue, in uom'
   -
     name: item_id
     type: integer
+    meaning: 'Item actually issued (items.id)'
     references: items.id
   -
     name: from_warehouse_id
     type: integer
+    meaning: 'Store the material left, e.g. RM-STORE (warehouses.id)'
     references: warehouses.id
   -
     name: to_warehouse_id
     type: integer
+    meaning: 'Where it went, normally Production/WIP (warehouses.id)'
     references: warehouses.id
   -
     name: quantity_issued
     type: decimal
+    meaning: 'Quantity handed over, in uom'
   -
     name: quantity_returned
     type: decimal
+    meaning: 'Quantity later returned unused, in uom'
   -
     name: uom
     type: string
     nullable: true
+    meaning: "Snapshot of the item's unit at issue time"
   -
     name: notes
     type: string
     nullable: true
+    meaning: 'Free-text note'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last updated'
   -
     name: substitutes_item_id
     type: integer
     nullable: true
+    meaning: 'The requested item this line stands in for (items.id); null when the line is not a substitution'
     references: items.id
   -
     name: substitution_reason
     type: string
     nullable: true
+    meaning: 'Why the alternate material was used'
 joins:
   - 'store_issue_lines.substitutes_item_id = items.id'
   - 'store_issue_lines.store_issue_id = store_issues.id'
   - 'store_issue_lines.item_id = items.id'
   - 'store_issue_lines.from_warehouse_id = warehouses.id'
   - 'store_issue_lines.to_warehouse_id = warehouses.id'
-keywords: {}
-questions: {}
+  - 'store_issue_lines.material_request_line_id = material_request_lines.id'
+keywords:
+  - 'issue line'
+  - 'issued quantity'
+  - 'returned quantity'
+  - substitution
+  - handover
+  - 'issued to production'
+questions:
+  - 'How much of each material was issued to production this week?'
+  - 'Which issues used a substitute material?'

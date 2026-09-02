@@ -1,66 +1,89 @@
 table: material_requests
 module: inventory
 label: 'Material Requests'
-purpose: ''
+purpose: 'One row is one request from the production floor to the store for material (the header): who asked, for which shift and machine, and where it stands. The materials themselves are on material_request_lines.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: status
     type: string
+    meaning: 'draft | submitted | partially_issued | issued | cancelled'
   -
     name: requested_by
     type: integer
     nullable: true
+    meaning: 'User who raised the request (users.id)'
     references: users.id
   -
     name: requested_at
     type: datetime
     nullable: true
+    meaning: 'When the request was raised'
   -
     name: shift_id
     type: integer
     nullable: true
+    meaning: 'Shift the material is for (shifts.id)'
     references: shifts.id
   -
     name: work_center_id
     type: integer
     nullable: true
+    meaning: 'Machine the material is for (work_centers.id); null for a common-input (resin/masterbatch) request, which belongs to no machine'
     references: work_centers.id
   -
     name: notes
     type: string
     nullable: true
+    meaning: 'Free-text note'
   -
     name: submitted_at
     type: datetime
     nullable: true
+    meaning: 'When the request was submitted to the store'
   -
     name: cancelled_by
     type: integer
     nullable: true
+    meaning: 'User who cancelled it (users.id)'
     references: users.id
   -
     name: cancelled_at
     type: datetime
     nullable: true
+    meaning: 'When it was cancelled'
   -
     name: cancelled_reason
     type: string
     nullable: true
+    meaning: 'Why it was cancelled'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last updated'
 joins:
   - 'material_requests.cancelled_by = users.id'
   - 'material_requests.work_center_id = work_centers.id'
   - 'material_requests.shift_id = shifts.id'
   - 'material_requests.requested_by = users.id'
-keywords: {}
-questions: {}
+  - 'store_issues.material_request_id = material_requests.id'
+keywords:
+  - 'material request'
+  - 'floor request'
+  - indent
+  - requisition
+  - 'store request'
+  - MR
+questions:
+  - 'Which material requests are waiting to be issued?'
+  - 'How many requests did the night shift raise today?'
+  - 'Which requests were cancelled and why?'

@@ -1,69 +1,93 @@
 table: tally_sync_snapshots
 module: tally-sync
 label: 'Tally Sync Snapshots'
-purpose: ''
+purpose: 'One record of a single post the on-prem agent made to Tally for a queue entry: the exact XML sent (with its hash) and what Tally answered. Never edited; a new attempt is a new row, and old rows are pruned by retention.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: tally_sync_entry_id
     type: integer
+    meaning: 'The queue entry this post was for (tally_sync_entries)'
     references: tally_sync_entries.id
   -
     name: attempt
     type: integer
+    meaning: '1-based ordinal of this post as the agent counted it; 0 when an old agent sent none'
   -
     name: direction
     type: string
+    meaning: 'Kind of exchange: post (one row per post report; a future read may be added)'
   -
     name: xml_sha256
     type: string
+    meaning: 'SHA-256 (lowercase hex) of the XML bytes the agent posted; always present'
   -
     name: xml_bytes
     type: integer
     nullable: true
+    meaning: 'Byte size of the posted XML; NULL when nobody measured it'
   -
     name: xml
     type: string
     nullable: true
+    meaning: 'The full voucher XML posted to Tally; NULL when the agent omitted the body (over 2 MB). Carries supplier name, GSTIN, rates and amounts for purchase-side vouchers'
+    sensitive: rates
   -
     name: tally_success
     type: integer
     nullable: true
+    meaning: '1 = Tally accepted, 0 = rejected; NULL when no answer came (timeout)'
   -
     name: tally_created
     type: integer
     nullable: true
+    meaning: 'CREATED count from the Tally response'
   -
     name: tally_errors
     type: integer
     nullable: true
+    meaning: 'ERRORS count from the Tally response'
   -
     name: tally_message
     type: string
     nullable: true
+    meaning: 'Message text from the Tally response'
   -
     name: tally_raw
     type: string
     nullable: true
+    meaning: 'Raw Tally response body, capped at 64 KB'
   -
     name: agent_version
     type: string
     nullable: true
+    meaning: 'Version of the tally-sync-agent build that posted it'
   -
     name: payload_hash
     type: string
     nullable: true
+    meaning: 'Hash of the queue payload the agent built the XML from, echoed back by the agent'
   -
     name: payload_matches
     type: integer
     nullable: true
+    meaning: '1 = the payload hash still matches the entry payload held now; 0 = the payload was regenerated after this XML was built; NULL when the agent echoed no hash'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the snapshot was stored'
 joins:
   - 'tally_sync_snapshots.tally_sync_entry_id = tally_sync_entries.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'tally xml'
+  - 'what was sent to tally'
+  - 'tally response'
+  - 'post attempt'
+  - 'sync snapshot'
+questions:
+  - 'What did Tally answer on the last post attempt of queue entry 42?'
+  - 'How many posts were rejected by Tally this week?'

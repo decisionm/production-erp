@@ -1,36 +1,47 @@
 table: serial_numbers
 module: production
 label: 'Serial Numbers'
-purpose: ''
+purpose: 'One row is one serial number of a serial-tracked item and its current status and location, referenced by stock movements. A generic inventory-tracking table; rarely used on this factory, whose products are counted by carton, not serial.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: item_id
     type: integer
+    meaning: 'The serial-tracked item -> items'
     references: items.id
   -
     name: serial_number
     type: string
+    meaning: 'The serial number, unique per item'
   -
     name: status
     type: string
+    meaning: 'registered (created, not yet stocked), in_stock, consumed, sold, scrapped'
   -
     name: warehouse_id
     type: integer
     nullable: true
+    meaning: 'Store the unit currently sits in -> warehouses'
     references: warehouses.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the serial was registered'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
 joins:
   - 'serial_numbers.warehouse_id = warehouses.id'
   - 'serial_numbers.item_id = items.id'
-keywords: {}
-questions: {}
+keywords:
+  - 'serial number'
+  - 'serial tracked'
+  - unit
+questions:
+  - 'Which serial numbers of an item are still in stock?'

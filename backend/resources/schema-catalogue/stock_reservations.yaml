@@ -1,62 +1,83 @@
 table: stock_reservations
 module: inventory
 label: 'Stock Reservations'
-purpose: ''
+purpose: 'One row is a hold of finished-goods stock in a warehouse against one sales order line: pieces spoken for by a customer order, not moved. Only a delivery moves stock.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: item_id
     type: integer
+    meaning: 'Item held (items.id)'
     references: items.id
   -
     name: warehouse_id
     type: integer
+    meaning: 'Warehouse the hold is against, normally the FG store (warehouses.id)'
     references: warehouses.id
   -
     name: sales_order_line_id
     type: integer
+    meaning: 'Sales order line the stock is held for (sales_order_lines.id)'
     references: sales_order_lines.id
   -
     name: quantity
     type: decimal
+    meaning: "Quantity held, in the item's uom"
   -
     name: consumed_quantity
     type: decimal
+    meaning: 'How much of the hold actually left on a delivery'
   -
     name: released_quantity
     type: decimal
+    meaning: 'How much of the hold was given up without leaving'
   -
     name: status
     type: string
+    meaning: 'active | released | consumed; maintained from the three quantities'
   -
     name: released_reason
     type: string
     nullable: true
+    meaning: 'Why the hold was given up: line_fulfilled, so_cancelled, repointed, or free text'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who placed the hold (users.id)'
     references: users.id
   -
     name: released_by
     type: integer
     nullable: true
+    meaning: 'User who released it (users.id)'
     references: users.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last updated'
 joins:
   - 'stock_reservations.released_by = users.id'
   - 'stock_reservations.created_by = users.id'
   - 'stock_reservations.sales_order_line_id = sales_order_lines.id'
   - 'stock_reservations.warehouse_id = warehouses.id'
   - 'stock_reservations.item_id = items.id'
-keywords: {}
-questions: {}
+keywords:
+  - reservation
+  - hold
+  - 'reserved stock'
+  - allocated
+  - 'sales order stock'
+  - committed
+questions:
+  - 'How much FG stock is reserved against open sales orders?'
+  - 'Which holds were released and why?'

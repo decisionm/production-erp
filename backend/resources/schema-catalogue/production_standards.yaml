@@ -1,113 +1,139 @@
 table: production_standards
 module: production
-label: 'Production Standards'
-purpose: ''
+label: 'Product Production Standards'
+purpose: "One row is one product-level standard variant from the factory's master workbook: the product name as the factory writes it, its cavities, unit weight and cycle time, the carton/tray/pouch specs it packs in, and the Tally item it has been matched to. Machine-independent; the packaging options hang off it in production_standard_packagings."
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: item_id
     type: integer
     nullable: true
+    meaning: 'The Tally/ERP product this standard was matched to -> items; null = not yet matched'
     references: items.id
   -
     name: source_product_name
     type: string
+    meaning: 'Product name exactly as the factory workbook spells it (e.g. 100ML ROUND PET CLEAR)'
   -
     name: cavities
     type: integer
     nullable: true
+    meaning: 'Number of mould cavities for this variant'
   -
     name: unit_weight_grams
     type: decimal
     nullable: true
+    meaning: 'Weight of one piece in grams'
   -
     name: cycle_time
     type: decimal
     nullable: true
+    meaning: 'Cycle time in seconds'
   -
     name: cycle_time_raw
     type: string
     nullable: true
+    meaning: 'Raw workbook cell when it could not be read as one number (e.g. "21.5 / 17.8")'
   -
     name: status
     type: string
+    meaning: 'Lifecycle: draft (imported, unconfirmed), approved (in force), unresolved (carries an ambiguity a person must settle), inactive (retired)'
   -
     name: unresolved_reason
     type: string
     nullable: true
+    meaning: 'What is ambiguous on an unresolved row (multi-valued cycle time, blank field)'
   -
     name: source
     type: string
     nullable: true
+    meaning: 'Where the row came from: the workbook import, or MANUAL for one added in the app'
   -
     name: source_reference
     type: string
     nullable: true
+    meaning: 'Workbook row number the standard was imported from'
   -
     name: confirmation_status
     type: string
     nullable: true
+    meaning: "The factory's own confirmation wording from the workbook, verbatim; rewritten on every re-import"
   -
     name: notes
     type: string
     nullable: true
+    meaning: 'Free-text notes'
   -
     name: approved_by
     type: integer
     nullable: true
+    meaning: 'User who approved the standard -> users'
     references: users.id
   -
     name: approved_at
     type: datetime
     nullable: true
+    meaning: 'When it was approved'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who created the row -> users; null = import'
     references: users.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
   -
     name: deleted_at
     type: datetime
     nullable: true
+    meaning: 'Soft-delete (archive) timestamp; null = live'
   -
     name: carton_spec
     type: string
     nullable: true
+    meaning: 'Carton (master box) spec string from the workbook, e.g. "170ML" — a spec, not a count'
   -
     name: tray_spec
     type: string
     nullable: true
+    meaning: 'Tray spec string from the workbook, e.g. "60ML"'
   -
     name: pouch_spec
     type: string
     nullable: true
+    meaning: 'Pouch film spec string from the workbook, e.g. "750*610" (millimetres)'
   -
     name: spec_provenance
     type: string
     nullable: true
+    meaning: 'JSON keyed by spec column recording an inferred value: inferred flag, value, from_source_reference, from_product, reason, inferred_by, inferred_on'
   -
     name: item_attached_by
     type: integer
     nullable: true
+    meaning: 'User who attached the Tally item to this standard from the app -> users'
     references: users.id
   -
     name: item_attached_at
     type: datetime
     nullable: true
+    meaning: 'When the Tally item was attached'
   -
     name: updated_by
     type: integer
     nullable: true
+    meaning: 'User who last edited the row -> users'
     references: users.id
 joins:
   - 'production_standards.updated_by = users.id'
@@ -115,5 +141,14 @@ joins:
   - 'production_standards.approved_by = users.id'
   - 'production_standards.item_id = items.id'
   - 'production_standards.item_attached_by = users.id'
-keywords: {}
-questions: {}
+keywords:
+  - standard
+  - 'product standard'
+  - workbook
+  - 'unit weight'
+  - 'cycle time'
+  - cavities
+  - 'carton spec'
+questions:
+  - 'What is the unit weight and cycle time for each product?'
+  - 'Which product standards are still unresolved or unapproved?'

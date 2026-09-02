@@ -1,76 +1,93 @@
 table: production_standard_packagings
 module: production
-label: 'Production Standard Packagings'
-purpose: ''
+label: 'Standard Packaging Options'
+purpose: 'One row is one way a product standard can be packed: pouch + box, tray + box, or direct box, with the pieces per pouch/tray/box counts (e.g. 840/box pouch-packed vs 810/box tray-packed). It may carry its own Tally stock item when that packing is booked under a different item name.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'Primary key'
   -
     name: production_standard_id
     type: integer
+    meaning: 'The product standard this packing belongs to -> production_standards'
     references: production_standards.id
   -
     name: mode
     type: string
+    meaning: 'How pieces reach the carton: pouch, tray or direct_box'
   -
     name: nos_per_pouch
     type: integer
     nullable: true
+    meaning: 'Pieces per pouch (Nos); pouch mode'
   -
     name: pouches_per_box
     type: integer
     nullable: true
+    meaning: 'Pouches per carton; pouch mode'
   -
     name: nos_per_tray
     type: integer
     nullable: true
+    meaning: 'Pieces per tray (Nos); tray mode'
   -
     name: trays_per_box
     type: integer
     nullable: true
+    meaning: 'Trays per carton; tray mode'
   -
     name: nos_per_box
     type: integer
     nullable: true
+    meaning: 'Pieces per carton (Nos) — the figure every mode must answer'
   -
     name: is_default
     type: integer
+    meaning: '1 = the packing chosen automatically when the supervisor is not asked'
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'When the row was created'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'When the row was last changed'
   -
     name: item_id
     type: integer
     nullable: true
+    meaning: "The Tally stock item production in this packing posts as -> items; null = the product's own item"
     references: items.id
   -
     name: item_set_by
     type: integer
     nullable: true
+    meaning: "User who set the packing's Tally identity -> users"
     references: users.id
   -
     name: item_set_at
     type: datetime
     nullable: true
+    meaning: 'When the Tally identity was set'
   -
     name: deleted_at
     type: datetime
     nullable: true
+    meaning: 'Soft-delete (archive) timestamp; null = live'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'User who created the row -> users; null = workbook import'
     references: users.id
   -
     name: updated_by
     type: integer
     nullable: true
+    meaning: 'User who last edited the row -> users'
     references: users.id
 joins:
   - 'production_standard_packagings.updated_by = users.id'
@@ -78,5 +95,13 @@ joins:
   - 'production_standard_packagings.item_id = items.id'
   - 'production_standard_packagings.production_standard_id = production_standards.id'
   - 'production_standard_packagings.created_by = users.id'
-keywords: {}
-questions: {}
+keywords:
+  - packaging
+  - 'pack size'
+  - 'nos per box'
+  - pouch
+  - tray
+  - 'direct box'
+questions:
+  - 'How many pieces per box does each product pack?'
+  - 'Which products have both a pouch and a tray packing?'

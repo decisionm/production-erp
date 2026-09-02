@@ -1,79 +1,110 @@
 table: employees
 module: hrms
 label: Employees
-purpose: ''
+purpose: 'One row per person on the factory staff list — operators, supervisors, office staff — with employee code, designation, department, joining date and reporting manager. This is the headcount; login accounts are in users.'
 columns:
   -
     name: id
     type: integer
+    meaning: 'row id'
   -
     name: employee_code
     type: string
+    meaning: 'unique staff code printed on the payslip and ID card'
   -
     name: name
     type: string
+    meaning: 'full name of the employee'
   -
     name: email
     type: string
     nullable: true
+    meaning: 'personal email address'
+    sensitive: personal
   -
     name: phone
     type: string
     nullable: true
+    meaning: 'mobile / phone number'
+    sensitive: personal
   -
     name: date_of_birth
     type: date
     nullable: true
+    meaning: 'date of birth'
+    sensitive: personal
   -
     name: date_of_joining
     type: date
+    meaning: 'date the employee started with the company'
   -
     name: designation
     type: string
     nullable: true
+    meaning: 'job title (e.g. Operator, Supervisor, Accountant)'
   -
     name: department
     type: string
     nullable: true
+    meaning: 'department name as free text (e.g. Production, Stores, Accounts)'
   -
     name: status
     type: string
+    meaning: "employment status: 'active', 'inactive', 'terminated'"
   -
     name: manager_id
     type: integer
     nullable: true
+    meaning: 'the employee this person reports to (employees)'
     references: employees.id
   -
     name: user_id
     type: integer
     nullable: true
+    meaning: 'the ERP login account linked to this employee, if any (users)'
     references: users.id
   -
     name: created_at
     type: datetime
     nullable: true
+    meaning: 'when the row was created in the ERP'
   -
     name: updated_at
     type: datetime
     nullable: true
+    meaning: 'when the row was last edited'
   -
     name: deleted_at
     type: datetime
     nullable: true
+    meaning: 'when the employee was soft-deleted (null = still on the list); deleted rows are hidden from lists'
   -
     name: created_by
     type: integer
     nullable: true
+    meaning: 'the user who created the record in the ERP (null = imported)'
     references: users.id
   -
     name: updated_by
     type: integer
     nullable: true
+    meaning: 'the user who last edited the record'
     references: users.id
 joins:
   - 'employees.updated_by = users.id'
   - 'employees.user_id = users.id'
   - 'employees.manager_id = employees.id'
   - 'employees.created_by = users.id'
-keywords: {}
-questions: {}
+keywords:
+  - staff
+  - worker
+  - operator
+  - people
+  - headcount
+  - employee
+  - personnel
+  - manpower
+questions:
+  - 'How many active employees are there?'
+  - 'Who reports to a given manager?'
+  - 'Which employees joined this year, by department?'
