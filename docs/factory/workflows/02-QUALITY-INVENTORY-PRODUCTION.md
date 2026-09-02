@@ -488,8 +488,15 @@ record's source.
 - **VERIFIED as a decision:** DEC-20260902-030, Q62(c). No permanent customer
   priority; the ERP never ranks customers or infers priority from value, name,
   date or history. A named priority would be a new decision.
-- **OPEN (one at a time):** Q62(d) production request queue order; (e) when a
-  request is answered; (f) parallel lines for planning dates.
+- **VERIFIED as a decision:** DEC-20260902-031, Q62(d). Pending production
+  requests sort by promised date, earliest first, undated last, ties by time
+  raised. A queue order only: no priority, no hold moves. Production's manual
+  position sticks until removed; started jobs never reorder; a re-sort caused
+  by a date change is flagged and the date is shown.
+- **GAP:** the queue today is raised order with manual reordering; the build
+  adds the date sort, the sticky manual position and the moved flag.
+- **OPEN (one at a time):** Q62(e) when a request is answered; (f) parallel
+  lines for planning dates.
 
 ## Sections still to capture
 
