@@ -5,11 +5,26 @@ import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
-import { createIncomingInspection, listIncomingInspections } from '@/features/quality/api';
+import { type IncomingInspectionListParams, createIncomingInspection, listIncomingInspections } from '@/features/quality/api';
+import { ListNoMatch } from '@/features/quality/components/ListNoMatch';
 import type { IncomingInspection, InspectionResult } from '@/features/quality/types';
-import { listGoodsReceipts } from '@/features/procurement/api';
-import { ListEmpty } from '@/lib/ListEmpty';
 import { inspectionPreview, resultTag } from '@/features/quality/words';
+import { listGoodsReceipts } from '@/features/procurement/api';
+import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
+import { type ListParamsSpec, compactParams, narrowingKeys } from '@/lib/listParams';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { useListParams } from '@/lib/useListParams';
+
+const RESULTS: readonly InspectionResult[] = ['pass', 'partial', 'fail'];
+
+/**
+ * The register's URL keys beyond q / page / per_page. A `result` the enum
+ * does not know is dropped on read, as the server would refuse it.
+ * Module-level: useListParams memoises on it.
+ */
+const INSPECTION_LIST_SPEC: ListParamsSpec = { strings: ['result'], allowed: { result: RESULTS } };
+
+const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
 
 const inspectionSchema = z.object({
     goods_receipt_note_line_id: z.number({ error: 'GRN line is required' }),
@@ -30,7 +45,18 @@ export default function IncomingInspectionsPage() {
     const [searchParams, setSearchParams] = useSearchParams();
     const linkedLineId = Number(searchParams.get('line')) || null;
 
-    const { data, isLoading, isPending, isError, error, refetch } = useQuery({ queryKey: ['quality', 'incoming-inspections'], queryFn: listIncomingInspections });
+    // THE URL IS THE LIST'S STATE — search, result filter, page and page size
+    // — and the SERVER does the narrowing. This page used to ask for the
+    // whole register and render every row with no pager.
+    const { params, setParams, setPage, reset: clearList } = useListParams<IncomingInspectionListParams>(INSPECTION_LIST_SPEC);
+    const request = compactParams(params);
+    const narrowed = narrowingKeys(params).length > 0;
+
+    const { data, isLoading, isPending, isError, error, refetch } = useQuery({
+        queryKey: ['quality', 'incoming-inspections', request],
+        queryFn: () => listIncomingInspections(params),
+        placeholderData: (previous) => previous,
+    });
     // THE WHOLE REGISTER, NOT THE FIRST PAGE. This picker is the only control
     // anywhere that releases a bag from waiting_qc. Asking for the default page
     // capped it at the newest 20 receipts, so material on the twenty-first
@@ -104,31 +130,92 @@ export default function IncomingInspectionsPage() {
 
     return (
         <>
-            <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
+            <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }} wrap>
                 <Typography.Title level={3} style={{ margin: 0 }}>Incoming Inspections</Typography.Title>
-                <Button type="primary" onClick={() => setModalOpen(true)}>New Inspection</Button>
+                <Space wrap>
+                    {/* Keyed on the term so Clear (reset) empties the box: the
+                        box is uncontrolled between submits, and submits on
+                        Enter, the button, or its own clear cross. */}
+                    <Input.Search
+                        key={params.q ?? ''}
+                        allowClear
+                        defaultValue={params.q}
+                        placeholder="Search product, GRN, reference"
+                        onSearch={(value) => setParams({ q: value.trim() || undefined })}
+                        style={{ width: 280 }}
+                    />
+                    <Select<InspectionResult>
+                        allowClear
+                        placeholder="All results"
+                        value={params.result}
+                        options={RESULTS.map((result) => ({ value: result, label: resultTag(result).label }))}
+                        onChange={(result) => setParams({ result })}
+                        style={{ width: 140 }}
+                    />
+                    <Button type="primary" onClick={() => setModalOpen(true)}>New Inspection</Button>
+                </Space>
             </Space>
+
+            {narrowed && data?.meta && (
+                <Space size={8} wrap style={{ marginBottom: 12 }}>
+                    {params.q && (
+                        <Tag closable onClose={() => setParams({ q: undefined })}>{`“${params.q}”`}</Tag>
+                    )}
+                    {params.result && (
+                        <Tag closable onClose={() => setParams({ result: undefined })}>{resultTag(params.result).label}</Tag>
+                    )}
+                    <Typography.Text type="secondary">{`${data.meta.total} match`}</Typography.Text>
+                    <Button size="small" type="link" style={{ padding: 0 }} onClick={clearList}>
+                        Clear
+                    </Button>
+                </Space>
+            )}
+
+            {/* placeholderData keeps stale rows on a failed refetch, so
+                emptyText never shows the failure — this line does. */}
+            <ListReadAlert state={{ isPending, isError, error, refetch }} entity="incoming inspections" />
 
             <Table<IncomingInspection>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                pagination={serverPagination(data?.meta, setPage, 'inspections')}
                 locale={{
                     emptyText: (
                         <ListEmpty
                             state={{ isPending, isError, error, refetch }}
                             entity="incoming inspections"
-                            empty="No incoming inspections recorded yet."
+                            empty={
+                                narrowed
+                                    ? <ListNoMatch entity="inspections" term={params.q} onClear={clearList} />
+                                    : 'No incoming inspections recorded yet.'
+                            }
                         />
                     ),
                 }}
                 columns={[
                     { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
-                    { title: 'Inspected', dataIndex: 'inspected_quantity' },
-                    { title: 'Accepted', dataIndex: 'accepted_quantity' },
-                    { title: 'Rejected', dataIndex: 'rejected_quantity' },
+                    {
+                        title: 'GRN',
+                        render: (_, row) =>
+                            row.goods_receipt_note ? (
+                                <Space direction="vertical" size={0}>
+                                    <span style={{ whiteSpace: 'nowrap' }}>{row.goods_receipt_note.document_number}</span>
+                                    {row.goods_receipt_note.tracking_number && (
+                                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                            {row.goods_receipt_note.tracking_number}
+                                        </Typography.Text>
+                                    )}
+                                </Space>
+                            ) : (
+                                '—'
+                            ),
+                    },
+                    { title: 'Inspected', dataIndex: 'inspected_quantity', align: 'right', render: (v: string) => <span style={numeric}>{v}</span> },
+                    { title: 'Accepted', dataIndex: 'accepted_quantity', align: 'right', render: (v: string) => <span style={numeric}>{v}</span> },
+                    { title: 'Rejected', dataIndex: 'rejected_quantity', align: 'right', render: (v: string) => <span style={numeric}>{v}</span> },
                     {
                         title: 'Result',
                         dataIndex: 'result',
@@ -255,6 +342,11 @@ export default function IncomingInspectionsPage() {
                     <Descriptions column={1} size="small" bordered>
                         <Descriptions.Item label="Item">
                             {detailRow.item.sku} — {detailRow.item.name}
+                        </Descriptions.Item>
+                        <Descriptions.Item label="GRN">
+                            {detailRow.goods_receipt_note
+                                ? [detailRow.goods_receipt_note.document_number, detailRow.goods_receipt_note.tracking_number].filter(Boolean).join(' · ')
+                                : '—'}
                         </Descriptions.Item>
                         <Descriptions.Item label="Result">
                             {(() => {

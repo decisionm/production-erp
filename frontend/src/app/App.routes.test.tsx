@@ -22,8 +22,9 @@ import App, { productionConfigurationTarget, storeProductionTarget } from './App
  * The table is read by walking the element tree App() returns — Route
  * elements are plain data until a router renders them, so no DOM, no
  * router context and no rendering are involved. Every page module App.tsx
- * imports is evaluated by that import; the sibling test below goes further
- * and loads every page module on disk as a lazy chunk.
+ * declares are still ordinary wrapper elements here, so this walk does not
+ * fetch their chunks. The sibling test below deliberately loads every page
+ * module on disk, proving each on-demand route can evaluate.
  */
 const ROUTE_TABLE = [
     '/login',
@@ -181,8 +182,8 @@ function elementKind(element: ReactNode): 'page' | 'redirect' | 'other' {
 }
 
 /**
- * Every page module on disk, as the lazy chunk a code-split build would
- * hand the router. Loading each one proves the module evaluates in
+ * Every page module on disk, as the lazy chunk the code-split build now
+ * hands the router. Loading each one proves the module evaluates in
  * isolation and exports a component — a chunk that throws on import, or a
  * page whose default export went missing, is a blank screen in production
  * that no typecheck catches.

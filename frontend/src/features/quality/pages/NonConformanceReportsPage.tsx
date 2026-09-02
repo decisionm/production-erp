@@ -43,7 +43,7 @@ export default function NonConformanceReportsPage() {
     const queryClient = useQueryClient();
 
     const { data, isLoading } = useQuery({ queryKey: ['quality', 'ncrs'], queryFn: listNonConformanceReports });
-    const { data: inspections } = useQuery({ queryKey: ['quality', 'incoming-inspections'], queryFn: listIncomingInspections });
+    const { data: inspections } = useQuery({ queryKey: ['quality', 'incoming-inspections'], queryFn: () => listIncomingInspections() });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
 
     const inspectionOptions =

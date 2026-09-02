@@ -119,26 +119,41 @@ class ClientOutstandingService
 
             $clients[$key]['outstanding_amount'] = bcadd($clients[$key]['outstanding_amount'], $amount, 4);
             $clients[$key]['ageing'][$bucket] = bcadd($clients[$key]['ageing'][$bucket], $amount, 4);
-            $clients[$key]['bill_count']++;
+
+            // The factory's measured all-parties Tally report supplies one
+            // closing balance per client, but no bill reference or dates. It
+            // is a real outstanding amount and must appear; it is NOT a bill
+            // and must not manufacture an invoice count or ageing detail.
+            $hasBillDetail = $bill->bill_reference !== null
+                || $bill->bill_date !== null
+                || $bill->due_date !== null;
+
+            if (! $hasBillDetail) {
+                $clients[$key]['balance_only'] = true;
+            } else {
+                $clients[$key]['bill_count']++;
+            }
 
             if ($daysPastDue !== null && $daysPastDue > 0) {
                 $clients[$key]['overdue_amount'] = bcadd($clients[$key]['overdue_amount'], $amount, 4);
                 $clients[$key]['oldest_overdue_days'] = max($clients[$key]['oldest_overdue_days'] ?? 0, $daysPastDue);
             }
 
-            $clients[$key]['bills'][] = [
-                'bill_reference' => $bill->bill_reference,
-                'bill_date' => $bill->bill_date?->toDateString(),
-                'due_date' => $bill->due_date?->toDateString(),
-                'closing_amount' => $amount,
-                'opening_amount' => $bill->opening_amount === null ? null : (string) $bill->opening_amount,
-                // The number the page's "Outstanding days" column shows. Null
-                // when Tally states no due date — the column reads "—", it does
-                // not read 0, which would mean "due today".
-                'days_past_due' => $daysPastDue,
-                'days_since_bill' => $this->daysBetween($bill->bill_date, $today),
-                'bucket' => $bucket,
-            ];
+            if ($hasBillDetail) {
+                $clients[$key]['bills'][] = [
+                    'bill_reference' => $bill->bill_reference,
+                    'bill_date' => $bill->bill_date?->toDateString(),
+                    'due_date' => $bill->due_date?->toDateString(),
+                    'closing_amount' => $amount,
+                    'opening_amount' => $bill->opening_amount === null ? null : (string) $bill->opening_amount,
+                    // The number the page's "Outstanding days" column shows. Null
+                    // when Tally states no due date — the column reads "—", it does
+                    // not read 0, which would mean "due today".
+                    'days_past_due' => $daysPastDue,
+                    'days_since_bill' => $this->daysBetween($bill->bill_date, $today),
+                    'bucket' => $bucket,
+                ];
+            }
         }
 
         foreach ($orders as $order) {
@@ -220,6 +235,9 @@ class ClientOutstandingService
             'party_ledger_name' => $ledgerName,
             'party_ledger_guid' => $guid,
             'is_linked' => $customer !== null,
+            // True when Tally supplied only the party closing balance. The UI
+            // names that limitation instead of showing a made-up bill count.
+            'balance_only' => false,
             'outstanding_amount' => '0.0000',
             'overdue_amount' => '0.0000',
             'pending_order_amount' => '0.0000',

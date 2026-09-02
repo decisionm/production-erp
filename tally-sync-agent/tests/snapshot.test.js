@@ -374,7 +374,7 @@ test('agentVersion() reads package.json and is the strict semver the release gat
     assert.match(agentVersion(), /^\d+\.\d+\.\d+$/);
 });
 
-test('this candidate is 0.4.5 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9, the purchase-rate read since 0.4.0, the receivables read since 0.4.5', () => {
+test('this candidate is 0.4.6 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9, the purchase-rate read since 0.4.0, measured receivables summary support since 0.4.6', () => {
     // The drawer's "agent ≥ 0.3.8" line depends on 0.3.8 being the snapshot
     // FLOOR, which does not move; the candidate itself advances. 0.3.9 added
     // purchaseOrder.ts (Phase 6, staged, flag off); 0.4.0 adds the Day Book
@@ -409,6 +409,11 @@ test('this candidate is 0.4.5 — snapshots since 0.3.8, the Purchase Order buil
     // document for their nodes rather than following a path — 0.4.2's lesson,
     // applied before it could be paid for twice.
     //
+    // 0.4.6 replaces the unmeasured bill-row assumption with the factory's
+    // observed DSPACCNAME/DSPACCINFO party-summary response and corrects
+    // Tally's debit sign at the integration boundary. The cloud/UI explicitly
+    // marks these as balance-only rows, never as invented bill detail.
+    //
     // IT STILL ASKS THE WAY 0.4.3 STOPPED ASKING. These two readers request a
     // REPORT (TALLYREQUEST=Export, TYPE=Data, ID=...), which is what the
     // purchase-rate read did until 0.4.3 measured that this factory's Tally
@@ -419,5 +424,5 @@ test('this candidate is 0.4.5 — snapshots since 0.3.8, the Purchase Order buil
     // WHAT THE DOCUMENT HELD when they find nothing, and why moving them to
     // the Collection shape is the open follow-up rather than a claim already
     // made here.
-    assert.equal(agentVersion(), '0.4.5');
+    assert.equal(agentVersion(), '0.4.6');
 });

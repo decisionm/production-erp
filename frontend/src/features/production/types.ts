@@ -2170,6 +2170,8 @@ export interface FactorySetting {
     label: string | null;
     description: string | null;
     confirmation_status: string | null;
+    /** Whether any screen or rule reads this value; the rest are reference rows. */
+    applied: boolean;
     is_active: boolean;
     effective_from: string | null;
     change_reason: string | null;

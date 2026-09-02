@@ -3,6 +3,7 @@ import type { ConfigurationAbilities } from '@/components/configuration/types';
 import type { Item, Warehouse } from '@/features/inventory/types';
 import type { MaterialLot } from '@/features/production/types';
 import type { TallyLink } from '@/features/sales/types';
+import type { ListParams } from '@/lib/listParams';
 
 export interface Vendor {
     id: number;
@@ -402,6 +403,30 @@ export interface GoodsReceiptNote {
      */
     tally_staging?: TallyStaging | null;
     created_at: string;
+}
+
+/**
+ * The server-side filters GET /procurement/goods-receipts accepts
+ * (ListGoodsReceiptsRequest): `q` — a receipt number in any spelling
+ * ("GRN-7", "grn 7", "7"), its reference, the order's vendor by name or
+ * code, the ORDER's number when spelled as one ("PO-12"), or an item on the
+ * receipt by SKU or name; one order; one receipt (`id`, the `?grn=` deep
+ * link); paging. Every field optional; empties never reach the wire.
+ */
+export interface GoodsReceiptListFilters extends ListParams {
+    purchase_order_id?: number;
+    id?: number;
+}
+
+/**
+ * The register PAGE's URL keys. `po` and `grn` are the deep links every
+ * movement, lot and purchase-order screen has always written
+ * (`?po=3`: every receipt on that order; `?grn=7`: that one receipt); they
+ * become purchase_order_id / id on the wire (goodsReceiptServerFilters).
+ */
+export interface GoodsReceiptListParams extends ListParams {
+    po?: number;
+    grn?: number;
 }
 
 // ------------------------------------------------------------ trace (P6-02) --

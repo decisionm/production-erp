@@ -30,14 +30,15 @@ import { escapeXml } from './voucherBuilders/xmlHelpers';
  * never a party, a bill reference or an amount, which are Owner/Accounts
  * (FC-06) and the factory PC keeps its log for 30 days.
  *
- * THE TAG NAMES ARE TALLY'S STANDARD ONES for these two reports. They have not
- * been measured against this factory's own exports, because no receivables
- * export has been taken from it yet — so every reader below is written to fail
- * VISIBLY (an empty pull, logged with what it did see) rather than to guess a
- * second name for a field and quote something wrong. `describeDocument` exists
- * precisely so the first real pull says what the factory's Tally actually
- * answered, and the names here can be corrected from evidence rather than from
- * another guess.
+ * THE RECEIVABLES SHAPE IS NOW MEASURED against the factory exports taken on
+ * 02-Sep-2026. `Bills Receivable` answers with paired `DSPACCNAME` and
+ * `DSPACCINFO` rows — one party closing balance per pair — rather than putting
+ * the party inside `BILLFIXED`. A separately exported single-party detail
+ * report carries `BILLFIXED`, `BILLCL` and the dates as flat siblings but does
+ * not repeat the party name, so it cannot safely be joined to a client by this
+ * all-parties pull. The parser therefore accepts the measured party-summary
+ * shape as a balance-only position and still accepts the older nested bill
+ * shape for Tally builds that genuinely return it.
  */
 
 export interface TallyTarget {
@@ -106,8 +107,9 @@ export function parseTallyDate(raw: unknown): string | null {
  * unreadable: a 0 outstanding is a settled bill, and printing one the factory
  * never stated would take a real debt off somebody's collection list.
  *
- * Tally writes amounts with an optional currency symbol and comma grouping,
- * and states a credit with a LEADING minus. The sign survives.
+ * Tally writes amounts with an optional currency symbol and comma grouping.
+ * The sign survives unchanged here; its accounting meaning depends on the
+ * report field, so the receivables boundary interprets it separately below.
  */
 export function parseAmount(raw: unknown): number | null {
     const text = textOf(raw).replace(/[,\s]/g, '').replace(/^[₹$]/, '');
@@ -117,6 +119,21 @@ export function parseAmount(raw: unknown): number | null {
     const value = Number(text);
 
     return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Tally's accounting sign to the page's business sign.
+ *
+ * Both the factory's detailed receivables export and Tally's documented
+ * `DSPCLDRAMTA` examples state a DEBIT balance as a leading negative number.
+ * On this page, however, a positive value means "the client owes us" and a
+ * negative value means "the client is in credit". Negating once at the Tally
+ * boundary keeps that contract consistent through the database and UI.
+ */
+function receivableAmount(raw: unknown): number | null {
+    const tallyAmount = parseAmount(raw);
+
+    return tallyAmount === null ? null : -tallyAmount;
 }
 
 /** ` 48.000 Kgs.` → { value: 48, unit: 'Kgs.' } — the quantity idiom from purchaseRates.ts. */
@@ -193,16 +210,63 @@ export function describeDocument(xml: string): { nodes: Record<string, number>; 
 /** Tally's Bills Receivable rows live under BILLFIXED, or BILLS on some builds. */
 const BILL_NODES = new Set(['BILLFIXED', 'BILLS']);
 
-/** Every outstanding bill in a Bills Receivable export's XML. */
-export function parseBillsReceivable(xml: string): ReceivableBill[] {
+/** The measured all-parties summary rows in this factory's Tally export. */
+const PARTY_NAME_NODES = new Set(['DSPACCNAME']);
+const PARTY_BALANCE_NODES = new Set(['DSPACCINFO']);
+
+/**
+ * Parse the factory's measured party-summary response.
+ *
+ * fast-xml-parser groups the interleaved sibling tags into two arrays while
+ * preserving the order within each tag. They may only be zipped when the
+ * counts agree; a partial pair is a parser failure, not permission to attach
+ * one client's money to another client's name.
+ */
+function parsePartySummary(document: unknown): ReceivableBill[] {
+    const names = findNodes(document, PARTY_NAME_NODES);
+    const balances = findNodes(document, PARTY_BALANCE_NODES);
+
+    if (names.length === 0 || names.length !== balances.length) return [];
+
     const bills: ReceivableBill[] = [];
 
-    for (const node of findNodes(parser.parse(xml), BILL_NODES)) {
+    for (let i = 0; i < names.length; i++) {
+        const party = clean(names[i]?.DSPDISPNAME);
+        const debit = parseAmount(balances[i]?.DSPCLDRAMT?.DSPCLDRAMTA);
+        const credit = parseAmount(balances[i]?.DSPCLCRAMT?.DSPCLCRAMTA);
+
+        if (party === '' || (debit === null && credit === null)) continue;
+
+        // The two columns are Tally-signed components. Sum them first, then
+        // cross the sign boundary once: debit-only -1000 => client owes +1000;
+        // credit-only +250 => client credit -250; both => the honest net.
+        const tallyClosing = (debit ?? 0) + (credit ?? 0);
+
+        bills.push({
+            party_ledger_name: party,
+            party_ledger_guid: null,
+            bill_reference: null,
+            bill_date: null,
+            due_date: null,
+            closing_amount: -tallyClosing,
+            opening_amount: null,
+        });
+    }
+
+    return bills;
+}
+
+/** Every outstanding bill in a Bills Receivable export's XML. */
+export function parseBillsReceivable(xml: string): ReceivableBill[] {
+    const document = parser.parse(xml);
+    const bills: ReceivableBill[] = [];
+
+    for (const node of findNodes(document, BILL_NODES)) {
         const party = clean(node?.LEDGERNAME) || clean(node?.PARTYNAME) || clean(node?.BILLPARTY);
 
         // BILLCL is Tally's closing balance for the bill — what is still
         // outstanding, which is the whole point of the report.
-        const closing = parseAmount(node?.BILLCL ?? node?.CLOSINGBALANCE ?? node?.AMOUNT);
+        const closing = receivableAmount(node?.BILLCL ?? node?.CLOSINGBALANCE ?? node?.AMOUNT);
 
         // A bill with no party cannot be chased, and one with no closing
         // amount is not an outstanding. Neither is emitted half-formed.
@@ -215,11 +279,14 @@ export function parseBillsReceivable(xml: string): ReceivableBill[] {
             bill_date: parseTallyDate(node?.BILLDATE ?? node?.DATE),
             due_date: parseTallyDate(node?.BILLDUEDATE ?? node?.DUEDATE),
             closing_amount: closing,
-            opening_amount: parseAmount(node?.BILLOP ?? node?.OPENINGBALANCE),
+            opening_amount: receivableAmount(node?.BILLOP ?? node?.OPENINGBALANCE),
         });
     }
 
-    return bills;
+    // A Tally build returning real bill rows wins because it carries dates and
+    // references. The factory's measured response has no valid nested rows,
+    // so it falls through to the paired balance-only summary instead.
+    return bills.length > 0 ? bills : parsePartySummary(document);
 }
 
 /**
@@ -359,7 +426,7 @@ export async function exportOutstandingPosition(
 
     if (bills.length === 0) {
         // Node names and counts only — never a party or an amount (FC-06).
-        logger.warn('Receivables read found no outstanding bills', { asOf, ...describeDocument(billsXml) });
+        logger.warn('Receivables read found no receivable rows', { asOf, ...describeDocument(billsXml) });
     }
 
     const ordersXml = await exportReport(target, 'Sales Order Outstanding', asOf);

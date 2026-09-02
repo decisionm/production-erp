@@ -128,6 +128,20 @@ class ShiftProductionEntryService
      * canAmendCompletion; awaiting → correctionHistory()['awaiting_
      * correction']), mirrored in correctableSql() / awaitingCorrectionSql()
      * below; a false is "no filter", never a match on the complement.
+     *
+     * `$awaitingQualityCheck` / `$q` / `$oldestFirst`: the quality desk's
+     * queue (BatchQualityQueueController), which used to be built in the
+     * browser by walking every page of `status=pending`, filtering on the
+     * resource's `quality` and `correction` blocks and re-sorting. Asked
+     * of the database instead, the same way the two flags above are:
+     * awaiting-quality-check is correctable AND NOT awaiting_correction
+     * (whereAwaitingQualityCheck, the complement of the JSON walk above),
+     * and is EMPTY while the stage is switched off — the check endpoint
+     * refuses then, so a queue offering that work would be a queue of
+     * refusals. `$q` narrows on the batch number, the product (sku / name)
+     * and the machine (code / name); `$oldestFirst` reverses the order,
+     * because a queue is worked front to back and the oldest batch is the
+     * one that has waited longest. Every default keeps the old answer.
      */
     public function paginate(
         int $perPage = 20,
@@ -142,6 +156,9 @@ class ShiftProductionEntryService
         ?int $page = null,
         bool $correctable = false,
         bool $awaitingCorrection = false,
+        bool $awaitingQualityCheck = false,
+        ?string $q = null,
+        bool $oldestFirst = false,
     ): LengthAwarePaginator {
         $includeCancelled = $includeCancelled || $batchStatus === BatchStatus::Cancelled;
 
@@ -219,8 +236,12 @@ class ShiftProductionEntryService
             ->when($shiftId, fn ($query) => $query->where('shift_id', $shiftId))
             ->when($correctable, fn ($query) => $this->whereCorrectable($query))
             ->when($awaitingCorrection, fn ($query) => $this->whereAwaitingCorrection($query))
-            ->orderByDesc('production_date')
-            ->orderByDesc('id')
+            ->when($awaitingQualityCheck, fn ($query) => $this->whereAwaitingQualityCheck($query))
+            ->when(trim((string) $q) !== '', fn ($query) => $this->whereMatchesTerm($query, trim((string) $q)))
+            // The id is the tie-breaker either way: a day's batches share a
+            // production_date, and the id is monotonic in creation order.
+            ->orderBy('production_date', $oldestFirst ? 'asc' : 'desc')
+            ->orderBy('id', $oldestFirst ? 'asc' : 'desc')
             ->paginate($perPage, ['*'], 'page', $page);
     }
 
@@ -282,6 +303,70 @@ class ShiftProductionEntryService
                 .' concat(\'{"answered_returns":\', json_length(shift_production_entries.config_snapshot, \'$.quality_returns\'), \'}\'),'
                 .' \'$.amendments\'), 0) = 0',
             default => throw new RuntimeException("The awaiting_correction filter has no SQL for the '{$driver}' driver."),
+        });
+    }
+
+    /**
+     * "Is this batch waiting for the quality desk?" — in SQL. Correctable
+     * (pending · completed · no check) AND NOT awaiting correction: a batch
+     * quality sent back sits with the floor, not here, until the floor's
+     * amendment answers the return. The JSON walk is the exact complement
+     * of whereAwaitingCorrection() above, spelt per driver for the same
+     * reason — "no returns at all" (a missing key, an empty array or a null
+     * snapshot: COALESCE) OR "an amendment answered every return".
+     *
+     * EMPTY WHILE THE STAGE IS SWITCHED OFF, on purpose: recordQualityCheck()
+     * refuses every check then, so a queue that still listed the pending
+     * batches would offer work that cannot be done.
+     *
+     * @param  Builder<ShiftProductionEntry>  $query
+     */
+    private function whereAwaitingQualityCheck($query): void
+    {
+        if (! config('production.approvals.quality_stage_enabled', true)) {
+            $query->whereRaw('0 = 1');
+
+            return;
+        }
+
+        $this->whereCorrectable($query);
+
+        $driver = $query->getConnection()->getDriverName();
+        $query->whereRaw(match ($driver) {
+            'sqlite' => '(coalesce(json_array_length(shift_production_entries.config_snapshot, \'$.quality_returns\'), 0) = 0'
+                .' or exists (select 1 from json_each(shift_production_entries.config_snapshot, \'$.amendments\') as amendment'
+                .' where json_extract(amendment.value, \'$.answered_returns\') = json_array_length(shift_production_entries.config_snapshot, \'$.quality_returns\')))',
+            'mysql', 'mariadb' => '(coalesce(json_length(shift_production_entries.config_snapshot, \'$.quality_returns\'), 0) = 0'
+                .' or coalesce(json_contains(shift_production_entries.config_snapshot,'
+                .' concat(\'{"answered_returns":\', json_length(shift_production_entries.config_snapshot, \'$.quality_returns\'), \'}\'),'
+                .' \'$.amendments\'), 0) = 1)',
+            default => throw new RuntimeException("The awaiting-quality-check filter has no SQL for the '{$driver}' driver."),
+        });
+    }
+
+    /**
+     * The list's free-text search: the batch number, the product's sku or
+     * name, the machine's code or name — the three things a row shows and
+     * a person types. Case-insensitive substring; `%` and `_` in the term
+     * are characters, not wildcards ('!' is the ESCAPE character). Archived
+     * products and retired machines stay searchable — a batch made on them
+     * is still a batch.
+     *
+     * @param  Builder<ShiftProductionEntry>  $query
+     */
+    private function whereMatchesTerm($query, string $term): void
+    {
+        $needle = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_strtolower($term)).'%';
+        $like = fn ($column) => "lower({$column}) like ? escape '!'";
+
+        $query->where(function ($any) use ($needle, $like) {
+            $any->whereRaw($like('shift_production_entries.batch_number'), [$needle])
+                ->orWhereHas('item', fn ($item) => $item->withTrashed()->where(function ($either) use ($needle, $like) {
+                    $either->whereRaw($like('items.sku'), [$needle])->orWhereRaw($like('items.name'), [$needle]);
+                }))
+                ->orWhereHas('workCenter', fn ($machine) => $machine->withTrashed()->where(function ($either) use ($needle, $like) {
+                    $either->whereRaw($like('work_centers.code'), [$needle])->orWhereRaw($like('work_centers.name'), [$needle]);
+                }));
         });
     }
 

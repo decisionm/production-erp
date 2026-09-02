@@ -1,10 +1,27 @@
 import { api } from '@/lib/api';
+import { type ListParams, compactParams } from '@/lib/listParams';
 import type { Paginated } from '@/lib/types';
 import type { ShiftProductionEntry } from '@/features/production/types';
-import type { Capa, IncomingInspection, MeasuringInstrument, NonConformanceReport, SpcChart, SpcCharacteristic, SpcMeasurement } from './types';
+import type { Capa, IncomingInspection, InspectionResult, MeasuringInstrument, NonConformanceReport, SpcChart, SpcCharacteristic, SpcMeasurement } from './types';
 
-export async function listIncomingInspections(): Promise<Paginated<IncomingInspection>> {
-    const { data } = await api.get<Paginated<IncomingInspection>>('/quality/incoming-inspections');
+export interface IncomingInspectionListParams extends ListParams {
+    /** The verdict to narrow to; absent is every result. */
+    result?: InspectionResult;
+}
+
+/**
+ * The register, one page at a time. `q`, `result`, `page` and `per_page`
+ * go to the server (ListIncomingInspectionsRequest), which cuts the page
+ * AFTER the filter — so the total is the matching set's and nothing is
+ * filtered here. Bare, it is the first twenty, newest first, exactly as
+ * before.
+ */
+export async function listIncomingInspections(
+    params: IncomingInspectionListParams = {},
+): Promise<Paginated<IncomingInspection>> {
+    const { data } = await api.get<Paginated<IncomingInspection>>('/quality/incoming-inspections', {
+        params: compactParams(params),
+    });
     return data;
 }
 
@@ -176,26 +193,26 @@ export async function getSpcChart(characteristicId: number): Promise<SpcChart> {
 // Batch quality check — the gate between Complete Batch and PM approval.
 //
 // The paths and field names below are the backend's ACTUAL contract
-// (BatchQualityCheckController + StoreBatchQualityCheckRequest), not a guess.
-// Two things about it are worth stating here, because both are easy to get
-// wrong from the frontend side:
+// (BatchQualityQueueController, BatchQualityCheckController +
+// StoreBatchQualityCheckRequest), not a guess. Two things about it are worth
+// stating here, because both are easy to get wrong from the frontend side:
 //
-// 1. THE WRITE LIVES AT A PRODUCTION PATH BUT CARRIES QUALITY PERMISSION. The
-//    route is registered outside the production group precisely so a QC
+// 1. THE WRITES LIVE AT A PRODUCTION PATH BUT CARRY QUALITY PERMISSION. The
+//    routes are registered outside the production group precisely so a QC
 //    checker needs quality.manage and NOT production.manage.
 //
-// 2. THERE IS NO DEDICATED QUEUE ENDPOINT, AND NO NEW STATUS. A checked and an
-//    unchecked batch are both status 'pending'; the queue is the ordinary
-//    approval list filtered on `quality.checked`. That list is production-
-//    gated, which is the one seam in this design — see listBatchQualityQueue.
+// 2. THE QUEUE IS THE SERVER'S. There is no new status — a checked and an
+//    unchecked batch are both 'pending' — but /quality/batch-quality-queue
+//    asks the database the queue's three questions (pending · completed ·
+//    unchecked · not sent back) and cuts the page after them. Reading it
+//    needs quality.view AND production.view, exactly what the screen needed
+//    when it built the queue from the production list itself; that seam is
+//    preserved, not widened, until the owner says otherwise.
 // ---------------------------------------------------------------------------
 
 /** POST the check for one entry. Returns the updated batch, net figure and all. */
 export const qualityCheckPath = (entryId: number): string =>
     `/production/shift-production-entries/${entryId}/quality-check`;
-
-/** The list the queue is derived from. Requires production.view. */
-const PENDING_ENTRIES_PATH = '/production/shift-production-entries';
 
 /**
  * Counts are whole BOTTLES, and the server means it: the request validates
@@ -217,80 +234,41 @@ export interface CreateBatchQualityCheckPayload {
 /** The queue row IS a shift production entry — same resource, filtered. */
 export type BatchQualityQueueRow = ShiftProductionEntry;
 
-export interface BatchQualityQueue {
-    /** Unchecked, gate-on batches — what the desk actually works. */
-    rows: BatchQualityQueueRow[];
+/** What the queue's `meta` carries beside the page, because no row can. */
+export interface BatchQualityQueueMeta {
     /**
-     * Does the gate apply at all? False when pending batches exist but none
-     * carries `stage_enabled` — i.e. the factory has stood the stage down.
-     * Null when there were no pending batches to tell either way.
+     * Is the gate switched on at all (PROD_QUALITY_STAGE_ENABLED)? While it
+     * is off the queue is EMPTY by contract — the check endpoint refuses,
+     * so a queue offering that work would be a queue of refusals.
      */
-    stageEnabled: boolean | null;
-    /** Pending batches examined, gate or no gate. Distinguishes "none at all". */
-    pendingCount: number;
+    stage_enabled: boolean;
+    /** Only while the stage is off: how many completed batches are going straight to the Plant Manager. */
+    pending_count: number | null;
 }
 
+export type BatchQualityQueue = Omit<Paginated<BatchQualityQueueRow>, 'meta'> & {
+    meta: Paginated<BatchQualityQueueRow>['meta'] & BatchQualityQueueMeta;
+};
+
+export const BATCH_QUALITY_QUEUE_PATH = '/quality/batch-quality-queue';
+
 /**
- * Completed batches still awaiting their quality check.
+ * Completed batches still awaiting their quality check — ONE PAGE, oldest
+ * first, as the server orders it.
  *
- * WHY THIS PAGES RATHER THAN TAKING THE FIRST RESPONSE. The list is paginated
- * at a fixed 20 and ordered NEWEST first server-side, while this queue is
- * worked OLDEST first — so reading only page 1 would show the twenty most
- * recent batches and hide exactly the ones that have been waiting longest.
- * The page walks to the end and sorts afterwards. `meta.last_page` bounds the
- * loop, with a hard cap as a second bound so a malformed meta cannot spin.
- *
- * Unchecked-only is decided HERE rather than by a query param because the
- * backend has no such filter: `quality.checked` is the only thing separating a
- * queued batch from a done one, both being status 'pending'.
- *
- * THE `stage_enabled` HALF OF THE FILTER IS LOAD-BEARING, not tidiness. With
- * the stage stood down (PROD_QUALITY_STAGE_ENABLED=false) every pending batch
- * still reports `checked: false`, so filtering on that alone would fill this
- * queue with batches nobody is meant to check — every one of which would be
- * refused on submit, since recordQualityCheck() turns away a check outright
- * while the stage is off. With the stage off the queue must be empty, which is
- * what "the chain is exactly what it was before this stage existed" means. The
- * server guard is the real one; this filter is what stops the screen offering
- * work that cannot be done.
+ * This used to walk every page of the production list's `status=pending`,
+ * keep the rows whose `quality` block said unchecked-and-gated and whose
+ * `correction` block said not-sent-back, and re-sort them oldest first —
+ * two hundred waiting batches was two hundred rows in memory, no pager and
+ * no search. The three questions are now the server's
+ * (ShiftProductionEntryService::whereAwaitingQualityCheck), asked in SQL
+ * before the page is cut, so a page is a slice of the queue and the total
+ * is the queue's. `q` narrows on the batch number, the product and the
+ * machine. Nothing is filtered or sorted here.
  */
-export async function listBatchQualityQueue(): Promise<BatchQualityQueue> {
-    const all: BatchQualityQueueRow[] = [];
-    let page = 1;
-    let lastPage = 1;
-
-    do {
-        const { data } = await api.get<Paginated<BatchQualityQueueRow>>(PENDING_ENTRIES_PATH, {
-            params: { status: 'pending', page },
-        });
-        all.push(...(data?.data ?? []));
-        lastPage = data?.meta?.last_page ?? 1;
-        page += 1;
-    } while (page <= lastPage && page <= 50);
-
-    const gated = all.filter((row) => row.quality?.stage_enabled === true);
-
-    return {
-        // `=== false`, not merely falsy: a backend without the gate sends no
-        // `quality` block, and those batches are not "awaiting quality" — they
-        // are batches from a world where this queue does not exist.
-        //
-        // AND NOT ONE THIS DESK ALREADY SENT BACK. returnToProduction() clears
-        // every quality_* column, on purpose — the batch has to be checked
-        // fresh once the floor has corrected it. That leaves it reading
-        // `checked: false`, indistinguishable here from a batch waiting for
-        // its first check, so without this second test a returned batch would
-        // sit in the queue asking to be checked again while production is
-        // still fixing it. `awaiting_correction` is the server's own answer to
-        // exactly that question (a return exists, no check since, still
-        // pending and completed) and it drops out of the queue the moment the
-        // floor amends it back.
-        rows: gated.filter(
-            (row) => row.quality?.checked === false && row.correction?.awaiting_correction !== true,
-        ),
-        stageEnabled: all.length === 0 ? null : gated.length > 0,
-        pendingCount: all.length,
-    };
+export async function listBatchQualityQueue(params: ListParams = {}): Promise<BatchQualityQueue> {
+    const { data } = await api.get<BatchQualityQueue>(BATCH_QUALITY_QUEUE_PATH, { params: compactParams(params) });
+    return data;
 }
 
 export async function createBatchQualityCheck(

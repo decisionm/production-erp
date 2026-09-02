@@ -117,6 +117,8 @@ export interface ClientOutstanding {
     party_ledger_name: string;
     party_ledger_guid: string | null;
     is_linked: boolean;
+    /** Tally supplied a party closing balance but no invoice/date detail. */
+    balance_only: boolean;
     outstanding_amount: string;
     overdue_amount: string;
     pending_order_amount: string;

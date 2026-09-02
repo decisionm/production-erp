@@ -94,6 +94,7 @@ use App\Modules\Production\Http\Controllers\VoucherPreviewController;
 use App\Modules\Production\Http\Controllers\WorkCenterController;
 use App\Modules\Production\Http\Controllers\WorkOrderController;
 use App\Modules\Quality\Http\Controllers\BatchQualityCheckController;
+use App\Modules\Quality\Http\Controllers\BatchQualityQueueController;
 use App\Modules\Quality\Http\Controllers\BatchReturnToProductionController;
 use App\Modules\Quality\Http\Controllers\CalibrationRecordController;
 use App\Modules\Quality\Http\Controllers\CapaController;
@@ -766,6 +767,23 @@ Route::prefix('v1')->group(function () {
 
         Route::prefix('quality')->middleware('module:quality')->group(function () {
             Route::apiResource('incoming-inspections', IncomingInspectionController::class)->only(['index', 'store']);
+
+            /*
+             * THE PRODUCTION QC QUEUE — the completed batches waiting for
+             * their check, oldest first, paged and searched on the server
+             * (BatchQualityQueueController). The screen used to build it by
+             * walking every page of the production list.
+             *
+             * `module:production` ON TOP of this group's `module:quality`,
+             * and that is the point: middleware accumulate, so both are
+             * required — exactly what reading the queue has always needed
+             * (quality.view for the screen, production.view for the list it
+             * was built from). Whether the quality desk should read this
+             * queue on quality.view ALONE is a permission question for the
+             * owner, not a side effect of moving the filter to the server;
+             * relaxing it is deleting this one middleware call.
+             */
+            Route::get('batch-quality-queue', BatchQualityQueueController::class)->middleware('module:production');
 
             /*
              * MATERIAL THAT CAME BACK FROM PRODUCTION DAMAGED

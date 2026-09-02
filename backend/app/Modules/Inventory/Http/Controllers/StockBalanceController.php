@@ -3,10 +3,10 @@
 namespace App\Modules\Inventory\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Inventory\Http\Requests\ListStockBalancesRequest;
 use App\Modules\Inventory\Http\Resources\StockBalanceResource;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Inventory\Services\StockStateReader;
-use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class StockBalanceController extends Controller
@@ -25,22 +25,21 @@ class StockBalanceController extends Controller
      * `item_id` is what an item's own detail page reads. It used to fetch this
      * list unfiltered and pick its rows out of the first twenty client-side,
      * so past twenty balances an item's own page stopped showing its stock.
+     *
+     * The query string is ListStockBalancesRequest's: `q` (and its older
+     * spelling `search`) is the needle, beside the warehouse filter and the
+     * sort. `item_id` and `per_page` keep the base-controller readers every
+     * inventory list shares, so their tolerances are unchanged.
      */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(ListStockBalancesRequest $request): AnonymousResourceCollection
     {
-        $validated = $request->validate([
-            'warehouse_id' => ['nullable', 'integer', 'exists:warehouses,id'],
-            'sort' => ['nullable', 'in:item,warehouse,quantity'],
-            'direction' => ['nullable', 'in:asc,desc'],
-        ]);
-
         $balances = $this->stock->paginateBalances(
             perPage: $this->perPage($request),
-            search: $this->searchTerm($request),
+            search: $request->needle(),
             itemId: $this->filterId($request, 'item_id'),
-            warehouseId: isset($validated['warehouse_id']) ? (int) $validated['warehouse_id'] : null,
-            sort: $validated['sort'] ?? 'item',
-            direction: $validated['direction'] ?? 'asc',
+            warehouseId: $request->warehouseId(),
+            sort: $request->sort(),
+            direction: $request->direction(),
         );
 
         // The four figures, for THIS PAGE only and in two queries — not one

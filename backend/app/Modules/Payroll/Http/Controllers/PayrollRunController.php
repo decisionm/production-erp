@@ -3,6 +3,7 @@
 namespace App\Modules\Payroll\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Payroll\Http\Requests\ListPayrollRunsRequest;
 use App\Modules\Payroll\Http\Requests\StorePayrollRunRequest;
 use App\Modules\Payroll\Http\Resources\PayrollRunResource;
 use App\Modules\Payroll\Models\PayrollRun;
@@ -14,9 +15,10 @@ class PayrollRunController extends Controller
 {
     public function __construct(private readonly PayrollRunService $runs) {}
 
-    public function index(): AnonymousResourceCollection
+    /** The list, filtered by ListPayrollRunsRequest; an empty query string is the same list as before. */
+    public function index(ListPayrollRunsRequest $request): AnonymousResourceCollection
     {
-        return PayrollRunResource::collection($this->runs->paginate());
+        return PayrollRunResource::collection($this->runs->paginate($request->validated()));
     }
 
     public function store(StorePayrollRunRequest $request): PayrollRunResource

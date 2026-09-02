@@ -10,6 +10,49 @@ body,
     overflow-x: clip;
 }
 
+.app-header-leading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.skip-to-content {
+    position: fixed;
+    inset-block-start: 8px;
+    inset-inline-start: 8px;
+    z-index: 1000;
+    transform: translateY(-160%);
+    padding: 8px 12px;
+    border-radius: 6px;
+    background: #1677ff;
+    color: #fff;
+    font-weight: 600;
+}
+
+.skip-to-content:focus {
+    transform: translateY(0);
+    color: #fff;
+}
+
+.app-breadcrumb {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.account-menu-button {
+    flex: 0 0 auto;
+    height: auto;
+    max-width: 260px;
+    padding: 4px 8px;
+}
+
+.account-user-name {
+    max-width: 190px;
+}
+
 @media (max-width: 768px) {
     .login-brand-panel {
         display: none !important;
@@ -17,6 +60,21 @@ body,
 
     .app-content {
         padding: 12px !important;
+    }
+
+    .app-header {
+        position: sticky;
+    }
+
+    .app-mobile-logo {
+        position: absolute;
+        left: 50%;
+        transform: translateX(-50%);
+        max-width: 132px;
+    }
+
+    .account-user-name {
+        display: none;
     }
 }
 

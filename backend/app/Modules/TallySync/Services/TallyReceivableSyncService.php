@@ -12,7 +12,9 @@ use Illuminate\Support\Facades\DB;
  *
  * The inbound half of the CRM's client-outstanding page. The agent exports
  * Bills Receivable and Sales Order Outstanding for the bound company and posts
- * the rows here. This service writes them and nothing else: it posts no
+ * the rows here. `bills` remains the stable wire/table name, but the measured
+ * all-parties report can supply a party balance without invoice detail. This
+ * service writes either shape and nothing else: it posts no
  * voucher, touches no stock, changes no master, and creates no customer.
  *
  * A PULL REPLACES THE COMPANY'S SET. Both reports are closing positions as at a

@@ -375,11 +375,22 @@ class StockMovementService
             ->with(['item' => fn ($item) => $item->withTrashed(), 'warehouse'])
             ->when($itemId !== null, fn ($query) => $query->where('item_id', $itemId))
             ->when($warehouseId !== null, fn ($query) => $query->where('warehouse_id', $warehouseId))
+            // THE NEEDLE (`q`, or its older spelling `search` — one matcher
+            // for both). Substring over the item's three names — `sku`,
+            // `display_name` (the ERP-facing label itemLabel() shows) and
+            // `name` (the Tally wire key) — and over the warehouse's code and
+            // name, the same LIKE-per-column FactoryLookupService uses.
+            // `display_name` joined 02-Sep-2026: the row is labelled with it,
+            // so a search that could not find what the row says was a search
+            // that lied to the reader.
             ->when($search !== null, fn ($query) => $query->where(function ($outer) use ($search) {
                 $like = "%{$search}%";
                 $outer
                     ->whereHas('item', fn ($item) => $item->withTrashed()
-                        ->where(fn ($q) => $q->where('sku', 'like', $like)->orWhere('name', 'like', $like)))
+                        ->where(fn ($q) => $q
+                            ->where('sku', 'like', $like)
+                            ->orWhere('display_name', 'like', $like)
+                            ->orWhere('name', 'like', $like)))
                     ->orWhereHas('warehouse', fn ($warehouse) => $warehouse
                         ->where(fn ($q) => $q->where('code', 'like', $like)->orWhere('name', 'like', $like)));
             }))
@@ -590,8 +601,13 @@ class StockMovementService
     /**
      * @param  list<string>|null  $purposes
      */
-    public function paginateMovements(?int $itemId = null, ?int $warehouseId = null, ?array $purposes = null, int $perPage = 20): LengthAwarePaginator
-    {
+    public function paginateMovements(
+        ?int $itemId = null,
+        ?int $warehouseId = null,
+        ?array $purposes = null,
+        int $perPage = 20,
+        ?string $reference = null,
+    ): LengthAwarePaginator {
         return StockMovement::query()
             // createdBy: two columns, eager-loaded, so a page of the ledger
             // can say who recorded each row without becoming one query per
@@ -607,6 +623,10 @@ class StockMovementService
             // whereIn over the enum's string values — stock_movements_purpose_index
             // was created for this read.
             ->when($purposes, fn ($query) => $query->whereIn('purpose', $purposes))
+            // The reference needle (ListStockMovementsRequest `q`): a
+            // substring of the one free-text column a person arrives with —
+            // a GRN's "PO #4", a material request's "MR-12".
+            ->when($reference !== null, fn ($query) => $query->where('reference', 'like', "%{$reference}%"))
             ->orderByDesc('movement_date')
             ->orderByDesc('id')
             ->paginate($perPage);

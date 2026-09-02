@@ -1,6 +1,5 @@
 import { CameraOutlined, ScanOutlined } from '@ant-design/icons';
-import { BrowserMultiFormatReader } from '@zxing/browser';
-import { Input, type InputRef, Modal, Typography, message } from 'antd';
+import { Button, Input, type InputRef, Modal, Typography, message } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 
 interface BarcodeScanInputProps {
@@ -39,27 +38,38 @@ export default function BarcodeScanInput({ onScan, placeholder, autoFocus = true
     useEffect(() => {
         if (!cameraOpen) return undefined;
 
-        const reader = new BrowserMultiFormatReader();
         let cancelled = false;
         let controls: { stop: () => void } | null = null;
 
-        reader
-            .decodeFromVideoDevice(undefined, videoRef.current ?? undefined, (result) => {
-                if (cancelled || !result) return;
-                submit(result.getText());
-                setCameraOpen(false);
-            })
-            .then((c) => {
-                if (cancelled) {
-                    c.stop();
-                    return;
-                }
-                controls = c;
-            })
-            .catch(() => {
+        // The decoder is roughly half a megabyte and the normal factory path
+        // is a USB/Bluetooth scanner acting as a keyboard. Fetch the camera
+        // library only when somebody explicitly opens the camera fallback.
+        void (async () => {
+            const { BrowserMultiFormatReader } = await import('@zxing/browser');
+            if (cancelled) return;
+
+            const nextControls = await new BrowserMultiFormatReader().decodeFromVideoDevice(
+                undefined,
+                videoRef.current ?? undefined,
+                (result) => {
+                    if (cancelled || !result) return;
+                    submit(result.getText());
+                    setCameraOpen(false);
+                },
+            );
+
+            if (cancelled) {
+                nextControls.stop();
+                return;
+            }
+
+            controls = nextControls;
+        })().catch(() => {
+            if (!cancelled) {
                 message.error('Could not access the camera — check browser permissions.');
                 setCameraOpen(false);
-            });
+            }
+        });
 
         return () => {
             cancelled = true;
@@ -76,10 +86,15 @@ export default function BarcodeScanInput({ onScan, placeholder, autoFocus = true
                 onChange={(e) => setValue(e.target.value)}
                 onPressEnter={() => submit(value)}
                 placeholder={placeholder ?? 'Scan or type a barcode…'}
+                aria-label={placeholder ?? 'Scan or type a barcode'}
                 prefix={<ScanOutlined style={{ color: '#999' }} />}
                 suffix={
-                    <CameraOutlined
-                        style={{ color: '#1677ff', cursor: 'pointer' }}
+                    <Button
+                        type="text"
+                        size="small"
+                        icon={<CameraOutlined />}
+                        aria-label="Scan with camera"
+                        title="Scan with camera"
                         onClick={() => setCameraOpen(true)}
                     />
                 }

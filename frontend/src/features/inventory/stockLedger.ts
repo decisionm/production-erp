@@ -7,40 +7,80 @@
  * what a person reads, and it says which filters the ledger endpoint actually
  * honours.
  */
+import type { ListParams, ListParamsSpec } from '@/lib/listParams';
 
 /**
  * WHAT `GET /inventory/stock-movements` ACTUALLY FILTERS ON.
  *
- * `StockMovementController::index` reads exactly three things — item_id,
- * warehouse_id and the page size — and `StockMovementService::paginateMovements`
- * applies exactly the first two. There is no type, purpose, date-range or
- * free-text filter on that endpoint, and the list is SERVER-PAGED, so a
- * control for one of those would filter the twenty rows that happen to be on
- * screen and quietly hide every matching row on every other page.
+ * `StockMovementController::index` reads item_id, warehouse_id, purpose, the
+ * reference needle `q` (ListStockMovementsRequest) and the page size, and
+ * `StockMovementService::paginateMovements` applies exactly those. There is
+ * no type or date-range filter on that endpoint, and the list is
+ * SERVER-PAGED, so a control for one of those would filter the twenty rows
+ * that happen to be on screen and quietly hide every matching row on every
+ * other page.
  *
- * That is why the page offers two filters and not six. When the endpoint grows
- * the missing ones, widen this type and the params builder below together —
- * the builder is the only thing that decides what leaves the browser.
+ * That is why the page offers three controls and not six. When the endpoint
+ * grows the missing ones, widen this type and the params builder below
+ * together — the builder is the only thing that decides what leaves the
+ * browser.
  */
 export interface StockLedgerFilters {
     itemId?: number | null;
     warehouseId?: number | null;
+    /** A substring of the movement's reference — "PO-4", "MR-12". */
+    q?: string | null;
     page?: number;
+    perPage?: number;
 }
+
+/** Exactly what listStockMovements is asked for — and the query key. */
+export interface StockLedgerRequest {
+    item_id?: number;
+    warehouse_id?: number;
+    q?: string;
+    page?: number;
+    per_page?: number;
+}
+
+/** The Stock Movements page's URL keys beyond q / page / per_page. */
+export const STOCK_LEDGER_SPEC: ListParamsSpec = { numbers: ['item_id', 'warehouse_id'] };
+
+export type StockLedgerListParams = ListParams & {
+    item_id?: number;
+    warehouse_id?: number;
+};
 
 /**
  * The query the ledger asks for. Empty selections are DROPPED rather than sent
  * as null/'' — `?item_id=` reaches Laravel as the string "", which `(int)`
  * turns into 0, and a falsy id is ignored by `when()` today but is not
- * something to depend on from here.
+ * something to depend on from here. The needle is trimmed, and an empty one
+ * is not sent.
  */
-export function stockLedgerParams(filters: StockLedgerFilters): Record<string, number> {
-    const params: Record<string, number> = {};
+export function stockLedgerParams(filters: StockLedgerFilters): StockLedgerRequest {
+    const params: StockLedgerRequest = {};
     if (typeof filters.itemId === 'number') params.item_id = filters.itemId;
     if (typeof filters.warehouseId === 'number') params.warehouse_id = filters.warehouseId;
+    const q = (filters.q ?? '').trim();
+    if (q !== '') params.q = q;
     if (typeof filters.page === 'number' && filters.page > 1) params.page = filters.page;
+    if (typeof filters.perPage === 'number' && filters.perPage > 0) params.per_page = filters.perPage;
 
     return params;
+}
+
+/**
+ * What an empty NARROWED ledger says. The term is repeated so the reader sees
+ * what was looked for rather than concluding nothing ever moved.
+ */
+export function ledgerNoMatchLine(q: string | undefined, narrowedByPickers: boolean): string {
+    const term = (q ?? '').trim();
+
+    if (term !== '' && narrowedByPickers) return `No movements match “${term}” for this item and warehouse.`;
+    if (term !== '') return `No movements match “${term}”.`;
+
+    return 'No movements match these filters.';
 }
 
 /** Which way the quantity went — `StockMovementType`. */

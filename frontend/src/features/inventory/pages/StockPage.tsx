@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { z } from 'zod';
@@ -19,12 +19,25 @@ import {
     recordReceipt,
     recordTransfer,
 } from '@/features/inventory/api';
+import {
+    STOCK_LIST_SPEC,
+    type StockListParams,
+    stockListNarrowed,
+    stockListRequest,
+    stockNoMatchLine,
+    stockRange,
+    stockSortFromTable,
+    stockSortOrder,
+} from '@/features/inventory/stockList';
 import { resolveStockScan, serverScanLookups } from '@/features/inventory/stockScan';
 import { identityRefusal } from '@/features/inventory/trackingIdentity';
 import type { SerialNumberStatus, StockBalance } from '@/features/inventory/types';
 import { formatDateTime } from '@/lib/datetime';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { itemLabel } from '@/lib/itemLabel';
+import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
+import { TABLE_STICKY, rangeLine, serverPagination } from '@/lib/tableProps';
+import { useListParams } from '@/lib/useListParams';
 
 const movementTypeColor: Record<string, string> = {
     receipt: 'green',
@@ -79,21 +92,42 @@ export default function StockPage() {
     const user = useAuthStore((s) => s.user);
     const financeAccess = hasModuleAccess(user, 'finance');
 
-    // Server-side paging. This list is one row per item×warehouse and the
-    // factory's is far past a screenful, so the page number is part of the
-    // query key and the pager below reads the server's own count.
-    const [page, setPage] = useState(1);
-    const [perPage, setPerPage] = useState(50);
-    /** Ordered by the SERVER — see listStockBalances. */
-    const [sort, setSort] = useState<'item' | 'warehouse' | 'quantity'>('item');
-    const [direction, setDirection] = useState<'asc' | 'desc'>('asc');
+    // THE URL IS THE LIST'S STATE — search, warehouse, sort, page and page
+    // size (useListParams), so a refresh, Back or a pasted link lands on the
+    // same view. The SERVER does the narrowing and the ordering: this list is
+    // one row per item×warehouse and the factory's is far past a screenful,
+    // so the pager below reads the server's own count.
+    const { params, setParams, setPage } = useListParams<StockListParams>(STOCK_LIST_SPEC);
+    const request = stockListRequest(params);
+    const narrowed = stockListNarrowed(params);
 
-    const { data: balances, isLoading } = useQuery({
-        // The sort is part of the KEY, so changing it fetches a newly ordered
-        // page rather than reordering the one already here.
-        queryKey: ['inventory', 'stock-balances', page, perPage, sort, direction],
-        queryFn: () => listStockBalances({ page, per_page: perPage, sort, direction }),
+    const {
+        data: balances,
+        isLoading,
+        isPending,
+        isError,
+        error,
+        refetch,
+    } = useQuery({
+        // The whole request is the KEY, so a new sort or needle fetches a
+        // newly ordered page rather than reordering the one already here.
+        queryKey: ['inventory', 'stock-balances', 'list', request],
+        queryFn: () => listStockBalances(request),
+        // Stale rows stay on screen while the next page loads; ListReadAlert
+        // below names a failed refetch, since emptyText then cannot.
+        placeholderData: (previous) => previous,
     });
+
+    // The search box's text as typed; it becomes `q` on Enter / the search
+    // button, so a half-typed SKU does not fire a request per keystroke.
+    // Re-seeded when the URL's q changes under it (Back, a pasted link).
+    const [qDraft, setQDraft] = useState(params.q ?? '');
+    useEffect(() => {
+        setQDraft(params.q ?? '');
+    }, [params.q]);
+
+    /** Search and warehouse off; sort and page size stay. */
+    const clearNarrowing = () => setParams({ q: undefined, warehouse_id: undefined });
     const { data: history, isLoading: historyLoading } = useQuery({
         queryKey: ['inventory', 'stock-movements', historyRow?.item.id, historyRow?.warehouse.id],
         queryFn: () =>
@@ -116,6 +150,16 @@ export default function StockPage() {
         isActive: (w) => w.is_active,
         option: (w) => ({ value: w.id, label: `${w.code} — ${w.name}` }),
     });
+
+    // THE FILTER offers every warehouse, retired included — a balance against
+    // a since-retired store must stay findable (the Purchase Orders bar's
+    // rule). Only the three WRITE modals are limited to active ones.
+    const warehouseFilterOptions =
+        warehouses?.data.map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` })) ?? [];
+    const warehouseFilterLabel =
+        params.warehouse_id === undefined
+            ? undefined
+            : (warehouses?.data.find((w) => w.id === params.warehouse_id)?.code ?? `warehouse #${params.warehouse_id}`);
 
     /**
      * DO THESE ROWS CARRY RATES AT ALL — the server's answer, honoured locally
@@ -310,43 +354,90 @@ export default function StockPage() {
                 </Space>
             </Space>
 
+            <Space wrap style={{ marginBottom: 12 }}>
+                <Input.Search
+                    allowClear
+                    placeholder="SKU, name or Tally name"
+                    style={{ width: 280 }}
+                    value={qDraft}
+                    onChange={(event) => setQDraft(event.target.value)}
+                    onSearch={(value) => setParams({ q: value.trim() || undefined })}
+                />
+                <Select<number>
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                    placeholder="Any warehouse"
+                    style={{ minWidth: 220 }}
+                    options={warehouseFilterOptions}
+                    value={params.warehouse_id}
+                    onChange={(value) => setParams({ warehouse_id: value ?? undefined })}
+                />
+            </Space>
+
+            {balances?.meta && (
+                <Space size={4} style={{ marginBottom: 12 }}>
+                    <Typography.Text type="secondary">
+                        {rangeLine(balances.meta.total, stockRange(balances.meta), narrowed ? 'matching balances' : 'balances')}
+                    </Typography.Text>
+                    {narrowed && (
+                        <Button type="link" size="small" onClick={clearNarrowing}>
+                            Clear
+                        </Button>
+                    )}
+                </Space>
+            )}
+
+            {/* placeholderData keeps stale rows on a failed refetch, so
+                emptyText never shows the failure — this line does. */}
+            <ListReadAlert state={{ isPending, isError, error, refetch }} entity="stock balances" />
+
             <Table<StockBalance>
-                sticky
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 /*
-                 * The sort is TRANSLATED INTO THE QUERY, never applied to the
-                 * rows in hand. Clearing it (antd's third click) returns to
-                 * item-name order rather than leaving the list in whatever
-                 * order the last request happened to produce, and any change
-                 * goes back to page 1 — page 4 of one ordering is not page 4
-                 * of another.
+                 * The sort is TRANSLATED INTO THE URL (one `sort` key —
+                 * stockSortFromTable), never applied to the rows in hand.
+                 * Clearing it (antd's third click) returns to item-name order
+                 * rather than leaving the list in whatever order the last
+                 * request happened to produce, and setParams goes back to
+                 * page 1 — page 4 of one ordering is not page 4 of another.
+                 * A page turn also arrives here (action 'paginate'); that is
+                 * the pager's to handle, not a sort change.
                  */
-                onChange={(_pagination, _filters, sorter) => {
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
                     const active = Array.isArray(sorter) ? sorter[0] : sorter;
-                    const column = String(active?.column?.title ?? '').toLowerCase();
-                    const next = column === 'quantity' || column === 'warehouse' ? column : 'item';
+                    const next = stockSortFromTable(active?.columnKey, active?.order);
 
-                    setSort(active?.order ? (next as typeof sort) : 'item');
-                    setDirection(active?.order === 'descend' ? 'desc' : 'asc');
-                    setPage(1);
+                    if (next !== params.sort) setParams({ sort: next });
                 }}
-                dataSource={balances?.data}
-                pagination={{
-                    current: page,
-                    pageSize: perPage,
-                    // The server's count, not the page's length — otherwise
-                    // the pager would claim the list ends at the first screen.
-                    total: balances?.meta?.total ?? balances?.data?.length ?? 0,
-                    showSizeChanger: true,
-                    pageSizeOptions: [20, 50, 100, 200],
-                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} balances`,
-                    onChange: (nextPage, nextSize) => {
-                        setPage(nextPage);
-                        setPerPage(nextSize);
-                    },
+                dataSource={balances?.data ?? []}
+                locale={{
+                    emptyText: (
+                        <ListEmpty
+                            state={{ isPending, isError, error, refetch }}
+                            entity="stock balances"
+                            empty={
+                                narrowed ? (
+                                    <Space direction="vertical" size={8} style={{ padding: '16px 0' }}>
+                                        <Typography.Text>{stockNoMatchLine(params.q, warehouseFilterLabel)}</Typography.Text>
+                                        <Button size="small" onClick={clearNarrowing}>
+                                            Clear
+                                        </Button>
+                                    </Space>
+                                ) : (
+                                    'No stock balances yet.'
+                                )
+                            }
+                        />
+                    ),
                 }}
+                // The server's own meta drives the pager — its count, never
+                // the page's length. Page and size go to the URL (setPage).
+                pagination={serverPagination(balances?.meta, setPage, 'balances')}
                 columns={[
                     {
                         /*
@@ -364,16 +455,18 @@ export default function StockPage() {
                          * the question it appears to answer.
                          */
                         title: 'Item',
+                        key: 'item',
                         fixed: 'left' as const,
                         width: 260,
                         sorter: true,
-                        sortOrder: sort === 'item' ? (direction === 'asc' ? 'ascend' : 'descend') : null,
+                        sortOrder: stockSortOrder('item', params.sort),
                         render: (_, row) => itemLabel(row.item),
                     },
                     {
                         title: 'Warehouse',
+                        key: 'warehouse',
                         sorter: true,
-                        sortOrder: sort === 'warehouse' ? (direction === 'asc' ? 'ascend' : 'descend') : null,
+                        sortOrder: stockSortOrder('warehouse', params.sort),
                         render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}`,
                     },
                     {
@@ -386,10 +479,11 @@ export default function StockPage() {
                     },
                     {
                         title: 'On hand',
+                        key: 'quantity',
                         dataIndex: 'quantity',
                         align: 'right' as const,
                         sorter: true,
-                        sortOrder: sort === 'quantity' ? (direction === 'asc' ? 'ascend' : 'descend') : null,
+                        sortOrder: stockSortOrder('quantity', params.sort),
                         // A negative balance is not stock. It reads as an
                         // ordinary number otherwise, and there are live rows
                         // like this — say so on the row rather than in a report.

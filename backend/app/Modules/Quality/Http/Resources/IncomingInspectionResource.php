@@ -13,6 +13,17 @@ class IncomingInspectionResource extends JsonResource
         return [
             'id' => $this->id,
             'goods_receipt_note_line_id' => $this->goods_receipt_note_line_id,
+            // The arrival this inspected, named the way the receipts register
+            // names it — so the row can show what `q` matched on.
+            'goods_receipt_note' => $this->whenLoaded('goodsReceiptNoteLine', function () {
+                $grn = $this->goodsReceiptNoteLine?->goodsReceiptNote;
+
+                return $grn === null ? null : [
+                    'id' => $grn->id,
+                    'document_number' => $grn->documentNumber(),
+                    'tracking_number' => $grn->tracking_number,
+                ];
+            }),
             'item' => ItemResource::make($this->whenLoaded('item')),
             'inspected_quantity' => $this->inspected_quantity,
             'accepted_quantity' => $this->accepted_quantity,

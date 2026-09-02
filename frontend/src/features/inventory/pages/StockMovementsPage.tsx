@@ -1,17 +1,25 @@
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Select, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { Button, Input, Select, Space, Table, Tag, Typography } from 'antd';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listAllItems, listAllWarehouses, listStockMovements } from '@/features/inventory/api';
 import {
+    STOCK_LEDGER_SPEC,
+    type StockLedgerListParams,
+    ledgerNoMatchLine,
     movementPurposeLabel,
     movementTypeTone,
     purchaseOrderIdIn,
     stockLedgerParams,
 } from '@/features/inventory/stockLedger';
+import { stockRange } from '@/features/inventory/stockList';
 import type { StockMovement } from '@/features/inventory/types';
 import { formatDateTime } from '@/lib/datetime';
 import { itemLabel } from '@/lib/itemLabel';
+import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
+import { narrowingKeys } from '@/lib/listParams';
+import { TABLE_STICKY, rangeLine, serverPagination } from '@/lib/tableProps';
+import { useListParams } from '@/lib/useListParams';
 
 /**
  * THE STOCK LEDGER, first-class.
@@ -26,11 +34,14 @@ import { itemLabel } from '@/lib/itemLabel';
  * IT WRITES NOTHING. Receiving, issuing and transferring stay on the Stock
  * page, where the balance being changed is on screen beside the form.
  *
- * TWO FILTERS, NOT SIX. The endpoint filters on item and warehouse and nothing
- * else, and this table is SERVER-PAGED: a type, purpose or date control here
- * would filter the twenty rows on screen and hide every match on the other
- * pages, which is worse than not offering it. stockLedger.ts holds that rule
- * and the test that pins it.
+ * THREE CONTROLS, NOT SIX. The endpoint filters on item, warehouse, purpose
+ * and a reference needle (`q`) and nothing else, and this table is
+ * SERVER-PAGED: a type or date control here would filter the twenty rows on
+ * screen and hide every match on the other pages, which is worse than not
+ * offering it. stockLedger.ts holds that rule and the test that pins it.
+ *
+ * THE URL IS THE LIST'S STATE (useListParams): item, warehouse, needle, page
+ * and page size, so a refresh, Back or a pasted link lands on the same view.
  *
  * NO COST COLUMN. `StockMovementResource` omits unit_cost for anyone without
  * finance access (FC-06) and the two screens that do show it are per-item, with
@@ -43,9 +54,26 @@ import { itemLabel } from '@/lib/itemLabel';
  * is worse than its absence.
  */
 export default function StockMovementsPage() {
-    const [itemId, setItemId] = useState<number | null>(null);
-    const [warehouseId, setWarehouseId] = useState<number | null>(null);
-    const [page, setPage] = useState(1);
+    const { params, setParams, setPage } = useListParams<StockLedgerListParams>(STOCK_LEDGER_SPEC);
+    const request = stockLedgerParams({
+        itemId: params.item_id,
+        warehouseId: params.warehouse_id,
+        q: params.q,
+        page: params.page,
+        perPage: params.per_page,
+    });
+    const narrowed = narrowingKeys(params).length > 0;
+    const narrowedByPickers = params.item_id !== undefined || params.warehouse_id !== undefined;
+
+    // The search box's text as typed; it becomes `q` on Enter / the search
+    // button, so a half-typed number does not fire a request per keystroke.
+    // Re-seeded when the URL's q changes under it (Back, a pasted link).
+    const [qDraft, setQDraft] = useState(params.q ?? '');
+    useEffect(() => {
+        setQDraft(params.q ?? '');
+    }, [params.q]);
+
+    const clearNarrowing = () => setParams({ q: undefined, item_id: undefined, warehouse_id: undefined });
 
     const { data: items } = useQuery({
         queryKey: ['inventory', 'items', 'all'],
@@ -56,9 +84,12 @@ export default function StockMovementsPage() {
         queryFn: listAllWarehouses,
     });
 
-    const { data, isLoading, isError } = useQuery({
-        queryKey: ['inventory', 'stock-movements', 'ledger', itemId, warehouseId, page],
-        queryFn: () => listStockMovements(stockLedgerParams({ itemId, warehouseId, page })),
+    const { data, isLoading, isPending, isError, error, refetch } = useQuery({
+        queryKey: ['inventory', 'stock-movements', 'ledger', request],
+        queryFn: () => listStockMovements(request),
+        // Stale rows stay on screen while the next page loads; ListReadAlert
+        // below names a failed refetch, since emptyText then cannot.
+        placeholderData: (previous) => previous,
     });
 
     // The pickers list what a person can still choose today. A movement
@@ -76,13 +107,10 @@ export default function StockMovementsPage() {
         <>
             <Typography.Title level={3}>Stock Movements</Typography.Title>
 
-            <Space wrap style={{ marginBottom: 16 }}>
-                <Select
-                    value={itemId ?? undefined}
-                    onChange={(value) => {
-                        setItemId(value ?? null);
-                        setPage(1);
-                    }}
+            <Space wrap style={{ marginBottom: 12 }}>
+                <Select<number>
+                    value={params.item_id}
+                    onChange={(value) => setParams({ item_id: value ?? undefined })}
                     options={itemOptions}
                     placeholder="All items"
                     showSearch
@@ -90,12 +118,9 @@ export default function StockMovementsPage() {
                     allowClear
                     style={{ width: 'min(100%, 360px)' }}
                 />
-                <Select
-                    value={warehouseId ?? undefined}
-                    onChange={(value) => {
-                        setWarehouseId(value ?? null);
-                        setPage(1);
-                    }}
+                <Select<number>
+                    value={params.warehouse_id}
+                    onChange={(value) => setParams({ warehouse_id: value ?? undefined })}
                     options={warehouseOptions}
                     placeholder="All warehouses"
                     showSearch
@@ -103,36 +128,62 @@ export default function StockMovementsPage() {
                     allowClear
                     style={{ width: 'min(100%, 280px)' }}
                 />
+                <Input.Search
+                    allowClear
+                    placeholder="Reference"
+                    style={{ width: 240 }}
+                    value={qDraft}
+                    onChange={(event) => setQDraft(event.target.value)}
+                    onSearch={(value) => setParams({ q: value.trim() || undefined })}
+                />
             </Space>
+
+            {data?.meta && (
+                <Space size={4} style={{ marginBottom: 12 }}>
+                    <Typography.Text type="secondary">
+                        {rangeLine(data.meta.total, stockRange(data.meta), narrowed ? 'matching movements' : 'movements')}
+                    </Typography.Text>
+                    {narrowed && (
+                        <Button type="link" size="small" onClick={clearNarrowing}>
+                            Clear
+                        </Button>
+                    )}
+                </Space>
+            )}
 
             {/* A failed read and an empty ledger look identical in a table.
                 On a factory with a real history the second one is a lie, so
-                the failure is named. */}
-            {isError && (
-                <Alert
-                    type="error"
-                    showIcon
-                    message="Could not load the stock ledger"
-                    style={{ marginBottom: 16 }}
-                />
-            )}
+                the failure is named — above the stale rows placeholderData
+                keeps on screen, where emptyText cannot show it. */}
+            <ListReadAlert state={{ isPending, isError, error, refetch }} entity="stock movements" />
 
             <Table<StockMovement>
+                sticky={TABLE_STICKY}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data ?? []}
                 scroll={{ x: 'max-content' }}
-                pagination={
-                    data?.meta
-                        ? {
-                              current: data.meta.current_page,
-                              pageSize: data.meta.per_page,
-                              total: data.meta.total,
-                              showSizeChanger: false,
-                              onChange: setPage,
-                          }
-                        : false
-                }
+                locale={{
+                    emptyText: (
+                        <ListEmpty
+                            state={{ isPending, isError, error, refetch }}
+                            entity="stock movements"
+                            empty={
+                                narrowed ? (
+                                    <Space direction="vertical" size={8} style={{ padding: '16px 0' }}>
+                                        <Typography.Text>{ledgerNoMatchLine(params.q, narrowedByPickers)}</Typography.Text>
+                                        <Button size="small" onClick={clearNarrowing}>
+                                            Clear
+                                        </Button>
+                                    </Space>
+                                ) : (
+                                    'No stock movements yet.'
+                                )
+                            }
+                        />
+                    ),
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'movements')}
                 columns={[
                     {
                         title: 'Date',

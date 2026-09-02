@@ -318,9 +318,11 @@ export default function StoreFulfilmentPage() {
                             </span>
                         ),
                     },
-                    { title: 'Held', align: 'right', render: (_, row) => <span style={numeric}>{formatQuantity(row.reserved)}</span> },
+                    // The stock screen's own words (DEC-20260831-002): Reserved and
+                    // Free to issue, so a storekeeper reads one vocabulary on both.
+                    { title: 'Reserved', align: 'right', render: (_, row) => <span style={numeric}>{formatQuantity(row.reserved)}</span> },
                     { title: 'Short', align: 'right', render: (_, row) => <span style={numeric}>{formatQuantity(row.shortfall)}</span> },
-                    { title: 'Free', align: 'right', render: (_, row) => <span style={numeric}>{formatQuantity(row.free)}</span> },
+                    { title: 'Free to issue', align: 'right', render: (_, row) => <span style={numeric}>{formatQuantity(row.free)}</span> },
                     {
                         // S8: an over-promise is PRINTED, never hidden — the
                         // figure in red is the whole reason the row sorted to

@@ -113,6 +113,27 @@ class ClientOutstandingTest extends TestCase
         $this->assertNull($client['bills'][0]['days_past_due']);
     }
 
+    public function test_a_party_closing_balance_is_not_misreported_as_one_bill(): void
+    {
+        // This is the measured shape of the factory's all-parties Tally
+        // export: a client closing balance without a bill reference or dates.
+        $this->bill([
+            'bill_reference' => null,
+            'bill_date' => null,
+            'due_date' => null,
+            'closing_amount' => '7500.0000',
+            'opening_amount' => null,
+        ]);
+
+        $client = $this->clientNamed($this->report(), 'Northwind Traders');
+
+        $this->assertSame('7500.0000', $client['outstanding_amount']);
+        $this->assertTrue($client['balance_only']);
+        $this->assertSame(0, $client['bill_count']);
+        $this->assertSame([], $client['bills']);
+        $this->assertSame('7500.0000', $client['ageing']['no_due_date']);
+    }
+
     public function test_a_client_in_credit_keeps_its_negative_sign(): void
     {
         $this->bill(['bill_reference' => 'INV-1', 'closing_amount' => '1000.0000']);

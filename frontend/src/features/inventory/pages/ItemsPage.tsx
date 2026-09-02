@@ -52,6 +52,7 @@ import type {
     ItemRow,
     ItemTrackingType,
 } from '@/features/inventory/types';
+import { TABLE_STICKY } from '@/lib/tableProps';
 
 const trackingTypeOptions: { value: ItemTrackingType; label: string }[] = [
     { value: 'none', label: 'None' },
@@ -274,8 +275,9 @@ export default function ItemsPage() {
 
             <Table<ItemRow>
                 // STICKY HEADER: at 700 rows a person scrolling the middle of
-                // the catalogue was reading unlabelled columns.
-                sticky
+                // the catalogue was reading unlabelled columns. Offset below
+                // the app bar — a bare `sticky` froze it at top: 0, under it.
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={warning === null ? isLoading : flaggedFetching}

@@ -3,13 +3,13 @@
 namespace App\Modules\Inventory\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Inventory\Http\Requests\ListStockMovementsRequest;
 use App\Modules\Inventory\Http\Requests\StoreStockIssueRequest;
 use App\Modules\Inventory\Http\Requests\StoreStockReceiptRequest;
 use App\Modules\Inventory\Http\Requests\StoreStockTransferRequest;
 use App\Modules\Inventory\Http\Resources\StockMovementResource;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Services\StockMovementService;
-use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class StockMovementController extends Controller
@@ -23,8 +23,11 @@ class StockMovementController extends Controller
      * ITEM 1's movements and said nothing, and `(int) ['50']` is 1 too, so
      * `?per_page[]=50` served ONE ROW PER PAGE — the "list looks empty"
      * shape `perPage()` was written for.
+     *
+     * `q` — the reference needle — is ListStockMovementsRequest's; the three
+     * readers below keep their own refusal rules.
      */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(ListStockMovementsRequest $request): AnonymousResourceCollection
     {
         return StockMovementResource::collection($this->stock->paginateMovements(
             itemId: $this->filterId($request, 'item_id'),
@@ -39,6 +42,7 @@ class StockMovementController extends Controller
             // surface, not the SPA's implementation detail).
             purposes: $this->filterEnumList($request, 'purpose', StockMovementPurpose::class),
             perPage: $this->perPage($request),
+            reference: $request->reference(),
         ));
     }
 

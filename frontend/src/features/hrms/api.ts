@@ -1,9 +1,24 @@
 import { api } from '@/lib/api';
+import { compactParams } from '@/lib/listParams';
 import type { Paginated } from '@/lib/types';
-import type { Attendance, Employee, LeaveBalance, LeaveRequest, LeaveType } from './types';
+import type {
+    Attendance,
+    AttendanceListParams,
+    Employee,
+    EmployeeListParams,
+    LeaveBalance,
+    LeaveRequest,
+    LeaveRequestListParams,
+    LeaveType,
+} from './types';
 
-export async function listEmployees(): Promise<Paginated<Employee>> {
-    const { data } = await api.get<Paginated<Employee>>('/hrms/employees');
+/**
+ * ONE PAGE of the employee list, narrowed and paged by the SERVER. The
+ * params are the URL's (useListParams); compacted so `{ q: '' }` and `{}`
+ * are the same request and the same query key.
+ */
+export async function listEmployees(params: EmployeeListParams = {}): Promise<Paginated<Employee>> {
+    const { data } = await api.get<Paginated<Employee>>('/hrms/employees', { params: compactParams(params) });
     return data;
 }
 
@@ -87,8 +102,9 @@ export async function allocateLeaveBalance(payload: AllocateLeaveBalancePayload)
     return data.data;
 }
 
-export async function listLeaveRequests(): Promise<Paginated<LeaveRequest>> {
-    const { data } = await api.get<Paginated<LeaveRequest>>('/hrms/leave-requests');
+/** One page of leave requests, narrowed and paged by the server. */
+export async function listLeaveRequests(params: LeaveRequestListParams = {}): Promise<Paginated<LeaveRequest>> {
+    const { data } = await api.get<Paginated<LeaveRequest>>('/hrms/leave-requests', { params: compactParams(params) });
     return data;
 }
 
@@ -116,8 +132,9 @@ export async function rejectLeaveRequest(id: number): Promise<LeaveRequest> {
     return data.data;
 }
 
-export async function listAttendance(): Promise<Paginated<Attendance>> {
-    const { data } = await api.get<Paginated<Attendance>>('/hrms/attendance');
+/** One page of attendance marks, narrowed and paged by the server. */
+export async function listAttendance(params: AttendanceListParams = {}): Promise<Paginated<Attendance>> {
+    const { data } = await api.get<Paginated<Attendance>>('/hrms/attendance', { params: compactParams(params) });
     return data;
 }
 

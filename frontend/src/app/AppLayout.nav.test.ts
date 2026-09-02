@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { User } from '@/features/auth/types';
 import { ADOPTED_MODULES } from '@/lib/adoptedModules';
-import { allNavItems, buildNavItems } from './AppLayout';
+import { allNavItems, buildNavItems, navTrailForPath } from './AppLayout';
 
 /**
  * THE SIDEBAR ORDER IS A CONTRACT (21-Aug-2026 owner request).
@@ -102,6 +102,27 @@ describe('the sidebar', () => {
         // that is deliberate (see the comments on those entries) and is
         // pinned here so a stray gate on one of them is a red test.
         expect(buildNavItems(null).map((item) => item.label)).toEqual(['Dashboard', 'Downloads', 'Help']);
+    });
+});
+
+describe('the current-page trail', () => {
+    it('names a top-level page without inventing a parent', () => {
+        expect(navTrailForPath(allNavItems, '/')).toEqual(['Dashboard']);
+    });
+
+    it('names both the module and page for a nested route', () => {
+        expect(navTrailForPath(allNavItems, '/finance/client-outstanding')).toEqual([
+            'Finance',
+            'Client Outstanding',
+        ]);
+        expect(navTrailForPath(allNavItems, '/inventory/store-production')).toEqual([
+            'Inventory',
+            'Store ↔ Production',
+        ]);
+    });
+
+    it('leaves unknown direct-only routes unlabeled', () => {
+        expect(navTrailForPath(allNavItems, '/not-a-configured-menu-route')).toEqual([]);
     });
 });
 

@@ -60,7 +60,10 @@ export async function runReceivablesSync(): Promise<ReceivablesRunResult | null>
         // Counts only in the log. A party name or an amount here would put
         // Owner/Accounts data (FC-06) into a file the factory PC keeps for 30
         // days and anybody at that desk can open.
-        logger.info(`Receivables pull: read ${bills.length} outstanding bills and ${orders.length} pending order lines`);
+        // `bills` is the stable wire-field name, but a measured all-parties
+        // report can contain balance-only receivable rows. The tray log names
+        // the broader truth instead of claiming invoice detail Tally omitted.
+        logger.info(`Receivables pull: read ${bills.length} receivable rows and ${orders.length} pending order lines`);
 
         const posted = await syncReceivables(bills, orders, asOf, cfg.tallyCompanyName);
 
@@ -71,7 +74,7 @@ export async function runReceivablesSync(): Promise<ReceivablesRunResult | null>
         if (posted.skipped_empty) {
             logger.warn('Receivables pull: Tally returned nothing at all, so the ERP kept the position it already had');
         } else {
-            logger.info(`Receivables pull: posted to ERP — ${posted.bills} bills, ${posted.orders} orders, ${posted.parties} parties`);
+            logger.info(`Receivables pull: posted to ERP — ${posted.bills} receivable rows, ${posted.orders} orders, ${posted.parties} parties`);
         }
 
         return { asOf, bills: bills.length, orders: orders.length, posted };

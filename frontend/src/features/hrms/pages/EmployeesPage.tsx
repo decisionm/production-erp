@@ -1,13 +1,18 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { DatePicker, Button, Form, Input, Modal, Select, Space, Table, Typography } from 'antd';
+import { Button, DatePicker, Empty, Form, Input, Modal, Select, Space, Table, Typography } from 'antd';
 import dayjs from 'dayjs';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
-import { createEmployee, listEmployees, updateEmployee } from '@/features/hrms/api';
-import type { Employee, EmployeeStatus } from '@/features/hrms/types';
+import { createEmployee, listAllEmployees, listEmployees, updateEmployee } from '@/features/hrms/api';
+import { EMPLOYEE_LIST_SPEC, noMatchLine, pageRangeLine } from '@/features/hrms/list';
+import type { Employee, EmployeeListParams, EmployeeStatus } from '@/features/hrms/types';
+import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
+import { compactParams, narrowingKeys } from '@/lib/listParams';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { useListParams } from '@/lib/useListParams';
 
 const employeeSchema = z.object({
     employee_code: z.string().min(1, 'Code is required').max(32),
@@ -32,17 +37,47 @@ const statusOptions: { value: EmployeeStatus; label: string }[] = [
     { value: 'terminated', label: 'Terminated' },
 ];
 
+const STATUS_FILTER: { value: EmployeeStatus | ''; label: string }[] = [{ value: '', label: 'All statuses' }, ...statusOptions];
+
+/**
+ * THE EMPLOYEE MASTER'S LIST. Search, status, page and page size live in
+ * the URL (useListParams) and the SERVER does the narrowing
+ * (ListEmployeesRequest): `q` finds an employee by code, name, department
+ * or designation across the whole master, never just the rows on screen.
+ * The pager is wired to the server's meta — the 21st employee was
+ * unreachable from this page until it was.
+ */
 export default function EmployeesPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['hrms', 'employees'], queryFn: listEmployees });
-    const managerOptions = data?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];
+    const { params, setParams, setPage, reset } = useListParams<EmployeeListParams>(EMPLOYEE_LIST_SPEC);
+    const listParams = useMemo(() => compactParams(params), [params]);
+    const narrowed = narrowingKeys(params).length > 0;
+
+    // The box's text as typed; it becomes `q` on Enter / the search button,
+    // never per keystroke. Re-seeded when the URL's q changes under it.
+    const [qDraft, setQDraft] = useState(params.q ?? '');
+    useEffect(() => setQDraft(params.q ?? ''), [params.q]);
+
+    const query = useQuery({
+        // The params are part of the key, and the key still STARTS with the
+        // prefix the invalidate uses, so a create or edit refreshes
+        // whichever view is on screen.
+        queryKey: ['hrms', 'employees', 'list', listParams],
+        queryFn: () => listEmployees(listParams),
+        placeholderData: (previous) => previous,
+    });
+    // The manager picker needs EVERY employee, not the page on screen — a
+    // searched or paged list would otherwise offer only the rows that
+    // happened to match.
+    const { data: allEmployees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
+    const managerOptions = allEmployees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['hrms', 'employees'] });
 
-    const { control, handleSubmit, reset, formState: { errors } } = useForm<EmployeeFormValues>({
+    const { control, handleSubmit, reset: resetForm, formState: { errors } } = useForm<EmployeeFormValues>({
         resolver: zodResolver(employeeSchema),
         defaultValues: { employee_code: '', name: '', email: '', phone: '', designation: '', department: '' },
     });
@@ -52,7 +87,7 @@ export default function EmployeesPage() {
         onSuccess: () => {
             invalidate();
             setModalOpen(false);
-            reset();
+            resetForm();
         },
     });
 
@@ -74,19 +109,69 @@ export default function EmployeesPage() {
         },
     });
 
+    // Three different empty tables: a term that matched nothing names the
+    // term; a status that holds nothing offers the filter back; only the
+    // bare page may say there are no employees at all.
+    const emptyText = params.q ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={noMatchLine('employees', params.q)}>
+            <Button size="small" onClick={() => setParams({ q: undefined })}>
+                Clear search
+            </Button>
+        </Empty>
+    ) : narrowed ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No employees match these filters.">
+            <Button size="small" onClick={reset}>
+                Clear filters
+            </Button>
+        </Empty>
+    ) : (
+        'No employees yet.'
+    );
+
     return (
         <>
-            <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
+            <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }} wrap>
                 <Typography.Title level={3} style={{ margin: 0 }}>Employees</Typography.Title>
-                <Button type="primary" onClick={() => setModalOpen(true)}>New Employee</Button>
+                <Space wrap>
+                    <Input.Search
+                        allowClear
+                        placeholder="Code, name, department, designation"
+                        style={{ width: 280 }}
+                        value={qDraft}
+                        onChange={(event) => setQDraft(event.target.value)}
+                        onSearch={(value) => setParams({ q: value.trim() || undefined })}
+                    />
+                    <Select<EmployeeStatus | ''>
+                        value={params.status ?? ''}
+                        style={{ width: 160 }}
+                        options={STATUS_FILTER}
+                        onChange={(value) => setParams({ status: value || undefined })}
+                    />
+                    <Button type="primary" onClick={() => setModalOpen(true)}>New Employee</Button>
+                </Space>
             </Space>
 
+            <Space style={{ marginBottom: 8 }} wrap>
+                <Typography.Text type="secondary">{pageRangeLine(query.data?.meta, 'employees')}</Typography.Text>
+                {narrowed ? (
+                    <Button size="small" onClick={reset}>
+                        Clear
+                    </Button>
+                ) : null}
+            </Space>
+
+            {/* placeholderData keeps stale rows on a failed refetch, so
+                emptyText never shows the failure — this line does. */}
+            <ListReadAlert state={query} entity="employees" />
+
             <Table<Employee>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
-                loading={isLoading}
-                dataSource={data?.data}
-                pagination={false}
+                loading={query.isFetching}
+                dataSource={query.data?.data}
+                pagination={serverPagination(query.data?.meta, setPage, 'employees')}
+                locale={{ emptyText: <ListEmpty state={query} entity="employees" empty={emptyText} /> }}
                 columns={[
                     { title: 'Code', dataIndex: 'employee_code' },
                     { title: 'Name', dataIndex: 'name' },

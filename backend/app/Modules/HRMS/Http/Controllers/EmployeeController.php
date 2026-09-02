@@ -3,11 +3,13 @@
 namespace App\Modules\HRMS\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\HRMS\Http\Requests\ListEmployeesRequest;
 use App\Modules\HRMS\Http\Requests\StoreEmployeeRequest;
 use App\Modules\HRMS\Http\Requests\UpdateEmployeeRequest;
 use App\Modules\HRMS\Http\Resources\EmployeeResource;
 use App\Modules\HRMS\Models\Employee;
 use App\Modules\HRMS\Services\EmployeeService;
+use App\Modules\HRMS\Services\HrmsListQuery;
 use App\Support\Configuration\Http\ConfigurationReasonRequest;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -28,9 +30,13 @@ class EmployeeController extends Controller
 {
     public function __construct(private readonly EmployeeService $employees) {}
 
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(ListEmployeesRequest $request, HrmsListQuery $query): AnonymousResourceCollection
     {
-        return EmployeeResource::collection($this->employees->paginate($this->perPage($request)));
+        $filters = $request->validated();
+
+        return EmployeeResource::collection(
+            $this->employees->paginate($query->perPage($filters, HrmsListQuery::PER_PAGE_MAX_EMPLOYEES), $filters),
+        );
     }
 
     /** One employee, archived rows included, with the authoritative `can`. */

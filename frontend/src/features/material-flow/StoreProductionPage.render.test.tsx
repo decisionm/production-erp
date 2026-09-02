@@ -29,9 +29,9 @@ import { describe, expect, it, vi } from 'vitest';
  * WHAT IT PINS ABOUT THE MERGE, and why each assertion exists rather than
  * just "it did not throw":
  *
- *  · rc-tabs renders the ACTIVE pane, so asserting a sentence that belongs to
- *    the embedded Store Issue Queue proves the tab really mounted its page
- *    and not an empty shell.
+ *  · rc-tabs renders the ACTIVE pane, so asserting a control that belongs to
+ *    the embedded Store Issue Queue — its search box — proves the tab really
+ *    mounted its page and not an empty shell.
  *  · The banner must appear EXACTLY ONCE. The shell owns it now; the embedded
  *    page suppresses its own. Drop the `embedded` guard and a storekeeper
  *    reads the same paragraph twice — a mutation that leaves every other test
@@ -71,7 +71,7 @@ describe('the Store <-> Production screen', () => {
         expect(html).toContain('Movement history');
 
         // The active pane really mounted the page it embeds.
-        expect(html).toContain('Every filter is applied by the server');
+        expect(html).toContain('placeholder="Request no."');
     });
 
     it('shows the issue-is-not-consumption banner once, from the shell', () => {

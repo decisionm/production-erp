@@ -32,12 +32,34 @@ class EmployeeService
 {
     use ManagesConfigurationLifecycle;
 
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    public function __construct(private readonly HrmsListQuery $query) {}
+
+    /**
+     * The list page's read. Every filter is ListEmployeesRequest's — `q`
+     * over code, name, department and designation (one clause, shared with
+     * the leave and attendance lists), `status` exact. Ordered by name as it
+     * always was, with id breaking ties so two employees of one name never
+     * swap places between page loads.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function paginate(int $perPage = HrmsListQuery::PER_PAGE_DEFAULT, array $filters = []): LengthAwarePaginator
     {
-        return Employee::query()
-            ->with(['manager'])
+        $query = Employee::query()->with(['manager']);
+
+        if (($term = $this->query->term($filters)) !== null) {
+            $this->query->whereEmployeeMatches($query, $term);
+        }
+
+        if (! empty($filters['status'])) {
+            $query->where('status', $filters['status']);
+        }
+
+        return $query
             ->orderBy('name')
-            ->paginate($perPage);
+            ->orderBy('id')
+            ->paginate($perPage)
+            ->withQueryString();
     }
 
     /**

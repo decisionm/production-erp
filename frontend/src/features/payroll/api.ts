@@ -1,8 +1,11 @@
 import { api } from '@/lib/api';
+import { MAX_PER_PAGE, compactParams } from '@/lib/listParams';
 import type { Paginated } from '@/lib/types';
 import type {
     PayrollRun,
+    PayrollRunListFilters,
     Payslip,
+    PayslipListFilters,
     SalaryCalculationType,
     SalaryComponent,
     SalaryComponentKind,
@@ -56,8 +59,25 @@ export async function createSalaryStructure(payload: CreateSalaryStructurePayloa
     return data.data;
 }
 
-export async function listPayrollRuns(): Promise<Paginated<PayrollRun>> {
-    const { data } = await api.get<Paginated<PayrollRun>>('/payroll/runs');
+/**
+ * ONE page of the runs, narrowed and paged on the SERVER (PayrollRunService
+ * through ListPayrollRunsRequest). The Payroll Runs table used to call this
+ * with no arguments and draw the answer with `pagination={false}`, so it
+ * showed the server's first 20 and said nothing about the rest. Compacted:
+ * `{}` and `{ q: '' }` are the same request and the same query key.
+ */
+export async function listPayrollRuns(filters: PayrollRunListFilters = {}): Promise<Paginated<PayrollRun>> {
+    const { data } = await api.get<Paginated<PayrollRun>>('/payroll/runs', { params: compactParams(filters) });
+    return data;
+}
+
+/**
+ * Every run, for a PICKER (the payslip page's run filter) — the server's
+ * ceiling, not the default first page, so a run older than the newest 20
+ * is still offered.
+ */
+export async function listAllPayrollRuns(): Promise<Paginated<PayrollRun>> {
+    const { data } = await api.get<Paginated<PayrollRun>>('/payroll/runs', { params: { per_page: MAX_PER_PAGE } });
     return data;
 }
 
@@ -86,10 +106,9 @@ export async function markPayrollRunPaid(id: number): Promise<PayrollRun> {
     return data.data;
 }
 
-export async function listPayslips(payrollRunId?: number): Promise<Paginated<Payslip>> {
-    const { data } = await api.get<Paginated<Payslip>>('/payroll/payslips', {
-        params: payrollRunId ? { payroll_run_id: payrollRunId } : undefined,
-    });
+/** ONE page of payslips, narrowed and paged on the SERVER (ListPayslipsRequest). */
+export async function listPayslips(filters: PayslipListFilters = {}): Promise<Paginated<Payslip>> {
+    const { data } = await api.get<Paginated<Payslip>>('/payroll/payslips', { params: compactParams(filters) });
     return data;
 }
 

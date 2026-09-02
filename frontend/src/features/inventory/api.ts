@@ -199,8 +199,15 @@ export async function updateWarehouse(id: number, payload: UpdateWarehousePayloa
  * column sorter in the table would order the rows already on screen and show
  * it as the order of the factory's stock.
  */
+/**
+ * `q` is the stock list's needle — item SKU, display name or Tally name, and
+ * the warehouse's code or name — answered by the server over every balance
+ * (ListStockBalancesRequest). `search` is the same needle in its older
+ * spelling; the page sends `q`.
+ */
 export async function listStockBalances(
     params?: ListParams & {
+        q?: string;
         item_id?: number;
         warehouse_id?: number;
         sort?: 'item' | 'warehouse' | 'quantity';
@@ -227,12 +234,15 @@ export async function listItemStockBalances(itemId: number): Promise<Paginated<S
  * the item detail tab ask for one big slice of ONE item and never turn a page,
  * but a ledger over the whole factory has to. Everything this endpoint filters
  * on is in this signature — `StockMovementController::index` reads item_id,
- * warehouse_id and the page size and nothing else, so a caller wanting a type,
- * a purpose or a date range has to widen the endpoint first, not the query.
+ * warehouse_id, purpose, the reference needle `q` and the page size, and
+ * nothing else — so a caller wanting a type or a date range has to widen the
+ * endpoint first, not the query.
  */
 export async function listStockMovements(params?: {
     item_id?: number;
     warehouse_id?: number;
+    /** A substring of the movement's reference (ListStockMovementsRequest). */
+    q?: string;
     per_page?: number;
     page?: number;
 }): Promise<Paginated<StockMovement>> {

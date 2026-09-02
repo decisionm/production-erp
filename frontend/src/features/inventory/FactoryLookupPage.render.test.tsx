@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
+import type { FactoryLookupResult } from './api';
 
 /**
  * The lookup page comes up, and says what it is for before anyone types.
@@ -25,11 +26,12 @@ vi.mock('@/lib/api', () => ({
 
 import FactoryLookupPage from './pages/FactoryLookupPage';
 
-function render(node: ReactNode): string {
+function render(node: ReactNode, path = '/', lookup?: FactoryLookupResult): string {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    if (lookup) client.setQueryData(['inventory', 'lookup', lookup.term], lookup);
 
     return renderToString(
-        <MemoryRouter>
+        <MemoryRouter initialEntries={[path]}>
             <QueryClientProvider client={client}>{node}</QueryClientProvider>
         </MemoryRouter>,
     );
@@ -51,5 +53,30 @@ describe('the factory lookup page', () => {
     it('explains that some numbers jump and others list, before anyone types', () => {
         expect(html).toContain('goes straight to its record');
         expect(html).toContain('more than one material');
+    });
+
+    it('renders a listed match as a keyboard-openable link', () => {
+        const result: FactoryLookupResult = {
+            term: 'LOT-77',
+            resolved: null,
+            omitted: [],
+            matches: [
+                {
+                    kind: 'batch',
+                    id: 77,
+                    identifier: 'LOT-77',
+                    label: 'Synthetic material',
+                    detail: null,
+                    retired: false,
+                    exact: true,
+                    unique: false,
+                },
+            ],
+        };
+
+        const resultHtml = render(<FactoryLookupPage />, '/inventory/find?q=LOT-77', result);
+
+        expect(resultHtml).toContain('aria-label="Open Batch LOT-77"');
+        expect(resultHtml).toContain('href="/inventory/batches"');
     });
 });

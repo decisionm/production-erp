@@ -44,6 +44,7 @@ import {
 } from '@/features/tally-sync/syncNow';
 import { useAuthStore } from '@/features/auth/store';
 import type { TallySyncEntry, TallySyncEntryFilters, TallySyncStatus } from '@/features/tally-sync/types';
+import { TABLE_STICKY } from '@/lib/tableProps';
 
 /** The status filter's choices — the same words the Status column uses. */
 const statusOptions = (Object.keys(statusLabel) as TallySyncStatus[]).map((status) => ({
@@ -840,7 +841,7 @@ export default function TallySyncPage() {
                     // width; the header sticks so the column names stay put
                     // while an accountant scrolls a long day's queue.
                     scroll={{ x: 'max-content' }}
-                    sticky
+                    sticky={TABLE_STICKY}
                     size="middle"
                     rowKey="id"
                     loading={isLoading}

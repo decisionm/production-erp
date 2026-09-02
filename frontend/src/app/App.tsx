@@ -1,87 +1,150 @@
+import { Component, lazy, Suspense, type ComponentType, type PropsWithChildren } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
-import RolesPage from '@/features/access/pages/RolesPage';
-import UsersPage from '@/features/access/pages/UsersPage';
-import ChangePasswordPage from '@/features/auth/pages/ChangePasswordPage';
-import LoginPage from '@/features/auth/pages/LoginPage';
-import DashboardPage from '@/features/dashboard/pages/DashboardPage';
-import ExportCenterPage from '@/features/exports/pages/ExportCenterPage';
-import GstRatesPage from '@/features/compliance/pages/GstRatesPage';
-import GstRegistrationsPage from '@/features/compliance/pages/GstRegistrationsPage';
-import GstReportsPage from '@/features/compliance/pages/GstReportsPage';
-import HelpPage from '@/features/help/pages/HelpPage';
-import AttendancePage from '@/features/hrms/pages/AttendancePage';
-import EmployeesPage from '@/features/hrms/pages/EmployeesPage';
-import LeaveBalancesPage from '@/features/hrms/pages/LeaveBalancesPage';
-import LeaveRequestsPage from '@/features/hrms/pages/LeaveRequestsPage';
-import LeaveTypesPage from '@/features/hrms/pages/LeaveTypesPage';
-import AssetsPage from '@/features/maintenance/pages/AssetsPage';
-import ReliabilityReportPage from '@/features/maintenance/pages/ReliabilityReportPage';
-import SchedulesPage from '@/features/maintenance/pages/SchedulesPage';
-import MaintenanceWorkOrdersPage from '@/features/maintenance/pages/WorkOrdersPage';
-import ApproveProductionPage from '@/features/production/pages/ApproveProductionPage';
-import BomsPage from '@/features/production/pages/BomsPage';
-import CapacityPlanPage from '@/features/production/pages/CapacityPlanPage';
-import CartonTracePage from '@/features/production/pages/CartonTracePage';
-import FactoryDayBinPage from '@/features/production/pages/FactoryDayBinPage';
-import MaterialRequestsPage from '@/features/material-flow/pages/MaterialRequestsPage';
-import StoreProductionPage from '@/features/material-flow/pages/StoreProductionPage';
-import MrpPage from '@/features/production/pages/MrpPage';
-import ProductionQueuePage from '@/features/production/pages/ProductionQueuePage';
-import ProductionReportsPage from '@/features/production/pages/ReportsPage';
-import ReworkOrdersPage from '@/features/production/pages/ReworkOrdersPage';
-import RoutingsPage from '@/features/production/pages/RoutingsPage';
-import ProductionConfigurationPage from '@/features/production/pages/ProductionConfigurationPage';
-import LiveMonitorPage from '@/features/production/pages/LiveMonitorPage';
-import ShiftProductionEntryPage from '@/features/production/pages/ShiftProductionEntryPage';
-import ShiftSummaryPage from '@/features/production/pages/ShiftSummaryPage';
-import SubcontractOrdersPage from '@/features/production/pages/SubcontractOrdersPage';
-import WorkOrdersPage from '@/features/production/pages/WorkOrdersPage';
-import PayrollRunsPage from '@/features/payroll/pages/PayrollRunsPage';
-import PayslipsPage from '@/features/payroll/pages/PayslipsPage';
-import SalaryComponentsPage from '@/features/payroll/pages/SalaryComponentsPage';
-import SalaryStructuresPage from '@/features/payroll/pages/SalaryStructuresPage';
-import LeadsPage from '@/features/crm/pages/LeadsPage';
-import OpportunitiesPage from '@/features/crm/pages/OpportunitiesPage';
-import QuotationsPage from '@/features/crm/pages/QuotationsPage';
-import ChartOfAccountsPage from '@/features/finance/pages/ChartOfAccountsPage';
-import ClientOutstandingPage from '@/features/finance/pages/ClientOutstandingPage';
-import JournalEntriesPage from '@/features/finance/pages/JournalEntriesPage';
-import ReportsPage from '@/features/finance/pages/ReportsPage';
-import CapasPage from '@/features/quality/pages/CapasPage';
-import IncomingInspectionsPage from '@/features/quality/pages/IncomingInspectionsPage';
-import InstrumentsPage from '@/features/quality/pages/InstrumentsPage';
-import NonConformanceReportsPage from '@/features/quality/pages/NonConformanceReportsPage';
-import ProductionQcPage from '@/features/quality/pages/ProductionQcPage';
-import ReturnedMaterialHoldsPage from '@/features/quality/pages/ReturnedMaterialHoldsPage';
-import SpcChartPage from '@/features/quality/pages/SpcChartPage';
-import SpcCharacteristicsPage from '@/features/quality/pages/SpcCharacteristicsPage';
-import BarcodeLabelsPage from '@/features/inventory/pages/BarcodeLabelsPage';
-import BatchesPage from '@/features/inventory/pages/BatchesPage';
-import FactoryLookupPage from '@/features/inventory/pages/FactoryLookupPage';
-import ItemDetailPage from '@/features/inventory/pages/ItemDetailPage';
-import ItemsPage from '@/features/inventory/pages/ItemsPage';
-import MaterialLotsPage from '@/features/inventory/pages/MaterialLotsPage';
-import SerialNumbersPage from '@/features/inventory/pages/SerialNumbersPage';
-import PlanningDashboardPage from '@/features/inventory/pages/PlanningDashboardPage';
-import StockMovementsPage from '@/features/inventory/pages/StockMovementsPage';
-import StockPage from '@/features/inventory/pages/StockPage';
-import StoreFulfilmentPage from '@/features/inventory/pages/StoreFulfilmentPage';
-import WarehousesPage from '@/features/inventory/pages/WarehousesPage';
-import GoodsReceiptsPage from '@/features/procurement/pages/GoodsReceiptsPage';
-import SupplierBillsPage from '@/features/procurement/pages/SupplierBillsPage';
-import PurchaseOrdersPage from '@/features/procurement/pages/PurchaseOrdersPage';
-import PurchaseRequisitionsPage from '@/features/procurement/pages/PurchaseRequisitionsPage';
-import VendorsPage from '@/features/procurement/pages/VendorsPage';
-import CustomersPage from '@/features/sales/pages/CustomersPage';
-import DeliveriesPage from '@/features/sales/pages/DeliveriesPage';
-import FulfilmentControlPage from '@/features/sales/pages/FulfilmentControlPage';
-import InvoicesPage from '@/features/sales/pages/InvoicesPage';
-import SalesOrdersPage from '@/features/sales/pages/SalesOrdersPage';
-import AgentTokensPage from '@/features/tally-sync/pages/AgentTokensPage';
-import TallySettingsPage from '@/features/tally-sync/pages/TallySettingsPage';
-import TallySyncPage from '@/features/tally-sync/pages/TallySyncPage';
+import { Alert, Button, Spin } from 'antd';
 import AppLayout from './AppLayout';
 import ProtectedRoute from './ProtectedRoute';
+
+type PageModule = { default: ComponentType };
+
+export function RouteChunkFallback() {
+    return (
+        <Alert
+            type="error"
+            showIcon
+            title="This page could not be loaded"
+            description="The app may have been updated while this tab was open, or the connection was interrupted. Reload to fetch the current page files."
+            action={<Button onClick={() => window.location.reload()}>Reload page</Button>}
+        />
+    );
+}
+
+class RouteChunkBoundary extends Component<PropsWithChildren, { failed: boolean }> {
+    state = { failed: false };
+
+    static getDerivedStateFromError() {
+        return { failed: true };
+    }
+
+    render() {
+        if (this.state.failed) {
+            return <RouteChunkFallback />;
+        }
+
+        return this.props.children;
+    }
+}
+
+/**
+ * Load only the page the reader opened. The previous static imports pulled
+ * every module into the first download, even though one person uses one route
+ * at a time. A normal function wrapper keeps the route table inspectable by
+ * App.routes.test.tsx while React.lazy supplies the split chunk underneath.
+ */
+function lazyPage(load: () => Promise<PageModule>) {
+    const Page = lazy(load);
+
+    return function LazyRoutePage() {
+        return (
+            <RouteChunkBoundary>
+                <Suspense
+                    fallback={
+                        <div
+                            role="status"
+                            aria-live="polite"
+                            style={{ minHeight: 180, display: 'grid', placeItems: 'center' }}
+                        >
+                            <Spin size="large" description="Loading page…" />
+                        </div>
+                    }
+                >
+                    <Page />
+                </Suspense>
+            </RouteChunkBoundary>
+        );
+    };
+}
+
+const RolesPage = lazyPage(() => import('@/features/access/pages/RolesPage'));
+const UsersPage = lazyPage(() => import('@/features/access/pages/UsersPage'));
+const ChangePasswordPage = lazyPage(() => import('@/features/auth/pages/ChangePasswordPage'));
+const LoginPage = lazyPage(() => import('@/features/auth/pages/LoginPage'));
+const DashboardPage = lazyPage(() => import('@/features/dashboard/pages/DashboardPage'));
+const ExportCenterPage = lazyPage(() => import('@/features/exports/pages/ExportCenterPage'));
+const GstRatesPage = lazyPage(() => import('@/features/compliance/pages/GstRatesPage'));
+const GstRegistrationsPage = lazyPage(() => import('@/features/compliance/pages/GstRegistrationsPage'));
+const GstReportsPage = lazyPage(() => import('@/features/compliance/pages/GstReportsPage'));
+const HelpPage = lazyPage(() => import('@/features/help/pages/HelpPage'));
+const AttendancePage = lazyPage(() => import('@/features/hrms/pages/AttendancePage'));
+const EmployeesPage = lazyPage(() => import('@/features/hrms/pages/EmployeesPage'));
+const LeaveBalancesPage = lazyPage(() => import('@/features/hrms/pages/LeaveBalancesPage'));
+const LeaveRequestsPage = lazyPage(() => import('@/features/hrms/pages/LeaveRequestsPage'));
+const LeaveTypesPage = lazyPage(() => import('@/features/hrms/pages/LeaveTypesPage'));
+const AssetsPage = lazyPage(() => import('@/features/maintenance/pages/AssetsPage'));
+const ReliabilityReportPage = lazyPage(() => import('@/features/maintenance/pages/ReliabilityReportPage'));
+const SchedulesPage = lazyPage(() => import('@/features/maintenance/pages/SchedulesPage'));
+const MaintenanceWorkOrdersPage = lazyPage(() => import('@/features/maintenance/pages/WorkOrdersPage'));
+const ApproveProductionPage = lazyPage(() => import('@/features/production/pages/ApproveProductionPage'));
+const BomsPage = lazyPage(() => import('@/features/production/pages/BomsPage'));
+const CapacityPlanPage = lazyPage(() => import('@/features/production/pages/CapacityPlanPage'));
+const CartonTracePage = lazyPage(() => import('@/features/production/pages/CartonTracePage'));
+const FactoryDayBinPage = lazyPage(() => import('@/features/production/pages/FactoryDayBinPage'));
+const MaterialRequestsPage = lazyPage(() => import('@/features/material-flow/pages/MaterialRequestsPage'));
+const StoreProductionPage = lazyPage(() => import('@/features/material-flow/pages/StoreProductionPage'));
+const MrpPage = lazyPage(() => import('@/features/production/pages/MrpPage'));
+const ProductionQueuePage = lazyPage(() => import('@/features/production/pages/ProductionQueuePage'));
+const ProductionReportsPage = lazyPage(() => import('@/features/production/pages/ReportsPage'));
+const ReworkOrdersPage = lazyPage(() => import('@/features/production/pages/ReworkOrdersPage'));
+const RoutingsPage = lazyPage(() => import('@/features/production/pages/RoutingsPage'));
+const ProductionConfigurationPage = lazyPage(() => import('@/features/production/pages/ProductionConfigurationPage'));
+const LiveMonitorPage = lazyPage(() => import('@/features/production/pages/LiveMonitorPage'));
+const ShiftProductionEntryPage = lazyPage(() => import('@/features/production/pages/ShiftProductionEntryPage'));
+const ShiftSummaryPage = lazyPage(() => import('@/features/production/pages/ShiftSummaryPage'));
+const SubcontractOrdersPage = lazyPage(() => import('@/features/production/pages/SubcontractOrdersPage'));
+const WorkOrdersPage = lazyPage(() => import('@/features/production/pages/WorkOrdersPage'));
+const PayrollRunsPage = lazyPage(() => import('@/features/payroll/pages/PayrollRunsPage'));
+const PayslipsPage = lazyPage(() => import('@/features/payroll/pages/PayslipsPage'));
+const SalaryComponentsPage = lazyPage(() => import('@/features/payroll/pages/SalaryComponentsPage'));
+const SalaryStructuresPage = lazyPage(() => import('@/features/payroll/pages/SalaryStructuresPage'));
+const LeadsPage = lazyPage(() => import('@/features/crm/pages/LeadsPage'));
+const OpportunitiesPage = lazyPage(() => import('@/features/crm/pages/OpportunitiesPage'));
+const QuotationsPage = lazyPage(() => import('@/features/crm/pages/QuotationsPage'));
+const ChartOfAccountsPage = lazyPage(() => import('@/features/finance/pages/ChartOfAccountsPage'));
+const ClientOutstandingPage = lazyPage(() => import('@/features/finance/pages/ClientOutstandingPage'));
+const JournalEntriesPage = lazyPage(() => import('@/features/finance/pages/JournalEntriesPage'));
+const ReportsPage = lazyPage(() => import('@/features/finance/pages/ReportsPage'));
+const CapasPage = lazyPage(() => import('@/features/quality/pages/CapasPage'));
+const IncomingInspectionsPage = lazyPage(() => import('@/features/quality/pages/IncomingInspectionsPage'));
+const InstrumentsPage = lazyPage(() => import('@/features/quality/pages/InstrumentsPage'));
+const NonConformanceReportsPage = lazyPage(() => import('@/features/quality/pages/NonConformanceReportsPage'));
+const ProductionQcPage = lazyPage(() => import('@/features/quality/pages/ProductionQcPage'));
+const ReturnedMaterialHoldsPage = lazyPage(() => import('@/features/quality/pages/ReturnedMaterialHoldsPage'));
+const SpcChartPage = lazyPage(() => import('@/features/quality/pages/SpcChartPage'));
+const SpcCharacteristicsPage = lazyPage(() => import('@/features/quality/pages/SpcCharacteristicsPage'));
+const BarcodeLabelsPage = lazyPage(() => import('@/features/inventory/pages/BarcodeLabelsPage'));
+const BatchesPage = lazyPage(() => import('@/features/inventory/pages/BatchesPage'));
+const FactoryLookupPage = lazyPage(() => import('@/features/inventory/pages/FactoryLookupPage'));
+const ItemDetailPage = lazyPage(() => import('@/features/inventory/pages/ItemDetailPage'));
+const ItemsPage = lazyPage(() => import('@/features/inventory/pages/ItemsPage'));
+const MaterialLotsPage = lazyPage(() => import('@/features/inventory/pages/MaterialLotsPage'));
+const SerialNumbersPage = lazyPage(() => import('@/features/inventory/pages/SerialNumbersPage'));
+const PlanningDashboardPage = lazyPage(() => import('@/features/inventory/pages/PlanningDashboardPage'));
+const StockMovementsPage = lazyPage(() => import('@/features/inventory/pages/StockMovementsPage'));
+const StockPage = lazyPage(() => import('@/features/inventory/pages/StockPage'));
+const StoreFulfilmentPage = lazyPage(() => import('@/features/inventory/pages/StoreFulfilmentPage'));
+const WarehousesPage = lazyPage(() => import('@/features/inventory/pages/WarehousesPage'));
+const GoodsReceiptsPage = lazyPage(() => import('@/features/procurement/pages/GoodsReceiptsPage'));
+const SupplierBillsPage = lazyPage(() => import('@/features/procurement/pages/SupplierBillsPage'));
+const PurchaseOrdersPage = lazyPage(() => import('@/features/procurement/pages/PurchaseOrdersPage'));
+const PurchaseRequisitionsPage = lazyPage(() => import('@/features/procurement/pages/PurchaseRequisitionsPage'));
+const VendorsPage = lazyPage(() => import('@/features/procurement/pages/VendorsPage'));
+const CustomersPage = lazyPage(() => import('@/features/sales/pages/CustomersPage'));
+const DeliveriesPage = lazyPage(() => import('@/features/sales/pages/DeliveriesPage'));
+const FulfilmentControlPage = lazyPage(() => import('@/features/sales/pages/FulfilmentControlPage'));
+const InvoicesPage = lazyPage(() => import('@/features/sales/pages/InvoicesPage'));
+const SalesOrdersPage = lazyPage(() => import('@/features/sales/pages/SalesOrdersPage'));
+const AgentTokensPage = lazyPage(() => import('@/features/tally-sync/pages/AgentTokensPage'));
+const TallySettingsPage = lazyPage(() => import('@/features/tally-sync/pages/TallySettingsPage'));
+const TallySyncPage = lazyPage(() => import('@/features/tally-sync/pages/TallySyncPage'));
 
 export default function App() {
     return (

@@ -1,10 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Col, DatePicker, Descriptions, Drawer, Empty, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
-import type { Dayjs } from 'dayjs';
-import { useEffect, useState } from 'react';
+import dayjs from 'dayjs';
+import { useEffect, useMemo, useState } from 'react';
 import { listShifts, listWorkCenters, machineLabel } from '@/features/production/api';
 import { itemLabel } from '@/lib/itemLabel';
-import { ListEmpty } from '@/lib/ListEmpty';
+import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
+import { MAX_PER_PAGE, narrowingKeys } from '@/lib/listParams';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { useListParams } from '@/lib/useListParams';
 import {
     apiRefusalMessage,
     cancelMaterialRequest,
@@ -18,7 +21,16 @@ import HandoverPanel from '../components/HandoverPanel';
 import PersonSelect from '../components/PersonSelect';
 import RequestLinesTable from '../components/RequestLinesTable';
 import ReturnToStoreModal from '../components/ReturnToStoreModal';
-import type { MaterialRequest, MaterialRequestFilters, StoreIssue } from '../types';
+import {
+    QUEUE_LIST_SPEC,
+    type QueueListParams,
+    noMatchLine,
+    pageRangeLine,
+    queueQueryKey,
+    queueServerFilters,
+    queueStatusChoice,
+} from '../lists';
+import type { MaterialRequest, StoreIssue } from '../types';
 import {
     ISSUE_IS_NOT_CONSUMPTION,
     LOCATION_LABEL,
@@ -32,15 +44,9 @@ import {
     TRANSITION_LABEL,
     formatQuantity,
     permitsFractions,
-    OPEN_REQUEST_STATUSES,
     queueEmptyText,
-    queueStatusFilter,
-    type MaterialRequestStatus,
     type QueueStatusChoice,
 } from '../words';
-
-/** Re-exported name kept local for readability; the list lives in words.ts. */
-const OPEN_STATUSES = OPEN_REQUEST_STATUSES;
 
 /**
  * THE STORE'S QUEUE — what production has asked for, and what the store has
@@ -106,13 +112,26 @@ function hasMaterialOutstanding(issue: StoreIssue): boolean {
 export default function StoreIssueQueuePage({ embedded = false }: { embedded?: boolean }) {
     const queryClient = useQueryClient();
     /**
+     * The search, the filters, the page and the page size ARE the URL —
+     * and the URL carries only what this list manages, so the workspace's
+     * `?tab=issues` survives every page turn (useListParams).
+     *
      * The queue's default view is "still to issue" — which the backend
      * expresses as a status LIST (submitted + partially_issued), not as a
-     * status of its own. Kept as a list here so the server does the
-     * narrowing, in SQL, over the whole queue rather than over one page.
+     * status of its own. That is what an absent `status` means here; the
+     * mapping lives in lists.ts and the server does the narrowing, in SQL,
+     * over the whole queue rather than over one page.
      */
-    const [filters, setFilters] = useState<MaterialRequestFilters>({ status: [...OPEN_STATUSES] });
-    const [dates, setDates] = useState<[Dayjs | null, Dayjs | null] | null>(null);
+    const { params, setParams, setPage, reset } = useListParams<QueueListParams>(QUEUE_LIST_SPEC);
+    const filters = useMemo(() => queueServerFilters(params), [params]);
+    const statusChoice = queueStatusChoice(params);
+    const term = params.q;
+    const filtersActive = narrowingKeys(params).length > 0;
+    // What is typed; the URL (and the server) hear it on Enter or the button.
+    const [qDraft, setQDraft] = useState(params.q ?? '');
+    useEffect(() => {
+        setQDraft(params.q ?? '');
+    }, [params.q]);
     const [openRequestId, setOpenRequestId] = useState<number | null>(null);
     const [issueQuantities, setIssueQuantities] = useState<Record<number, number | null>>({});
     const [receivedBy, setReceivedBy] = useState<number | null>(null);
@@ -121,8 +140,12 @@ export default function StoreIssueQueuePage({ embedded = false }: { embedded?: b
     const [cancelReason, setCancelReason] = useState('');
 
     const queueQuery = useQuery({
-        queryKey: ['material-flow', 'queue', filters],
+        queryKey: queueQueryKey(filters),
         queryFn: () => listMaterialRequests(filters),
+        // Turning a page keeps the last page on screen until the next one
+        // lands; a refetch that fails then has rows in front of it, which
+        // is why ListReadAlert sits above the table.
+        placeholderData: (previous) => previous,
     });
     const requestQuery = useQuery({
         queryKey: ['material-flow', 'request', openRequestId],
@@ -139,7 +162,9 @@ export default function StoreIssueQueuePage({ embedded = false }: { embedded?: b
      */
     const issuesQuery = useQuery({
         queryKey: ['material-flow', 'issues', openRequestId],
-        queryFn: () => listStoreIssues({ material_request_id: openRequestId as number }),
+        // No pager in the drawer, so the ceiling is asked for outright: a
+        // request's handovers must never be cut off at the server's default.
+        queryFn: () => listStoreIssues({ material_request_id: openRequestId as number, per_page: MAX_PER_PAGE }),
         enabled: openRequestId !== null,
         retry: false,
     });
@@ -244,7 +269,25 @@ export default function StoreIssueQueuePage({ embedded = false }: { embedded?: b
         onError: (error) => message.error(apiRefusalMessage(error, REFUSAL_MESSAGE.request_closed)),
     });
 
-    const setFilter = (patch: MaterialRequestFilters) => setFilters((current) => ({ ...current, ...patch }));
+    // What an EMPTY table says is judged on the query's state (ListEmpty),
+    // and then on WHY it is empty: a term that matched nothing names the
+    // term and offers to drop it; a narrowed view offers its filters back;
+    // the bare default keeps the queue's own wording.
+    const emptyText = term ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={noMatchLine('requests', term)}>
+            <Button size="small" onClick={() => setParams({ q: undefined })}>
+                Clear search
+            </Button>
+        </Empty>
+    ) : (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={queueEmptyText(filters.status)}>
+            {filtersActive ? (
+                <Button size="small" onClick={reset}>
+                    Clear filters
+                </Button>
+            ) : null}
+        </Empty>
+    );
 
     return (
         <>
@@ -260,13 +303,20 @@ export default function StoreIssueQueuePage({ embedded = false }: { embedded?: b
 
             <Card size="small" style={{ marginBottom: 16 }}>
                 <Row gutter={[8, 8]}>
-                    <Col xs={24} sm={8} md={5}>
-                        <Select
+                    <Col xs={24} sm={12} md={6}>
+                        <Input.Search
+                            allowClear
+                            placeholder="Request no."
+                            value={qDraft}
+                            onChange={(event) => setQDraft(event.target.value)}
+                            onSearch={(value) => setParams({ q: value.trim() || undefined })}
+                        />
+                    </Col>
+                    <Col xs={24} sm={12} md={4}>
+                        <Select<QueueStatusChoice>
                             style={{ width: '100%' }}
-                            value={Array.isArray(filters.status) ? 'open' : (filters.status ?? 'all')}
-                            onChange={(value) =>
-                                setFilter({ status: queueStatusFilter(value as QueueStatusChoice) })
-                            }
+                            value={statusChoice}
+                            onChange={(value) => setParams({ status: value })}
                             options={[
                                 { value: 'open', label: 'Still to issue' },
                                 { value: 'all', label: 'All requests (including issued)' },
@@ -277,51 +327,48 @@ export default function StoreIssueQueuePage({ embedded = false }: { embedded?: b
                             ]}
                         />
                     </Col>
-                    <Col xs={24} sm={16} md={7}>
+                    <Col xs={24} sm={12} md={5}>
                         <DatePicker.RangePicker
                             style={{ width: '100%' }}
-                            value={dates}
-                            onChange={(range) => {
-                                setDates(range as [Dayjs | null, Dayjs | null] | null);
-                                setFilter({
-                                    from: range?.[0]?.format('YYYY-MM-DD'),
-                                    to: range?.[1]?.format('YYYY-MM-DD'),
-                                });
-                            }}
+                            allowEmpty={[true, true]}
+                            value={[params.from ? dayjs(params.from) : null, params.to ? dayjs(params.to) : null]}
+                            onChange={(_, dateStrings) =>
+                                setParams({ from: dateStrings[0] || undefined, to: dateStrings[1] || undefined })
+                            }
                         />
                     </Col>
-                    <Col xs={24} sm={8} md={4}>
+                    <Col xs={24} sm={8} md={3}>
                         <Select
                             allowClear
                             style={{ width: '100%' }}
                             placeholder="Shift"
-                            value={filters.shift_id}
-                            onChange={(value) => setFilter({ shift_id: value })}
+                            value={params.shift_id}
+                            onChange={(value) => setParams({ shift_id: value ?? undefined })}
                             options={(shiftsQuery.data?.data ?? []).map((shift) => ({ value: shift.id, label: shift.name }))}
                         />
                     </Col>
-                    <Col xs={24} sm={8} md={4}>
+                    <Col xs={24} sm={8} md={3}>
                         <Select
                             allowClear
                             style={{ width: '100%' }}
                             placeholder="Machine / area"
-                            value={filters.work_center_id}
-                            onChange={(value) => setFilter({ work_center_id: value })}
+                            value={params.work_center_id}
+                            onChange={(value) => setParams({ work_center_id: value ?? undefined })}
                             options={(machinesQuery.data?.data ?? []).map((machine) => ({
                                 value: machine.id,
                                 label: machineLabel(machine),
                             }))}
                         />
                     </Col>
-                    <Col xs={24} sm={8} md={4}>
+                    <Col xs={24} sm={8} md={3}>
                         <Select
                             allowClear
                             showSearch
                             optionFilterProp="label"
                             style={{ width: '100%' }}
                             placeholder="Material"
-                            value={filters.item_id}
-                            onChange={(value) => setFilter({ item_id: value })}
+                            value={params.item_id}
+                            onChange={(value) => setParams({ item_id: value ?? undefined })}
                             options={(materialsQuery.data ?? []).map((material) => ({
                                 value: material.id,
                                 label: itemLabel(material),
@@ -329,31 +376,26 @@ export default function StoreIssueQueuePage({ embedded = false }: { embedded?: b
                         />
                     </Col>
                 </Row>
-                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    Every filter is applied by the server, on the whole queue — not to the page you are looking at.
-                </Typography.Text>
+                <Space style={{ marginTop: 8 }} wrap>
+                    <Typography.Text type="secondary">{pageRangeLine(queueQuery.data?.meta, 'requests')}</Typography.Text>
+                    {filtersActive ? (
+                        <Button size="small" onClick={reset}>
+                            Clear
+                        </Button>
+                    ) : null}
+                </Space>
             </Card>
+
+            <ListReadAlert state={queueQuery} entity="the store's queue" />
 
             <Table<MaterialRequest>
                 rowKey="id"
-                loading={queueQuery.isLoading}
-                dataSource={queueQuery.data?.data}
-                pagination={false}
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
-                locale={{
-                    emptyText: (
-                        <ListEmpty
-                            state={queueQuery}
-                            entity="the store's queue"
-                            empty={
-                                <Empty
-                                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                                    description={queueEmptyText(filters.status)}
-                                />
-                            }
-                        />
-                    ),
-                }}
+                loading={queueQuery.isFetching}
+                dataSource={queueQuery.data?.data}
+                pagination={serverPagination(queueQuery.data?.meta, setPage, 'requests')}
+                locale={{ emptyText: <ListEmpty state={queueQuery} entity="the store's queue" empty={emptyText} /> }}
                 columns={[
                     { title: 'Request', dataIndex: 'request_number' },
                     {
