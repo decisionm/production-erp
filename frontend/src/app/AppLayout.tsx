@@ -607,7 +607,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
         const items: unknown[] = [];
         navItems.forEach((item) => {
             if (item.key === '/exports') {
-                items.push({ type: 'divider', key: 'divider-utility', style: { borderColor: 'rgba(255,255,255,0.12)', margin: '8px 16px' } });
+                items.push({ type: 'divider', key: 'divider-utility', style: { borderColor: 'var(--brand-rule)', margin: '8px 16px' } });
             }
             items.push(item);
         });
@@ -620,7 +620,8 @@ export default function AppLayout({ children }: PropsWithChildren) {
                 Skip to page content
             </a>
             <Layout.Sider
-                theme="dark"
+                className="app-sider"
+                theme="light"
                 collapsible
                 collapsed={collapsed}
                 onCollapse={(value, type) => {
@@ -674,7 +675,8 @@ export default function AppLayout({ children }: PropsWithChildren) {
                     <div
                         style={{
                             background: '#fff',
-                            borderRadius: 8,
+                            borderRadius: 10,
+                            border: '1px solid var(--brand-rule)',
                             padding: collapsed ? '6px 8px' : '8px 12px',
                             display: 'flex',
                             alignItems: 'center',
@@ -696,7 +698,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
                 </div>
                 <Menu
                     aria-label="Primary navigation"
-                    theme="dark"
+                    theme="light"
                     mode="inline"
                     selectedKeys={[location.pathname]}
                     openKeys={openKeys}
@@ -740,8 +742,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
                         justifyContent: 'space-between',
                         padding: '0 16px',
                         background: '#fff',
-                        borderBottom: '1px solid #f0f0f0',
-                        position: 'sticky',
+                                                position: 'sticky',
                         top: 0,
                         zIndex: 9,
                     }}
@@ -800,7 +801,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
                             title="Open account menu"
                         >
                             <Space>
-                                <Avatar size="small" style={{ backgroundColor: '#1677ff' }}>
+                                <Avatar size="small" style={{ backgroundColor: 'var(--brand-navy)' }}>
                                     {user?.name?.charAt(0).toUpperCase() ?? '?'}
                                 </Avatar>
                                 <Typography.Text className="account-user-name" ellipsis={{ tooltip: user?.name }}>

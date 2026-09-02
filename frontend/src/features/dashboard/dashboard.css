@@ -5,7 +5,7 @@
  * runs from the DAY BIN node into the top rail of every machine faceplate,
  * because that is physically how this plant works (one crane-fed common
  * input, piped to all machines; DEC-20260807-006). Everything else stays
- * quiet: hairline-ruled bands, uppercase micro-labels, monospace figures.
+ * quiet: hairline-ruled bands, small bold labels, tabular figures in the app face.
  *
  * State colours are deliberately the floor screens' own (Live Monitor,
  * Shift Floor): running green, waiting amber, down/failed red. A dashboard
@@ -13,14 +13,15 @@
  */
 
 .dash {
-    --dash-ink: #0e2a47;
-    --dash-steel: #5b6b7c;
-    --dash-hairline: #e3e8ee;
-    --dash-panel: #fbfcfd;
+    font-variant-numeric: tabular-nums;
+    --dash-ink: #0a145b;
+    --dash-steel: #5b6579;
+    --dash-hairline: #d9e0ec;
+    --dash-panel: #ffffff;
     --dash-run: #237804;
     --dash-hold: #ad6800;
     --dash-stop: #cf1322;
-    --dash-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, Consolas, monospace;
+    --dash-mono: var(--brand-font);
     color: var(--dash-ink);
 }
 
@@ -30,10 +31,10 @@
 
 /* Uppercase letterspaced micro-label — the stencil-on-a-machine register. */
 .dash-eyebrow {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
     color: var(--dash-steel);
 }
 
@@ -62,8 +63,9 @@
 
 .dash-date {
     font-family: var(--dash-mono);
-    font-size: 26px;
-    font-weight: 700;
+    font-size: 30px;
+    font-weight: 800;
+    font-stretch: 112%;
     line-height: 1.15;
     letter-spacing: 0.02em;
 }
@@ -191,8 +193,8 @@
 .dash-bin-note {
     font-size: 10px;
     color: var(--dash-hold);
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     margin-top: 6px;
 }
 
@@ -287,8 +289,8 @@
 .dash-cell-state {
     font-size: 9px;
     font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     margin-top: 3px;
     color: var(--dash-steel);
 }
@@ -409,8 +411,8 @@
 .dash-stage-label {
     font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     color: var(--dash-steel);
 }
 
@@ -478,8 +480,8 @@
 .dash-ledger-label {
     font-size: 10px;
     font-weight: 600;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+    letter-spacing: 0;
+    text-transform: none;
     color: var(--dash-steel);
     margin-top: 1px;
 }
