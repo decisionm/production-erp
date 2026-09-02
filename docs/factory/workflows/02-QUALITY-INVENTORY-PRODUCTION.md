@@ -113,6 +113,26 @@ DEC-20260902-005.
 - **GAP (code):** the day-bin load today accepts any weighed bag, masterbatch
   included; after the build only a flagged item may be treated as bin material.
 
+### Build notes (engineering boundaries inside the two decisions)
+
+Proposed in a Codex review the owner forwarded on 02-Sep-2026; kept where they
+sit inside DEC-20260902-004 and DEC-20260902-005 and need no new owner question.
+
+1. **No "loaded" event or status for masterbatch.** The return screen accepts
+   only what the Store verifies in an identifiable container; everything else
+   is batch consumption. Nothing tracks when masterbatch entered a machine.
+2. **The bin-material flag lives on the item master** under the existing
+   `inventory.manage` permission that already gates item writes. No new
+   permission. The screen proposes the flag where the Tally stock group says
+   PET; a person confirms it; nothing sets it automatically.
+3. **One transaction at the Store Issue scan:** the stock movement, the bag-scan
+   record and the resin-pool fold commit together or not at all. A retried scan
+   must not fold the resin twice. A partial issue folds only the issued kg.
+4. **The day-bin page retires behind a query-preserving redirect** to the
+   Store ↔ Production page, the same component pattern the retired
+   material-flow URLs already use in `App.tsx`. Every `day_bin_movements` row
+   and every other historical record stays unchanged.
+
 ## Sections still to capture
 
 - Incoming Quality checklist for purchased material.
