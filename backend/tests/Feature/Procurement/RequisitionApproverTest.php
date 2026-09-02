@@ -14,7 +14,11 @@ use Tests\TestCase;
 /**
  * DEC-20260902-025: any procurement-write holder may approve a requisition
  * EXCEPT the person who raised it; self-approval is refused with a clear
- * message; no Administrator bypass. Rejection is an approver action too.
+ * message; no Administrator bypass. This rule APPLIES TO APPROVAL ONLY —
+ * "REJECTION remains an approver action and carries NO requester comparison
+ * from this decision." The record supersedes DEC-20260902-024 solely to
+ * withdraw that record's inferred clause that rejection followed the same
+ * four-eyes comparison as approval.
  */
 class RequisitionApproverTest extends TestCase
 {
@@ -58,13 +62,14 @@ class RequisitionApproverTest extends TestCase
         $this->assertDatabaseHas('purchase_requisitions', ['id' => $id, 'status' => 'draft', 'approved_by' => null]);
     }
 
-    public function test_the_requester_cannot_reject_their_own_requisition(): void
+    public function test_the_requester_may_reject_their_own_requisition(): void
     {
-        $this->actAs();
+        $requester = $this->actAs();
         $id = $this->raise();
 
-        $this->postJson("/api/v1/procurement/purchase-requisitions/{$id}/reject")->assertStatus(422);
-        $this->assertDatabaseHas('purchase_requisitions', ['id' => $id, 'status' => 'draft']);
+        $this->postJson("/api/v1/procurement/purchase-requisitions/{$id}/reject")->assertOk();
+
+        $this->assertDatabaseHas('purchase_requisitions', ['id' => $id, 'status' => 'rejected', 'rejected_by' => $requester->id]);
     }
 
     public function test_a_different_procurement_user_approves_and_is_recorded(): void
