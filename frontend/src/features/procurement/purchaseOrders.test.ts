@@ -374,6 +374,20 @@ describe('amendFormDefaults', () => {
         expect(lines[1].unit_price).toBe(1);
         expect(lines[0]).not.toHaveProperty('schedules');
     });
+
+    // I1: a line's stored unclassified_reason must round-trip into the amend
+    // form, or AmendPurchaseOrderRequest::unchangedLineIndexes() sees the
+    // reason go from "something" to null, reads that as a CHANGED line and
+    // refuses it — even though the buyer never touched it.
+    it('carries a stored unclassified_reason so the grandfather match on resubmit still succeeds', () => {
+        const { lines } = amendFormDefaults({ lines: [line({ unclassified_reason: 'Mould-release spray — no other supplier stocks it.' })] });
+        expect(lines[0].unclassified_reason).toBe('Mould-release spray — no other supplier stocks it.');
+    });
+
+    it('omits unclassified_reason for a line that never had one', () => {
+        const { lines } = amendFormDefaults({ lines: [line()] });
+        expect(lines[0]).not.toHaveProperty('unclassified_reason');
+    });
 });
 
 const uomItem = (uom: string) => ({ id: 1, sku: 'ITEM_A', name: 'ITEM_A', uom }) as PurchaseOrderLine['item'];

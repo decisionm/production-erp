@@ -350,6 +350,13 @@ export interface AmendLineDefaults {
     quantity: number;
     /** undefined (typed as number for the form) when the server withheld the rate — see amendFormDefaults. */
     unit_price: number;
+    /**
+     * DEC-20260902-023: must round-trip from the order as served, or
+     * AmendPurchaseOrderRequest::unchangedLineIndexes() sees the reason go
+     * from "something" to null on resubmit, reads that as a CHANGED line and
+     * refuses it even though the buyer never touched it.
+     */
+    unclassified_reason?: string;
     schedules?: { due_date: string; quantity: number; tally_reference?: string }[];
 }
 
@@ -360,6 +367,10 @@ export interface AmendLineDefaults {
  * empty and `ratesNotPrefilled` tells the form to say so. Schedules come
  * across as they stand; a line whose item is gone from the master is
  * carried with no item so the form flags it rather than dropping it.
+ * `unclassified_reason` is carried too — dropping it here would make an
+ * untouched unclassified line look CHANGED on resubmit (I1: the reason is
+ * part of `unchangedLineIndexes()`'s match key) and 422 with a demand to
+ * retype a reason nobody asked the buyer to touch.
  */
 export function amendFormDefaults(order: Pick<PurchaseOrder, 'lines'>): { lines: AmendLineDefaults[]; ratesNotPrefilled: boolean } {
     let ratesNotPrefilled = false;
@@ -375,6 +386,7 @@ export function amendFormDefaults(order: Pick<PurchaseOrder, 'lines'>): { lines:
             item_id: line.item?.id as number,
             quantity: Number(line.quantity),
             unit_price: line.unit_price === undefined ? (undefined as unknown as number) : Number(line.unit_price),
+            ...(line.unclassified_reason ? { unclassified_reason: line.unclassified_reason } : {}),
             ...(schedules.length > 0 ? { schedules } : {}),
         };
     });
