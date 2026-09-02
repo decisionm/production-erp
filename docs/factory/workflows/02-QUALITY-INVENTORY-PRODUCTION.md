@@ -573,10 +573,11 @@ raises for the OWNER before any code, none of which an agent may answer:
    with a warning; netting treats negative as zero; other materials carry no
    label; the Tally reconcile compares the item total across the one godown and
    never re-anchors the row; no second figure.
-5. Whether DEC-20260902-029 and DEC-20260902-031 still read as the owner's own
-   rules: -029 rests on "we can go with your recommendation of A"; -031 records
-   the opposite of the owner's first answer after a Codex argument the owner
-   accepted.
+5. ~~Whether -029 and -031 read as the owner's own rules~~ — **answered,
+   DEC-20260902-040:** both stand, restated in the owner's own words; no rule
+   changed.
+
+All five review questions are answered (DEC-20260902-036 to -040).
 
 Build-blocking, not merge-blocking: a rollout order for DEC-20260902-013, -023
 and -035, each of which refuses a real live transaction on day one unless the
@@ -587,7 +588,7 @@ PR #79 can leave a requisition with no eligible approver.
 
 ## Status
 
-Chapter 2 is complete. Every owner question raised in it, and every leftover
-from Chapter 1, is recorded (DEC-20260902-002 to -035) or expressly deferred
-to Accounts (Q48, Q68). Section 1 of this chapter is superseded in part by
+Chapter 2 is complete. Every owner question raised in it, every leftover from
+Chapter 1, and every question the Opus review raised is recorded
+(DEC-20260902-002 to -040) or expressly deferred to Accounts (Q48, Q68). Section 1 of this chapter is superseded in part by
 §3: Q94 was opened and closed the same day.

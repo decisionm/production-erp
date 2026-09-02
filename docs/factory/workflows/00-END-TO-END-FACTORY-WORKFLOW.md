@@ -118,7 +118,7 @@ It should deep-link to the exact filtered rows behind every count.
 | Chapter | Current result | Detailed document |
 |---|---|---|
 | Dashboard and Procurement | Verified on 02-Sep-2026; several workflow gaps found | [01-DASHBOARD-AND-PROCUREMENT.md](01-DASHBOARD-AND-PROCUREMENT.md) |
-| Quality, Inventory and Production | Complete 02-Sep-2026: 34 decisions recorded (DEC-20260902-002 to -035) covering the Store scan, the day bin, returns, both Quality checklists, handling units, the approval chain's gates, packaging, factory rules, variance, held stock and the production queue; Q45, Q59, Q62, Q64, Q78, Q87, Q90, Q93, Q94 closed; ground-truth research note under `research/` | [02-QUALITY-INVENTORY-PRODUCTION.md](02-QUALITY-INVENTORY-PRODUCTION.md) |
+| Quality, Inventory and Production | Complete 02-Sep-2026: 39 decisions recorded (DEC-20260902-002 to -040, after an Opus review whose five questions were answered the same day) covering the Store scan, the day bin, returns, both Quality checklists, handling units, the approval chain's gates, packaging, factory rules, variance, held stock and the production queue; Q45, Q59, Q62, Q64, Q78, Q87, Q90, Q93, Q94 closed; ground-truth research note under `research/` | [02-QUALITY-INVENTORY-PRODUCTION.md](02-QUALITY-INVENTORY-PRODUCTION.md) |
 | Sales and Dispatch | Active decisions found; full page verification pending | To be created |
 | Reports and Tally | Direction captured; report-by-report reconciliation pending | To be created |
 
