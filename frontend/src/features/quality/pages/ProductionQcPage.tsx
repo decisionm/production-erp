@@ -11,6 +11,7 @@ import {
     RETURN_REASON_MIN_LENGTH,
 } from '@/features/quality/api';
 import { ListNoMatch } from '@/features/quality/components/ListNoMatch';
+import { consumptionSummary } from '@/features/production/consumptionSummary';
 import { grossProducedPieces, readQuantity } from '@/features/production/types';
 import {
     PRODUCTION_QC_DEFAULT_SORT,
@@ -574,6 +575,16 @@ function QualityCheckDrawer({
                         <Descriptions.Item label="Rejection recorded by production">
                             {fmtKg(row.quantity_rejection_kg)}
                         </Descriptions.Item>
+                    </Descriptions>
+
+                    {/* DEC-20260902-022: the four consumption figures at every
+                        approval stage, never a block — dashes when the batch
+                        has no norm or is not yet completed, but the row is
+                        always here for quality to check before it signs. */}
+                    <Descriptions column={2} size="small" bordered title="Consumption">
+                        {consumptionSummary(row.variance).map((r) => (
+                            <Descriptions.Item key={r.label} label={r.label}>{r.value}</Descriptions.Item>
+                        ))}
                     </Descriptions>
 
                     <div>

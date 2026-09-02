@@ -18,6 +18,7 @@ import {
     cancelShiftProductionEntry,
 } from '@/features/production/api';
 import FinishedCartonLabels from '@/features/production/components/FinishedCartonLabels';
+import { consumptionSummary } from '@/features/production/consumptionSummary';
 import type {
     BatchCost,
     ConsumptionVariance,
@@ -449,45 +450,29 @@ function BatchCostSection({ cost, showsDetail }: { cost: BatchCost; showsDetail:
  * product's standard weight, so it moves when the bottle weight drifts or a
  * supervisor corrects the grams — a real signal. "Unaccounted" was
  * consumption compared against itself.
+ *
+ * DEC-20260902-022: figures at every stage, never a block — `variance` is
+ * nullable (no completed batch yet) and `consumptionSummary` already answers
+ * that with four dashes, so this section always renders instead of
+ * disappearing or falling back to an explanatory sentence.
  */
-function VarianceSection({ variance }: { variance: ConsumptionVariance }) {
-    if (variance.norm_source === null) {
-        return (
-            <>
-                <Typography.Title level={5} style={{ marginTop: 16 }}>Material Usage vs Norm</Typography.Title>
-                <Descriptions column={1} size="small" bordered>
-                    <Descriptions.Item label="Actual consumed">{fmtKg(variance.actual_kg)} Kg</Descriptions.Item>
-                </Descriptions>
-                <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
-                    No norm set for this product
-                </Typography.Text>
-            </>
-        );
-    }
-
+function VarianceSection({ variance }: { variance: ConsumptionVariance | null }) {
     return (
         <>
             <Typography.Title level={5} style={{ marginTop: 16 }}>Material Usage vs Norm</Typography.Title>
             <Descriptions column={1} size="small" bordered>
-                <Descriptions.Item label="Expected (per norm)">
-                    {variance.expected_kg === null ? '—' : `${fmtKg(variance.expected_kg)} Kg`}
-                </Descriptions.Item>
-                <Descriptions.Item label="Actual consumed">{fmtKg(variance.actual_kg)} Kg</Descriptions.Item>
-                <Descriptions.Item label="Variance">
-                    {variance.variance_kg === null ? (
-                        '—'
-                    ) : (
-                        <Space size={4} wrap>
-                            <span>
-                                {fmtSignedKg(variance.variance_kg)} Kg
-                                {variance.variance_pct !== null
-                                    ? ` (${variance.variance_pct > 0 ? '+' : ''}${variance.variance_pct}%)`
-                                    : ''}
-                            </span>
-                            {varianceTag(variance.variance_pct, variance.variance_band)}
-                        </Space>
-                    )}
-                </Descriptions.Item>
+                {consumptionSummary(variance).map((row) => (
+                    <Descriptions.Item key={row.label} label={row.label}>
+                        {variance && row.label === 'Variance' && variance.variance_kg !== null && variance.variance_pct !== null ? (
+                            <Space size={4} wrap>
+                                <span>{row.value}</span>
+                                {varianceTag(variance.variance_pct, variance.variance_band)}
+                            </Space>
+                        ) : (
+                            row.value
+                        )}
+                    </Descriptions.Item>
+                ))}
             </Descriptions>
             {/* What the variance above is partly made of. The guard is on the
                 two figures actually PRINTED — it used to key on
@@ -495,14 +480,16 @@ function VarianceSection({ variance }: { variance: ConsumptionVariance }) {
                 would have appeared and vanished on a number off-screen. Both
                 fields are always strings ("0" when none), so the test is
                 "is there anything to say", not "is it present". */}
-            {(parseFloat(variance.rejection_kg) !== 0 || parseFloat(variance.scrap_kg) !== 0) && (
+            {variance && (parseFloat(variance.rejection_kg) !== 0 || parseFloat(variance.scrap_kg) !== 0) && (
                 <Typography.Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
                     of which rejection {fmtKg(variance.rejection_kg)} kg · scrap {fmtKg(variance.scrap_kg)} kg
                 </Typography.Text>
             )}
-            <Typography.Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: 12 }}>
-                norm: {variance.norm_source === 'bom' ? 'BOM' : 'product weight'}
-            </Typography.Text>
+            {variance?.norm_source && (
+                <Typography.Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: 12 }}>
+                    norm: {variance.norm_source === 'bom' ? 'BOM' : 'product weight'}
+                </Typography.Text>
+            )}
         </>
     );
 }
@@ -1967,7 +1954,7 @@ export default function ApproveProductionPage() {
 
                         <DowntimeSection row={detailRow} logs={downtimeLogs?.data} loading={downtimeLoading} />
 
-                        {detailRow.variance && <VarianceSection variance={detailRow.variance} />}
+                        <VarianceSection variance={detailRow.variance} />
 
                         {(detailRow.material_consumptions ?? []).length > 0 && (
                             <>
