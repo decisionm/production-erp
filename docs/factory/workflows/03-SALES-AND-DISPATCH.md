@@ -78,18 +78,21 @@ own statement of the flow:
   Orders and Invoices pages still describes the reversed outbound direction;
   several code comments cite superseded decision ids; Q61 and Q72 lack their
   RESOLVED markers though DEC-20260831-012 resolves them.
+- **VERIFIED as a decision:** DEC-20260902-041, partial dispatch. Quality
+  approves only once the full line is held; the Store may then dispatch in
+  parts under the same approval, never above the remaining approved quantity;
+  after the first dispatch the approval cannot be withdrawn. A declared
+  clarification of DEC-20260831-006. The code already refuses over-delivery
+  and refuses withdrawal after dispatch; no build follows.
 - **OPEN (to ask, one at a time):**
-  1. Partial dispatch after full approval, and whether an approval can be
-     withdrawn once goods have moved (DEC-20260831-006 leaves the second open;
-     the code refuses it).
-  2. Step 4 says the finished goods must have "passed batch Quality" before
+  1. Step 4 says the finished goods must have "passed batch Quality" before
      dispatch approval. Nothing in code joins a hold or a dispatch approval to
      a batch; the approval checks only that the line is fully held. Is the
      batch's own Quality stage the gate, and how does the ERP know which
      batches a hold draws on?
-  3. "Promised date": the schema and form carry `expected_date`, whose meaning
+  2. "Promised date": the schema and form carry `expected_date`, whose meaning
      Q67 says was never recorded. Is it the date promised to the customer?
-  4. Sales Order amendment after a hold exists: quantity, date, cancellation.
-  5. Customer master: who creates customers, the Tally ledger import, FC-06.
-  6. An imported Tally invoice that matches no order: who resolves it, and how.
-  7. Dispatch by carton scan versus typed quantity, given live has no cartons.
+  3. Sales Order amendment after a hold exists: quantity, date, cancellation.
+  4. Customer master: who creates customers, the Tally ledger import, FC-06.
+  5. An imported Tally invoice that matches no order: who resolves it, and how.
+  6. Dispatch by carton scan versus typed quantity, given live has no cartons.
