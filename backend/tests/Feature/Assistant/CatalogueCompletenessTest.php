@@ -21,13 +21,27 @@ class CatalogueCompletenessTest extends TestCase
 {
     use RefreshDatabase;
 
+    /**
+     * SQLite in memory reports tables schema-qualified ("main.customers");
+     * MySQL does not. The catalogue is keyed by the bare name.
+     *
+     * @return list<string>
+     */
+    private function tables(): array
+    {
+        return array_map(
+            static fn (string $table) => str_contains($table, '.') ? substr($table, strrpos($table, '.') + 1) : $table,
+            Schema::getTableListing(),
+        );
+    }
+
     public function test_every_business_table_has_an_annotated_file(): void
     {
         $catalogue = SchemaCatalogue::fromDirectory(resource_path('schema-catalogue'));
         $modules = array_keys(PermissionService::MODULES);
         $problems = [];
 
-        foreach (Schema::getTableListing() as $table) {
+        foreach ($this->tables() as $table) {
             if (in_array($table, CatalogueGenerator::FRAMEWORK_TABLES, true)) {
                 continue;
             }
@@ -68,7 +82,7 @@ class CatalogueCompletenessTest extends TestCase
     public function test_no_file_names_a_table_the_database_does_not_have(): void
     {
         $catalogue = SchemaCatalogue::fromDirectory(resource_path('schema-catalogue'));
-        $tables = Schema::getTableListing();
+        $tables = $this->tables();
 
         $orphans = array_values(array_diff(array_keys($catalogue->all()), $tables));
 

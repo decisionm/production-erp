@@ -3,6 +3,7 @@
 use App\Exceptions\DomainException;
 use App\Http\Middleware\EnsureDraftIsProductionsOwn;
 use App\Http\Middleware\EnsureModulePermission;
+use App\Http\Middleware\EnsureModuleReadPermission;
 use App\Http\Middleware\EnsureTraceabilityEnabled;
 use App\Http\Middleware\EnsureUserIsActive;
 use Illuminate\Foundation\Application;
@@ -38,6 +39,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->alias([
             'module' => EnsureModulePermission::class,
+            'module-read' => EnsureModuleReadPermission::class,
             'active' => EnsureUserIsActive::class,
             'traceability' => EnsureTraceabilityEnabled::class,
             'own-draft' => EnsureDraftIsProductionsOwn::class,

@@ -14,12 +14,17 @@ use Symfony\Component\Yaml\Yaml;
  */
 final class CatalogueGenerator
 {
-    /** Laravel's and the packages' own tables — nothing a factory asks about. */
+    /**
+     * Laravel's and the packages' own tables — nothing a factory asks about
+     * — and the assistant's own conversation log, which is one login's
+     * questions and must not be readable through another login's questions.
+     */
     public const array FRAMEWORK_TABLES = [
         'migrations', 'cache', 'cache_locks', 'jobs', 'job_batches', 'failed_jobs',
         'sessions', 'password_reset_tokens', 'personal_access_tokens', 'activity_log',
         'permissions', 'roles', 'model_has_permissions', 'model_has_roles', 'role_has_permissions',
         'sqlite_sequence',
+        'ask_erp_conversations', 'ask_erp_messages',
     ];
 
     /**
