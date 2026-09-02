@@ -841,7 +841,12 @@ invoicable at all; should drafts count as invoiced; is a cancellation reason
 of these can be flipped without touching data. **Blocks:** nothing — defaults in
 force are stated in the UI. *Open since 2026-08-17.*
 
-## Q45 · Must a product standard always keep ONE default packaging?
+## Q45 · Must a product standard always keep ONE default packaging? — RESOLVED
+
+**Resolved 2026-09-02 by DEC-20260902-020:** no. At most one OPTIONAL default.
+One option selects itself; several with a default use it; several without a
+default ask the supervisor at Start Batch; the choice is saved in the batch
+snapshot. The original entry follows.
 
 Phase 5 (Product / SKU configuration) lets one product standard carry two
 packings of the same mode with different counts (the case DEC-20260810-003 was

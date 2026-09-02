@@ -389,8 +389,20 @@ record's source.
 - **GAP:** the completion drawer does not show the added item's category or a
   warning today; the refusal set and the audit already exist.
 
+## 10. Start Batch: which packaging
+
+### Result
+
+- **VERIFIED as a decision:** DEC-20260902-020. At most one optional default
+  packaging. One option selects itself; several with a default use it; several
+  without a default ask the supervisor at Start Batch. The choice is saved in
+  the batch snapshot. No forced default. Q45 closed.
+- **VERIFIED (code):** the at-most-one-default rule, the Shift Floor question
+  on a real choice, and the snapshot already exist; the build confirms the
+  single-option auto-select and that the ask happens at Start Batch.
+
 ## Sections still to capture
 
-- Batch lifecycle: the remaining open points (Q45 default packaging, Q93
-  factory rules, variance bands).
+- Batch lifecycle: the remaining open points (Q93 factory rules, variance
+  bands).
 - Store and held stock.
