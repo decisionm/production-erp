@@ -50,6 +50,9 @@ export async function listVendors(
     // them) — see the Vendors tab and vendorClassification.ts.
     classifications?: VendorClassification[],
     unclassified = false,
+    // ListVendorsRequest::SORTABLE in the ListSort spelling (03-Sep-2026);
+    // trailing and optional for the same reason, absent = name order.
+    sort?: string,
 ): Promise<Paginated<Vendor>> {
     const term = search?.trim() ?? '';
     const { data } = await api.get<Paginated<Vendor>>('/procurement/vendors', {
@@ -59,6 +62,7 @@ export async function listVendors(
             ...(term !== '' ? { q: term } : {}),
             ...(classifications && classifications.length > 0 ? { classification: classifications } : {}),
             ...(unclassified ? { unclassified: 1 } : {}),
+            ...(sort ? { sort } : {}),
         },
     });
     return data;

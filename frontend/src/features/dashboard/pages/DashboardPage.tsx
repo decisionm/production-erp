@@ -26,6 +26,7 @@ import type {
 } from '@/features/production/types';
 import { listAllTallySyncEntries } from '@/features/tally-sync/api';
 import { ADOPTED_MODULES } from '@/lib/adoptedModules';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 import { itemLabel } from '@/lib/itemLabel';
 import '../dashboard.css';
 
@@ -422,17 +423,43 @@ export default function DashboardPage() {
                             pagination={false}
                             scroll={{ x: 'max-content' }}
                             dataSource={summary.demand}
+                            // The whole order book is here (no pager): honest
+                            // client sorters, undated promises last.
                             columns={[
-                                { title: 'Product', dataIndex: 'item' },
-                                { title: 'Customer', dataIndex: 'customer' },
-                                { title: 'Promised', dataIndex: 'expected_date', render: (d: string | null) => d ?? '—' },
-                                { title: 'Ordered', dataIndex: 'ordered', align: 'right', render: fmtQty },
-                                { title: 'Delivered', dataIndex: 'delivered', align: 'right', render: fmtQty },
-                                { title: 'In stock', dataIndex: 'on_hand', align: 'right', render: fmtQty },
+                                { title: 'Product', dataIndex: 'item', sorter: columnSorter((r: DemandRow) => r.item, 'text') },
+                                { title: 'Customer', dataIndex: 'customer', sorter: columnSorter((r: DemandRow) => r.customer, 'text') },
+                                {
+                                    title: 'Promised',
+                                    dataIndex: 'expected_date',
+                                    sorter: columnSorter((r: DemandRow) => r.expected_date, 'date'),
+                                    render: (d: string | null) => d ?? '—',
+                                },
+                                {
+                                    title: 'Ordered',
+                                    dataIndex: 'ordered',
+                                    align: 'right',
+                                    sorter: columnSorter((r: DemandRow) => r.ordered, 'number'),
+                                    render: fmtQty,
+                                },
+                                {
+                                    title: 'Delivered',
+                                    dataIndex: 'delivered',
+                                    align: 'right',
+                                    sorter: columnSorter((r: DemandRow) => r.delivered, 'number'),
+                                    render: fmtQty,
+                                },
+                                {
+                                    title: 'In stock',
+                                    dataIndex: 'on_hand',
+                                    align: 'right',
+                                    sorter: columnSorter((r: DemandRow) => r.on_hand, 'number'),
+                                    render: fmtQty,
+                                },
                                 {
                                     title: 'To produce',
                                     dataIndex: 'to_produce',
                                     align: 'right',
+                                    sorter: columnSorter((r: DemandRow) => r.to_produce, 'number'),
                                     render: (v: string) =>
                                         parseFloat(v) > 0 ? (
                                             <Typography.Text strong>{fmtQty(v)}</Typography.Text>
@@ -482,12 +509,19 @@ export default function DashboardPage() {
                             scroll={{ x: 'max-content' }}
                             dataSource={summary.incoming_stock}
                             columns={[
-                                { title: 'Vendor', dataIndex: 'vendor' },
+                                { title: 'Vendor', dataIndex: 'vendor', sorter: columnSorter((r: IncomingStockRow) => r.vendor, 'text') },
                                 { title: 'Items', dataIndex: 'items' },
-                                { title: 'Expected', dataIndex: 'expected_date', render: (d: string | null) => d ?? '—' },
+                                {
+                                    title: 'Expected',
+                                    dataIndex: 'expected_date',
+                                    sorter: columnSorter((r: IncomingStockRow) => r.expected_date, 'date'),
+                                    render: (d: string | null) => d ?? '—',
+                                },
                                 {
                                     title: 'Status',
                                     dataIndex: 'status',
+                                    filters: filterOptions(summary.incoming_stock, (r) => r.status),
+                                    onFilter: onFilterBy((r: IncomingStockRow) => r.status),
                                     render: (status: string) => (
                                         <Tag color={statusColor[status] ?? 'default'}>{status}</Tag>
                                     ),
@@ -613,11 +647,17 @@ export default function DashboardPage() {
                             scroll={{ x: 'max-content' }}
                             dataSource={summary.recent_sales_orders}
                             columns={[
-                                { title: 'Customer', dataIndex: 'customer' },
-                                { title: 'Order date', dataIndex: 'order_date' },
+                                { title: 'Customer', dataIndex: 'customer', sorter: columnSorter((r: RecentSalesOrder) => r.customer, 'text') },
+                                {
+                                    title: 'Order date',
+                                    dataIndex: 'order_date',
+                                    sorter: columnSorter((r: RecentSalesOrder) => r.order_date, 'date'),
+                                },
                                 {
                                     title: 'Status',
                                     dataIndex: 'status',
+                                    filters: filterOptions(summary.recent_sales_orders, (r) => r.status),
+                                    onFilter: onFilterBy((r: RecentSalesOrder) => r.status),
                                     render: (status: string) => (
                                         <Tag color={statusColor[status] ?? 'default'}>{status}</Tag>
                                     ),

@@ -43,6 +43,7 @@ class StockMovementController extends Controller
             purposes: $this->filterEnumList($request, 'purpose', StockMovementPurpose::class),
             perPage: $this->perPage($request),
             reference: $request->reference(),
+            sort: $request->sort(),
         ));
     }
 

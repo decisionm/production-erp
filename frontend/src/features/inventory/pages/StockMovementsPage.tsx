@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listAllItems, listAllWarehouses, listStockMovements } from '@/features/inventory/api';
 import {
+    STOCK_LEDGER_DEFAULT_SORT,
+    STOCK_LEDGER_SORT_FIELDS,
     STOCK_LEDGER_SPEC,
     type StockLedgerListParams,
     ledgerNoMatchLine,
@@ -19,6 +21,7 @@ import { itemLabel } from '@/lib/itemLabel';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { narrowingKeys } from '@/lib/listParams';
 import { TABLE_STICKY, rangeLine, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { useListParams } from '@/lib/useListParams';
 
 /**
@@ -40,8 +43,12 @@ import { useListParams } from '@/lib/useListParams';
  * screen and hide every match on the other pages, which is worse than not
  * offering it. stockLedger.ts holds that rule and the test that pins it.
  *
- * THE URL IS THE LIST'S STATE (useListParams): item, warehouse, needle, page
- * and page size, so a refresh, Back or a pasted link lands on the same view.
+ * SORTED BY THE SERVER, for the same reason. Date, Type, Purpose and
+ * Quantity carry sortOrder-controlled sorters that re-query the whole ledger
+ * (ListStockMovementsRequest::SORTABLE); antd never sorts the loaded page.
+ *
+ * THE URL IS THE LIST'S STATE (useListParams): item, warehouse, needle, sort,
+ * page and page size, so a refresh, Back or a pasted link lands on the same view.
  *
  * NO COST COLUMN. `StockMovementResource` omits unit_cost for anyone without
  * finance access (FC-06) and the two screens that do show it are per-item, with
@@ -59,6 +66,7 @@ export default function StockMovementsPage() {
         itemId: params.item_id,
         warehouseId: params.warehouse_id,
         q: params.q,
+        sort: params.sort,
         page: params.page,
         perPage: params.per_page,
     });
@@ -184,10 +192,17 @@ export default function StockMovementsPage() {
                     ),
                 }}
                 pagination={serverPagination(data?.meta, setPage, 'movements')}
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, STOCK_LEDGER_SORT_FIELDS, STOCK_LEDGER_DEFAULT_SORT) });
+                }}
                 columns={[
                     {
                         title: 'Date',
                         dataIndex: 'movement_date',
+                        key: 'movement_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('movement_date', params.sort, STOCK_LEDGER_DEFAULT_SORT),
                         render: (value: string) => formatDateTime(value),
                     },
                     {
@@ -200,11 +215,17 @@ export default function StockMovementsPage() {
                     {
                         title: 'Type',
                         dataIndex: 'type',
+                        key: 'type',
+                        sorter: true,
+                        sortOrder: columnSortOrder('type', params.sort, STOCK_LEDGER_DEFAULT_SORT),
                         render: (type: string) => <Tag color={movementTypeTone(type)}>{type.replaceAll('_', ' ')}</Tag>,
                     },
                     {
                         title: 'Purpose',
                         dataIndex: 'purpose',
+                        key: 'purpose',
+                        sorter: true,
+                        sortOrder: columnSortOrder('purpose', params.sort, STOCK_LEDGER_DEFAULT_SORT),
                         // A dash here means the row predates the purpose column;
                         // "Not stated" means the writer had one to give and did
                         // not. Two different facts, two different cells.
@@ -213,7 +234,14 @@ export default function StockMovementsPage() {
                             return label ? <Tag color={label.tone}>{label.text}</Tag> : '—';
                         },
                     },
-                    { title: 'Quantity', dataIndex: 'quantity', align: 'right' },
+                    {
+                        title: 'Quantity',
+                        dataIndex: 'quantity',
+                        key: 'quantity',
+                        align: 'right',
+                        sorter: true,
+                        sortOrder: columnSortOrder('quantity', params.sort, STOCK_LEDGER_DEFAULT_SORT),
+                    },
                     {
                         title: 'Reference',
                         dataIndex: 'reference',

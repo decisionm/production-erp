@@ -8,6 +8,7 @@ use App\Modules\Production\Services\ProductionRequestService;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\SalesOrder;
 use App\Modules\Sales\Models\SalesOrderLine;
+use App\Support\Lists\ListSort;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Pagination\Paginator;
@@ -78,6 +79,14 @@ class FulfilmentQueueService
 
     public const PER_PAGE_MAX = 200;
 
+    /**
+     * The REAL columns of the queue's base query a reader may order by: the
+     * order number and the ordered quantity (sales_order_lines' own). Every
+     * other column on the queue — reserved, shortfall, free, state — is
+     * computed per row and has no server order.
+     */
+    public const SORTABLE = ['sales_order_id', 'quantity'];
+
     public function __construct(
         private readonly AvailabilityService $availability,
         private readonly StockReservationService $reservations,
@@ -94,7 +103,8 @@ class FulfilmentQueueService
      */
     public function queue(array $filters = [], int $perPage = self::PER_PAGE_DEFAULT, int $page = 1): LengthAwarePaginator
     {
-        $rows = $this->rows();
+        $sort = $filters['sort'] ?? null;
+        $rows = $this->rows(is_string($sort) && trim($sort) !== '' ? trim($sort) : null);
 
         $state = $filters['state'] ?? null;
 
@@ -164,19 +174,28 @@ class FulfilmentQueueService
      * Every candidate row, computed and sorted — over-reserved first, then
      * oldest order first so the queue reads like the order book does.
      *
+     * A REQUESTED `$sort` (03-Sep-2026) replaces that order with the reader's
+     * own: one of SORTABLE — the real columns of this base query — with
+     * ListSort's id-desc tiebreak, and WITHOUT the over-reserved hoist, since
+     * a column the reader clicked is the order they asked to see. The
+     * over-reserved figure is still printed in red on every row (S8 is a
+     * visibility rule as much as an ordering one), and the default order is
+     * untouched.
+     *
      * @return list<array<string, mixed>>
      */
-    private function rows(): array
+    private function rows(?string $sort = null): array
     {
-        $lines = SalesOrderLine::query()
+        $query = SalesOrderLine::query()
             ->with(['item:id,sku,name,display_name,uom', 'salesOrder:id,status,customer_id', 'salesOrder.customer:id,name'])
             ->whereHas('salesOrder', fn ($order) => $order->whereIn('status', [
                 SalesOrderStatus::Confirmed,
                 SalesOrderStatus::PartiallyDelivered,
-            ]))
-            ->orderBy('sales_order_id')
-            ->orderBy('id')
-            ->get();
+            ]));
+
+        $lines = $sort === null
+            ? $query->orderBy('sales_order_id')->orderBy('id')->get()
+            : ListSort::apply($query, $sort, self::SORTABLE)->get();
 
         if ($lines->isEmpty()) {
             return [];
@@ -202,6 +221,10 @@ class FulfilmentQueueService
                 $holds[(int) $line->id] ?? null,
                 $requests[(int) $line->id] ?? null,
             );
+        }
+
+        if ($sort !== null) {
+            return $rows;
         }
 
         // OVER-RESERVED FIRST, and the rest left in the order the query

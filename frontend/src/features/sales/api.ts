@@ -21,9 +21,11 @@ import type {
  * list was a handful of demo rows, actively misleading once the ledger import
  * puts hundreds of real customers behind it.
  */
-export async function listCustomers(page = 1, perPage = 50): Promise<Paginated<Customer>> {
+export async function listCustomers(page = 1, perPage = 50, sort?: string): Promise<Paginated<Customer>> {
     const { data } = await api.get<Paginated<Customer>>('/sales/customers', {
-        params: { page, per_page: perPage },
+        // `sort` (ListCustomersRequest::SORTABLE) is trailing and optional so
+        // every picker's positional `listCustomers(1, 200)` still compiles.
+        params: { page, per_page: perPage, ...(sort ? { sort } : {}) },
     });
     return data;
 }

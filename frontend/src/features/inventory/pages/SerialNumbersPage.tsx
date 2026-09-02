@@ -1,13 +1,23 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Drawer, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
 import { createSerialNumber, getSerialNumberHistory, listAllItems, listSerialNumbers } from '@/features/inventory/api';
+import {
+    SERIAL_NUMBER_DEFAULT_SORT,
+    SERIAL_NUMBER_LIST_SPEC,
+    SERIAL_NUMBER_SORT_FIELDS,
+    type SerialNumberListParams,
+    serialNumberListRequest,
+} from '@/features/inventory/serialNumberList';
 import type { SerialNumber, SerialNumberStatus } from '@/features/inventory/types';
 import { itemLabel } from '@/lib/itemLabel';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const serialSchema = z.object({
     item_id: z.number({ error: 'Item is required' }),
@@ -30,15 +40,20 @@ export default function SerialNumbersPage() {
     const [barcodeSerial, setBarcodeSerial] = useState<SerialNumber | null>(null);
     const queryClient = useQueryClient();
 
-    // Server-side paging and search, for the reason the batch list has them:
-    // the table showed the newest twenty and nothing said there were more.
-    const [page, setPage] = useState(1);
-    const [perPage, setPerPage] = useState(20);
-    const [search, setSearch] = useState('');
+    // Server-side paging, search and ordering, in the URL, for the reason the
+    // batch list has them: the table showed the newest twenty and nothing
+    // said there were more.
+    const { params, setParams, setPage } = useListParams<SerialNumberListParams>(SERIAL_NUMBER_LIST_SPEC);
+    const request = serialNumberListRequest(params);
+    const [qDraft, setQDraft] = useState(params.q ?? '');
+    useEffect(() => {
+        setQDraft(params.q ?? '');
+    }, [params.q]);
 
     const { data, isLoading } = useQuery({
-        queryKey: ['inventory', 'serial-numbers', page, perPage, search],
-        queryFn: () => listSerialNumbers({ page, per_page: perPage, search: search || undefined }),
+        queryKey: ['inventory', 'serial-numbers', request],
+        queryFn: () => listSerialNumbers(request),
+        placeholderData: (previous) => previous,
     });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const itemOptions = items?.data.filter((i) => i.tracking_type === 'serial').map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
@@ -76,10 +91,9 @@ export default function SerialNumbersPage() {
                         allowClear
                         placeholder="Serial number or item"
                         style={{ width: 260 }}
-                        onSearch={(value) => {
-                            setSearch(value.trim());
-                            setPage(1);
-                        }}
+                        value={qDraft}
+                        onChange={(event) => setQDraft(event.target.value)}
+                        onSearch={(value) => setParams({ q: value.trim() || undefined })}
                     />
                     <Button type="primary" onClick={() => setModalOpen(true)}>Register Serial Number</Button>
                 </Space>
@@ -91,28 +105,34 @@ export default function SerialNumbersPage() {
             </Typography.Paragraph>
 
             <Table<SerialNumber>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={{
-                    current: page,
-                    pageSize: perPage,
-                    total: data?.meta?.total ?? data?.data?.length ?? 0,
-                    showSizeChanger: true,
-                    pageSizeOptions: [20, 50, 100, 200],
-                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} serial numbers`,
-                    onChange: (nextPage, nextSize) => {
-                        setPage(nextPage);
-                        setPerPage(nextSize);
-                    },
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queries the
+                // whole list. Item and Warehouse render relations and carry
+                // no sorter.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, SERIAL_NUMBER_SORT_FIELDS, SERIAL_NUMBER_DEFAULT_SORT) });
                 }}
+                pagination={serverPagination(data?.meta, setPage, 'serial numbers')}
                 columns={[
                     { title: 'Item', render: (_, row) => itemLabel(row.item) },
-                    { title: 'Serial Number', dataIndex: 'serial_number' },
+                    {
+                        title: 'Serial Number',
+                        dataIndex: 'serial_number',
+                        key: 'serial_number',
+                        sorter: true,
+                        sortOrder: columnSortOrder('serial_number', params.sort, SERIAL_NUMBER_DEFAULT_SORT),
+                    },
                     {
                         title: 'Status',
                         dataIndex: 'status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, SERIAL_NUMBER_DEFAULT_SORT),
                         render: (status: SerialNumberStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
                     { title: 'Warehouse', render: (_, row) => row.warehouse?.code ?? '—' },

@@ -2,8 +2,10 @@
 
 namespace App\Modules\Inventory\Services;
 
+use App\Modules\Inventory\Http\Requests\ListSerialNumbersRequest;
 use App\Modules\Inventory\Models\Enums\SerialNumberStatus;
 use App\Modules\Inventory\Models\SerialNumber;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Str;
 
@@ -25,9 +27,9 @@ class SerialNumberService
      * separate query, and a unit of a deleted item was listing with a null
      * item — unreadable on the very screen that has to trace it.
      */
-    public function paginate(?int $itemId, int $perPage = 20, ?string $search = null, ?string $code = null): LengthAwarePaginator
+    public function paginate(?int $itemId, int $perPage = 20, ?string $search = null, ?string $code = null, ?string $sort = null): LengthAwarePaginator
     {
-        return SerialNumber::query()
+        $query = SerialNumber::query()
             ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
             ->when($code !== null, fn ($query) => $query->whereRaw(
                 'lower(serial_number) = ?', [Str::lower($code)]
@@ -39,8 +41,9 @@ class SerialNumberService
                     ->orWhereHas('item', fn ($item) => $item->withTrashed()
                         ->where(fn ($q) => $q->where('sku', 'like', $like)->orWhere('name', 'like', $like))));
             })
-            ->with(['item' => fn ($item) => $item->withTrashed(), 'warehouse'])
-            ->orderByDesc('id')
+            ->with(['item' => fn ($item) => $item->withTrashed(), 'warehouse']);
+
+        return ListSort::apply($query, $sort, ListSerialNumbersRequest::SORTABLE, '-id')
             ->paginate($perPage);
     }
 
