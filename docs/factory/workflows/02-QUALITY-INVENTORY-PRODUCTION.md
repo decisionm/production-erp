@@ -133,10 +133,52 @@ sit inside DEC-20260902-004 and DEC-20260902-005 and need no new owner question.
    material-flow URLs already use in `App.tsx`. Every `day_bin_movements` row
    and every other historical record stays unchanged.
 
+## 4. Finished-goods Quality checklist
+
+### Owner input (02-Sep-2026)
+
+Verbatim: "finished goods quality checklist: checker sees batch, sample count,
+weight, visual defects".
+
+Reading: the Quality checker opens a completed batch and works one screen that
+shows the batch, takes the number of pieces sampled, takes the sample weight and
+compares it with the standard weight, and records the visual defects found.
+
+### Current application
+
+- There is no checklist. The quality stage is a COUNT: reviewed, ok and rejected
+  pieces plus an optional note, refused unless reviewed = ok + rejected and
+  rejected ≤ produced (`StoreBatchQualityCheckRequest`).
+- Four eyes already hold: the checker needs `quality.manage` and cannot be the
+  person who completed the batch. The Plant Manager cannot approve until the
+  check is recorded (FC-05).
+- Rejected pieces are issued out of finished goods and received as scrap at the
+  run's frozen unit weight (FC-02, DEC-20260805-001).
+- A standard weight exists for every run: the frozen unit weight taken at Start
+  Batch from configuration → standard → item master (DEC-20260805-005). Nothing
+  compares a measured weight against it today.
+- No defect master is verified. The configuration workspace has a Scrap Reasons
+  tab, which records why scrap arose, not what a checker saw on a sample.
+- Details and citations: [research note](research/2026-09-02-quality-inventory-production-ground-truth.md) §3.
+
+### Result
+
+- **REQUIRED:** one checklist screen per completed batch showing the batch,
+  sample count, weight and visual defects.
+- **GAP:** none of the four exists as a checklist; only the count and note do.
+- **OPEN (to ask, one at a time):**
+  1. Does the checklist replace the ok/rejected count, or sit beside it? The
+     count is what nets stock and books scrap today.
+  2. Weight: the measured sample weight against the run's frozen unit weight.
+     Is there a tolerance, and who states it? Not to be invented.
+  3. Visual defects: a fixed list a person maintains, or free text?
+  4. Sample count: entered by the checker each time, or a fixed rule per product?
+  5. Who is the checker, and may a checker who also holds Plant Manager approve
+     their own check? The code leaves this as a comment, with no question id.
+
 ## Sections still to capture
 
 - Incoming Quality checklist for purchased material.
-- Finished-goods Quality checklist.
 - Product Configuration standards and what a batch completion checks against them.
 - Batch lifecycle: queue, start, run recording, complete, QC, approvals.
 - Store, held stock and the finished-goods store acceptance.
