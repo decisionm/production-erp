@@ -665,7 +665,10 @@ chosen by an agent or inferred from code — it is a fact about how the office
 works. **Blocks:** scheduling the first real customer-outstanding pull; the
 build and review can proceed without it. *Open since 2026-08-12.*
 
-## Q37 · Will the factory record enquiries and quotations at all?
+## Q37 · Will the factory record enquiries and quotations at all? — RESOLVED
+
+**Resolved 2026-09-02 by DEC-20260902-052:** no — enquiries, CRM and
+quotations stay out of scope and hidden. The original entry follows.
 
 CRM stays hidden (DEC-20260812-001) until the factory records its first real
 enquiry, because opening Leads, Opportunities and Quotations empty is exactly
@@ -816,7 +819,13 @@ page's mapping surface reports such names as `ambiguous` with the count, so a
 duplicate would be visible there. **Blocks:** nothing new; keeps the old preview
 behaviour (block) until answered. *Open since 2026-08-17.*
 
-## Q44 · ERP sales-document lifecycle rules — draft SO invoicing, drafts in "invoiced", cancellation record
+## Q44 · ERP sales-document lifecycle rules — draft SO invoicing, drafts in "invoiced", cancellation record — PARTLY RESOLVED
+
+**Partly resolved 2026-09-02:** every cancellation records person, date and
+a mandatory reason (DEC-20260902-045); a Tally invoice matches only a
+confirmed order and a draft match stays unmatched with its reason
+(DEC-20260902-046). Still open: whether the carton/batch read for Sales users
+is acceptable. The original entry follows.
 
 Only matters if the ERP's Sales module is ever used for real: real sales are
 invoiced in Tally (DEC-20260809-003), so today these are demo-scale rules. Phase
@@ -1585,7 +1594,11 @@ written, which came from evidence rather than from this mapping.
 
 *Open since 2026-08-25.*
 
-## Q61 · May the ERP emit a Tally "Sales Order" voucher?
+## Q61 · May the ERP emit a Tally "Sales Order" voucher? — RESOLVED
+
+**Resolved 2026-08-31 by DEC-20260831-012, marker added 02-Sep-2026:** no —
+the ERP does not emit a Tally Sales Order voucher; the direction is inbound
+only. The original entry follows.
 
 DEC-20260809-003 records that ALL real sales are invoiced directly in Tally and
 that the ERP Sales module is demo-scale. That answer was given in the context of
@@ -1805,7 +1818,14 @@ number, because this file re-mints question numbers at merge — so a re-mint
 of this entry needs no code edit.
 *Open since 2026-08-27.*
 
-## Q67 · What may the FLOOR read on a job — the ETA, the free stock, the customer's date?
+## Q67 · What may the FLOOR read on a job — the ETA, the free stock, the customer's date? — RESOLVED
+
+**Resolved 2026-09-02 by DEC-20260902-043 and -044:** expected_date IS the
+date promised to the customer and is renamed Promised date, no second date;
+the floor reads product, required quantity, promised date, internal job
+reference and packing instructions, customer and PO only for a
+customer-specific carton label, never price, supplier, rate or unrelated
+stock. The original entry follows.
 
 The Production Queue screen (`GET /api/v1/production/queue`, new on 27-Aug)
 puts a job's demand and its date on one row. Opening that queue is OR-gated
@@ -2029,7 +2049,10 @@ it on needs BOTH an Accounts answer here AND a builder validated field-by-field
 against a real export. **Blocks:** any Sales voucher emission. *Open since
 2026-08-30.*
 
-## Q72 · Q61 revisited — the Tally Sales Order register IS in use
+## Q72 · Q61 revisited — the Tally Sales Order register IS in use — RESOLVED
+
+**Resolved 2026-08-31 by DEC-20260831-012, marker added 02-Sep-2026:** no —
+see Q61. The original entry follows.
 
 Q61 asks whether the ERP may emit a Tally "Sales Order" voucher, and notes as
 part of its premise that "Tally's own order register is not in use today as far
@@ -2045,7 +2068,12 @@ cancels one, stand unchanged. But it should be answered knowing the register is
 real and in daily use, not assumed dormant. **Blocks:** nothing beyond what Q61
 already blocks. *Open since 2026-08-30.*
 
-## Q73 · What does it MEAN when the store rejects a quantity?
+## Q73 · What does it MEAN when the store rejects a quantity? — RESOLVED
+
+**Resolved 2026-09-02 by DEC-20260902-048:** the Store records why it cannot
+fulfil; it may send only the shortfall to Production; if it does not, the
+shortfall returns to Sales; nothing is raised automatically. The original
+entry follows.
 
 The owner's fulfilment flow has the store approve a hold in full, approve it in
 part, or REJECT it, with production planning starting only for the quantity the
