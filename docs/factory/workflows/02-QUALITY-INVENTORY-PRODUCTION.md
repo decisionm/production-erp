@@ -198,9 +198,17 @@ separately, one at a time.
   enters how many pieces were sampled each time. No minimum, fixed count or
   per-product rule. Evidence only. A per-product minimum would be a new decision
   adding a warning on top.
-- **OPEN (asked one at a time, in this order):**
-  1. May a checker who also holds Plant Manager approve their own check? The
-     code leaves this as a comment, with no question id.
+- **VERIFIED as a decision:** DEC-20260902-010, the checker rule. The person
+  who performs the quality check cannot approve the same batch as Plant Manager.
+  The existing allow-same-user flag may relax it only when explicitly enabled
+  for a one-person operation, never automatically because someone holds both
+  roles. The system records who performed both actions.
+- **GAP:** the Plant Manager approval has no comparison against the checker
+  today; the build adds the third comparison beside the two that exist, under
+  the same flag.
+
+Section 4 is complete: DEC-20260902-006 to -010 cover the screen, the weight
+check, the observations, the sample count and the checker rule.
 
 ## Sections still to capture
 
