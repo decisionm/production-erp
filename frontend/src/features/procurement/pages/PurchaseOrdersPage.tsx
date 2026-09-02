@@ -12,6 +12,8 @@ import { AmendPurchaseOrderModal, PurchaseOrderReasonModal, type ReasonAction } 
 import PurchaseOrderTallyCell from '@/features/procurement/components/PurchaseOrderTallyCell';
 import PurchaseOrderTraceDrawer from '@/features/procurement/components/PurchaseOrderTraceDrawer';
 import {
+    PURCHASE_ORDER_DEFAULT_SORT,
+    PURCHASE_ORDER_SORT_FIELDS,
     type PurchaseOrderAction,
     amendedItemIds,
     canLabels,
@@ -27,6 +29,8 @@ import { isUnclassified } from '@/features/procurement/purchasePicker';
 import { vendorPickerOptionsWithFallback } from '@/features/procurement/vendorClassification';
 import type { PurchaseOrder } from '@/features/procurement/types';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
+import { TABLE_STICKY } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { usePurchaseOrderListParams } from '@/features/procurement/usePurchaseOrderListParams';
 
 const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
@@ -182,7 +186,15 @@ export default function PurchaseOrdersPage() {
 
             <Table<PurchaseOrder>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 rowKey="id"
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries; the list is paginated, so sorting the loaded
+                // page would misorder the whole result set.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setFilters((prev) => ({ ...prev, sort: sortParamFromSorter(sorter, PURCHASE_ORDER_SORT_FIELDS, PURCHASE_ORDER_DEFAULT_SORT) }));
+                }}
                 loading={isLoading}
                 dataSource={orders}
                 locale={{
@@ -208,7 +220,13 @@ export default function PurchaseOrdersPage() {
                         : false
                 }
                 columns={[
-                    { title: 'Number', render: (_, row) => <strong>{poNumber(row)}</strong> },
+                    {
+                        title: 'Number',
+                        key: 'id',
+                        sorter: true,
+                        sortOrder: columnSortOrder('id', filters.sort, PURCHASE_ORDER_DEFAULT_SORT),
+                        render: (_, row) => <strong>{poNumber(row)}</strong>,
+                    },
                     {
                         title: 'Status',
                         render: (_, row) => <Tag color={statusTag(row.status).color}>{statusTag(row.status).label}</Tag>,
@@ -225,7 +243,13 @@ export default function PurchaseOrdersPage() {
                             ),
                     },
                     { title: 'Vendor', render: (_, row) => row.vendor?.name ?? '—' },
-                    { title: 'Order Date', dataIndex: 'order_date' },
+                    {
+                        title: 'Order Date',
+                        key: 'order_date',
+                        dataIndex: 'order_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('order_date', filters.sort, PURCHASE_ORDER_DEFAULT_SORT),
+                    },
                     {
                         title: 'Received',
                         render: (_, row) => {
