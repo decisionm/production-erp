@@ -1136,7 +1136,12 @@ already names. What it blocks is knowing whether the narrow reading is the
 factory's. (c) additionally decides whether the `source: tally` route needs a
 trust check at all. *Open since 2026-08-17.*
 
-## Q54 · Five things the Store -> Production material flow cannot decide for itself
+## Q54 · Five things the Store -> Production material flow cannot decide for itself — (d) RESOLVED
+
+**(d) resolved 2026-09-02 by DEC-20260902-037:** the carton trace keeps its
+calculated bin-held-these-lots meaning and wording; the lot list now comes from
+the bags scanned at Store Issue; exact Store Issue details are shown separately
+and never combined with the calculated attribution. (a), (b), (c), (e) as below.
 
 Phase 7.5 builds the workflow the lead confirmed on 17-Aug (Q50, DEC-20260830-002):
 Store Stock -> Material Request -> Store Issue -> Scan/Handover -> Issued to
