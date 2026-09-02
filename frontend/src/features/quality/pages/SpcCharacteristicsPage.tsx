@@ -7,7 +7,19 @@ import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { listAllItems } from '@/features/inventory/api';
 import { createSpcCharacteristic, listSpcCharacteristics } from '@/features/quality/api';
+import { SPC_DEFAULT_SORT, SPC_LIST, SPC_SORT_FIELDS, type SpcListParams } from '@/features/quality/qualityLists';
 import type { SpcCharacteristic } from '@/features/quality/types';
+import { compactParams } from '@/lib/listParams';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
+
+/**
+ * The register's URL keys beyond page / per_page (SPC_LIST, qualityLists.ts):
+ * `item_id` narrows to one product, `sort` a column. Module-level:
+ * useListParams memoises on it.
+ */
+const SPC_LIST_SPEC = SPC_LIST.spec;
 
 const characteristicSchema = z.object({
     item_id: z.number({ error: 'Item is required' }),
@@ -24,7 +36,17 @@ export default function SpcCharacteristicsPage() {
     const queryClient = useQueryClient();
     const navigate = useNavigate();
 
-    const { data, isLoading } = useQuery({ queryKey: ['quality', 'spc-characteristics'], queryFn: () => listSpcCharacteristics() });
+    // THE URL IS THE LIST'S STATE (item, sort, page, page size) and the
+    // SERVER cuts the page: this table used to draw the server's first
+    // twenty rows under pagination={false}, with nothing on screen to say a
+    // twenty-first existed.
+    const { params, setParams, setPage } = useListParams<SpcListParams>(SPC_LIST_SPEC);
+    const request = compactParams(params);
+    const { data, isLoading } = useQuery({
+        queryKey: ['quality', 'spc-characteristics', request],
+        queryFn: () => listSpcCharacteristics(params),
+        placeholderData: (previous) => previous,
+    });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const itemOptions = items?.data.map((i) => ({ value: i.id, label: `${i.sku} — ${i.name}` })) ?? [];
 
@@ -53,15 +75,42 @@ export default function SpcCharacteristicsPage() {
 
             <Table<SpcCharacteristic>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries the whole register.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, SPC_SORT_FIELDS, SPC_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'characteristics')}
                 columns={[
+                    // Item shows a relation's sku and name — no column of the
+                    // characteristic's own table to sort on, so no sorter.
                     { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
-                    { title: 'Characteristic', dataIndex: 'name' },
-                    { title: 'Unit', dataIndex: 'unit_of_measure' },
-                    { title: 'Target', dataIndex: 'target_value' },
+                    {
+                        title: 'Characteristic',
+                        key: 'name',
+                        dataIndex: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, SPC_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Unit',
+                        key: 'unit_of_measure',
+                        dataIndex: 'unit_of_measure',
+                        sorter: true,
+                        sortOrder: columnSortOrder('unit_of_measure', params.sort, SPC_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Target',
+                        key: 'target_value',
+                        dataIndex: 'target_value',
+                        sorter: true,
+                        sortOrder: columnSortOrder('target_value', params.sort, SPC_DEFAULT_SORT),
+                    },
                     { title: 'LSL', dataIndex: 'lower_spec_limit' },
                     { title: 'USL', dataIndex: 'upper_spec_limit' },
                     {

@@ -23,6 +23,7 @@ use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\ShiftScrap;
 use App\Modules\Production\Models\WorkCenter;
 use App\Modules\TallySync\Services\VoucherPreviewService;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -48,6 +49,9 @@ use RuntimeException;
  */
 class ShiftProductionEntryService
 {
+    /** The columns paginate() may sort on by name besides id — what the quality queue's headers offer. */
+    public const SORTABLE = ['batch_number', 'quantity_produced', 'production_date'];
+
     public function __construct(
         private readonly StockMovementService $stock,
         private readonly BomService $boms,
@@ -142,6 +146,12 @@ class ShiftProductionEntryService
      * and the machine (code / name); `$oldestFirst` reverses the order,
      * because a queue is worked front to back and the oldest batch is the
      * one that has waited longest. Every default keeps the old answer.
+     *
+     * `$sort` (03-Sep-2026): a column the caller's request has validated
+     * against SORTABLE, in the ListSort spelling (`batch_number`,
+     * `-quantity_produced`), replacing the date/id order above with that
+     * column and `id desc` as the tie-break. Null — every existing caller —
+     * keeps the order exactly as it was; the membership is never touched.
      */
     public function paginate(
         int $perPage = 20,
@@ -159,6 +169,7 @@ class ShiftProductionEntryService
         bool $awaitingQualityCheck = false,
         ?string $q = null,
         bool $oldestFirst = false,
+        ?string $sort = null,
     ): LengthAwarePaginator {
         $includeCancelled = $includeCancelled || $batchStatus === BatchStatus::Cancelled;
 
@@ -240,8 +251,18 @@ class ShiftProductionEntryService
             ->when(trim((string) $q) !== '', fn ($query) => $this->whereMatchesTerm($query, trim((string) $q)))
             // The id is the tie-breaker either way: a day's batches share a
             // production_date, and the id is monotonic in creation order.
-            ->orderBy('production_date', $oldestFirst ? 'asc' : 'desc')
-            ->orderBy('id', $oldestFirst ? 'asc' : 'desc')
+            ->when($sort === null, fn ($query) => $query
+                ->orderBy('production_date', $oldestFirst ? 'asc' : 'desc')
+                ->orderBy('id', $oldestFirst ? 'asc' : 'desc'))
+            // A column sort asked for by name (the quality queue's headers,
+            // ListBatchQualityQueueRequest): the ListSort spelling, id desc
+            // as the tie-break. The membership above is untouched by it.
+            ->when($sort !== null, fn ($query) => ListSort::apply(
+                $query,
+                $sort,
+                self::SORTABLE,
+                $oldestFirst ? 'production_date' : '-production_date',
+            ))
             ->paginate($perPage, ['*'], 'page', $page);
     }
 

@@ -6,7 +6,25 @@ import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { CONFIGURATION_STATUS_WORDS } from '@/components/configuration/configurationWords';
 import { createMeasuringInstrument, listMeasuringInstruments, recordCalibration } from '@/features/quality/api';
+import {
+    INSTRUMENT_DEFAULT_SORT,
+    INSTRUMENT_LIST,
+    INSTRUMENT_SORT_FIELDS,
+    type InstrumentListParams,
+    instrumentListRequest,
+    instrumentsDueOnly,
+} from '@/features/quality/qualityLists';
 import type { CalibrationRecord, CalibrationResult, MeasuringInstrument, MeasuringInstrumentStatus } from '@/features/quality/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
+
+/**
+ * The register's URL keys beyond page / per_page (INSTRUMENT_LIST,
+ * qualityLists.ts): `due=1` is the switch, `sort` a column. Module-level:
+ * useListParams memoises on it.
+ */
+const INSTRUMENT_LIST_SPEC = INSTRUMENT_LIST.spec;
 
 const instrumentSchema = z.object({
     code: z.string().min(1, 'Code is required').max(32),
@@ -46,12 +64,20 @@ const resultOptions: { value: CalibrationResult; label: string }[] = [
 export default function InstrumentsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [calibratingId, setCalibratingId] = useState<number | null>(null);
-    const [dueOnly, setDueOnly] = useState(false);
     const queryClient = useQueryClient();
 
+    // THE URL IS THE LIST'S STATE — the due switch, sort, page and page size
+    // — and the SERVER cuts the page: this table used to draw the server's
+    // first twenty rows under pagination={false}, with nothing on screen to
+    // say a twenty-first existed. The switch used to live in component
+    // state and was lost on a refresh.
+    const { params, setParams, setPage } = useListParams<InstrumentListParams>(INSTRUMENT_LIST_SPEC);
+    const dueOnly = instrumentsDueOnly(params);
+    const request = instrumentListRequest(params);
     const { data, isLoading } = useQuery({
-        queryKey: ['quality', 'instruments', dueOnly],
-        queryFn: () => listMeasuringInstruments(dueOnly),
+        queryKey: ['quality', 'instruments', request],
+        queryFn: () => listMeasuringInstruments(request),
+        placeholderData: (previous) => previous,
     });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['quality', 'instruments'] });
@@ -98,7 +124,7 @@ export default function InstrumentsPage() {
                 <Space>
                     <Space>
                         <Typography.Text>Due for calibration only</Typography.Text>
-                        <Switch checked={dueOnly} onChange={setDueOnly} />
+                        <Switch checked={dueOnly} onChange={(checked) => setParams({ due: checked ? '1' : undefined })} />
                     </Space>
                     <Button type="primary" onClick={() => setModalOpen(true)}>New Instrument</Button>
                 </Space>
@@ -106,20 +132,61 @@ export default function InstrumentsPage() {
 
             <Table<MeasuringInstrument>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries the whole register.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, INSTRUMENT_SORT_FIELDS, INSTRUMENT_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'instruments')}
                 columns={[
-                    { title: 'Code', dataIndex: 'code' },
-                    { title: 'Name', dataIndex: 'name' },
-                    { title: 'Location', dataIndex: 'location' },
+                    {
+                        title: 'Code',
+                        key: 'code',
+                        dataIndex: 'code',
+                        sorter: true,
+                        sortOrder: columnSortOrder('code', params.sort, INSTRUMENT_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Name',
+                        key: 'name',
+                        dataIndex: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, INSTRUMENT_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Location',
+                        key: 'location',
+                        dataIndex: 'location',
+                        sorter: true,
+                        sortOrder: columnSortOrder('location', params.sort, INSTRUMENT_DEFAULT_SORT),
+                    },
                     { title: 'Frequency (days)', dataIndex: 'calibration_frequency_days' },
-                    { title: 'Last Calibrated', dataIndex: 'last_calibrated_date' },
-                    { title: 'Next Due', dataIndex: 'next_calibration_due' },
+                    {
+                        // Nullable: a never-calibrated gauge sorts last either way (server-side).
+                        title: 'Last Calibrated',
+                        key: 'last_calibrated_date',
+                        dataIndex: 'last_calibrated_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('last_calibrated_date', params.sort, INSTRUMENT_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Next Due',
+                        key: 'next_calibration_due',
+                        dataIndex: 'next_calibration_due',
+                        sorter: true,
+                        sortOrder: columnSortOrder('next_calibration_due', params.sort, INSTRUMENT_DEFAULT_SORT),
+                    },
                     {
                         title: 'Status',
+                        key: 'status',
                         dataIndex: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, INSTRUMENT_DEFAULT_SORT),
                         render: (status: MeasuringInstrumentStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
                     {

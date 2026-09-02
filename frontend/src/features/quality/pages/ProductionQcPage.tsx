@@ -12,10 +12,17 @@ import {
 } from '@/features/quality/api';
 import { ListNoMatch } from '@/features/quality/components/ListNoMatch';
 import { grossProducedPieces, readQuantity } from '@/features/production/types';
+import {
+    PRODUCTION_QC_DEFAULT_SORT,
+    PRODUCTION_QC_LIST,
+    PRODUCTION_QC_SORT_FIELDS,
+    type SortedListParams,
+} from '@/features/quality/qualityLists';
 import { itemLabel } from '@/lib/itemLabel';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
-import { type ListParamsSpec, compactParams } from '@/lib/listParams';
+import { compactParams } from '@/lib/listParams';
 import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { useListParams } from '@/lib/useListParams';
 
 /**
@@ -49,12 +56,13 @@ const fmtKg = (raw: string | null | undefined): string => {
 };
 
 /**
- * The queue's URL keys are only q / page / per_page: its MEMBERSHIP and its
- * ORDER (oldest first, id breaking the tie) are the server's contract, not
- * something a query string may widen or re-sort. Module-level: useListParams
- * memoises on it.
+ * The queue's URL keys are q / page / per_page and `sort`: its MEMBERSHIP
+ * is the server's contract, not something a query string may widen; its
+ * ORDER is oldest first (id breaking the tie) unless a column header asks
+ * the server for another (PRODUCTION_QC_LIST, qualityLists.ts). Module-
+ * level: useListParams memoises on it.
  */
-const QUEUE_LIST_SPEC: ListParamsSpec = {};
+const QUEUE_LIST_SPEC = PRODUCTION_QC_LIST.spec;
 
 export default function ProductionQcPage() {
     const user = useAuthStore((s) => s.user);
@@ -86,7 +94,7 @@ export default function ProductionQcPage() {
     // THE URL IS THE QUEUE'S STATE (search, page, page size) and the SERVER
     // cuts the page: this screen used to walk every page of the production
     // list and filter and re-sort in the browser.
-    const { params, setParams, setPage, reset } = useListParams(QUEUE_LIST_SPEC);
+    const { params, setParams, setPage, reset } = useListParams<SortedListParams>(QUEUE_LIST_SPEC);
     const request = compactParams(params);
 
     const { data, isLoading, isPending, isError, error, refetch } = useQuery({
@@ -99,8 +107,9 @@ export default function ProductionQcPage() {
 
     const status = (error as { response?: { status?: number } } | null)?.response?.status;
     const forbidden = status === 403;
-    // The server's order IS the queue's order — oldest first, id breaking the
-    // tie — so a page is a slice of the queue, never a re-sort of one.
+    // The server's order IS the queue's order — oldest first, or the column
+    // the URL's sort names — so a page is a slice of the queue, never a
+    // re-sort of one.
     const rows = data?.data ?? [];
     // The factory has stood the quality stage down (PROD_QUALITY_STAGE_ENABLED
     // =false). The server says so in meta, because no row can; saying it is
@@ -193,6 +202,13 @@ export default function ProductionQcPage() {
                 size="small"
                 rowKey="id"
                 loading={isLoading}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries the whole queue; sorting the loaded page
+                // would misorder the rest of it.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, PRODUCTION_QC_SORT_FIELDS, PRODUCTION_QC_DEFAULT_SORT) });
+                }}
                 pagination={serverPagination(data?.meta, setPage, 'batches')}
                 dataSource={rows}
                 locale={{
@@ -209,12 +225,25 @@ export default function ProductionQcPage() {
                     ),
                 }}
                 columns={[
-                    { title: 'Batch #', dataIndex: 'batch_number', render: (v: string | null) => v ?? '—' },
+                    {
+                        title: 'Batch #',
+                        key: 'batch_number',
+                        dataIndex: 'batch_number',
+                        sorter: true,
+                        sortOrder: columnSortOrder('batch_number', params.sort, PRODUCTION_QC_DEFAULT_SORT),
+                        render: (v: string | null) => v ?? '—',
+                    },
                     { title: 'Machine', render: (_, row) => row.work_center?.code ?? row.work_center?.name ?? '—' },
                     { title: 'Product', render: (_, row) => itemLabel(row.item) },
                     {
+                        // An unchecked batch's quantity_produced IS its gross
+                        // figure (no check has reduced it yet), so the server
+                        // sorts on that column and the order matches the cell.
                         title: 'Produced (pcs)',
+                        key: 'quantity_produced',
                         align: 'right',
+                        sorter: true,
+                        sortOrder: columnSortOrder('quantity_produced', params.sort, PRODUCTION_QC_DEFAULT_SORT),
                         render: (_, row) => fmtPcs(grossProducedPieces(row)),
                     },
                     {
@@ -223,6 +252,9 @@ export default function ProductionQcPage() {
                         // different and misleading instant. So this is the
                         // batch's production date and shift, which are real.
                         title: 'Completed',
+                        key: 'production_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('production_date', params.sort, PRODUCTION_QC_DEFAULT_SORT),
                         render: (_, row) => (
                             <Space direction="vertical" size={0}>
                                 <span>{row.production_date ?? '—'}</span>

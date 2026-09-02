@@ -3,18 +3,27 @@
 namespace App\Modules\Quality\Services;
 
 use App\Modules\Quality\Models\MeasuringInstrument;
+use App\Support\Lists\ListSort;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
 class MeasuringInstrumentService
 {
-    public function paginate(bool $dueOnly = false, int $perPage = 20): LengthAwarePaginator
+    /** The columns the register sorts on besides id (ListMeasuringInstrumentsRequest validates the same list). */
+    public const SORTABLE = ['code', 'name', 'location', 'next_calibration_due', 'last_calibrated_date', 'status'];
+
+    /**
+     * Next due first unless `$sort` (a validated column, ListSort spelling)
+     * says otherwise. `last_calibrated_date` is nullable, so a gauge never
+     * calibrated sorts last in either direction.
+     */
+    public function paginate(bool $dueOnly = false, int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return MeasuringInstrument::query()
-            ->when($dueOnly, fn ($query) => $query->where('next_calibration_due', '<=', today()))
-            ->orderBy('next_calibration_due')
-            ->paginate($perPage);
+        $query = MeasuringInstrument::query()
+            ->when($dueOnly, fn ($query) => $query->where('next_calibration_due', '<=', today()));
+
+        return ListSort::apply($query, $sort, self::SORTABLE, 'next_calibration_due', ['last_calibrated_date'])->paginate($perPage);
     }
 
     /**

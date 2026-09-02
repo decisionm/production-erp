@@ -11,7 +11,15 @@ import {
     listIncomingInspections,
     listNonConformanceReports,
 } from '@/features/quality/api';
+import { NCR_DEFAULT_SORT, NCR_LIST, NCR_SORT_FIELDS, type SortedListParams } from '@/features/quality/qualityLists';
 import type { NonConformanceReport, NonConformanceSeverity, NonConformanceStatus } from '@/features/quality/types';
+import { compactParams } from '@/lib/listParams';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
+
+/** The register's URL keys beyond page / per_page (NCR_LIST, qualityLists.ts). Module-level: useListParams memoises on it. */
+const NCR_LIST_SPEC = NCR_LIST.spec;
 
 const ncrSchema = z.object({
     incoming_inspection_id: z.number().optional(),
@@ -42,7 +50,17 @@ export default function NonConformanceReportsPage() {
     const [detailReport, setDetailReport] = useState<NonConformanceReport | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['quality', 'ncrs'], queryFn: listNonConformanceReports });
+    // THE URL IS THE LIST'S STATE (sort, page, page size) and the SERVER
+    // cuts the page: this table used to draw the server's first twenty rows
+    // under pagination={false}, with nothing on screen to say a twenty-first
+    // existed.
+    const { params, setParams, setPage } = useListParams<SortedListParams>(NCR_LIST_SPEC);
+    const request = compactParams(params);
+    const { data, isLoading } = useQuery({
+        queryKey: ['quality', 'ncrs', request],
+        queryFn: () => listNonConformanceReports(params),
+        placeholderData: (previous) => previous,
+    });
     const { data: inspections } = useQuery({ queryKey: ['quality', 'incoming-inspections'], queryFn: () => listIncomingInspections() });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
 
@@ -87,24 +105,49 @@ export default function NonConformanceReportsPage() {
 
             <Table<NonConformanceReport>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries the whole register.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, NCR_SORT_FIELDS, NCR_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'reports')}
                 columns={[
-                    { title: 'ID', dataIndex: 'id' },
+                    {
+                        title: 'ID',
+                        key: 'id',
+                        dataIndex: 'id',
+                        sorter: true,
+                        sortOrder: columnSortOrder('id', params.sort, NCR_DEFAULT_SORT),
+                    },
                     { title: 'Item', render: (_, row) => `${row.item.sku} — ${row.item.name}` },
                     {
                         title: 'Severity',
+                        key: 'severity',
                         dataIndex: 'severity',
+                        sorter: true,
+                        sortOrder: columnSortOrder('severity', params.sort, NCR_DEFAULT_SORT),
                         render: (s: NonConformanceSeverity) => <Tag color={severityColor[s]}>{s}</Tag>,
                     },
                     {
                         title: 'Status',
+                        key: 'status',
                         dataIndex: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, NCR_DEFAULT_SORT),
                         render: (s: NonConformanceStatus) => <Tag color={statusColor[s]}>{s}</Tag>,
                     },
-                    { title: 'Raised', dataIndex: 'raised_date' },
+                    {
+                        title: 'Raised',
+                        key: 'raised_date',
+                        dataIndex: 'raised_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('raised_date', params.sort, NCR_DEFAULT_SORT),
+                    },
                     {
                         title: 'Actions',
                         render: (_, row) => (

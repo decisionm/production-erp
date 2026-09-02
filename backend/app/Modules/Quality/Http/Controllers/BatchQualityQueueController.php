@@ -47,6 +47,7 @@ class BatchQualityQueueController extends Controller
             awaitingQualityCheck: true,
             q: $request->term(),
             oldestFirst: true,
+            sort: $request->sort(),
         );
 
         return ShiftProductionEntryResource::collection($page)->additional(['meta' => [

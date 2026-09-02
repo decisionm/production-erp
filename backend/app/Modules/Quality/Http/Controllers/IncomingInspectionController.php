@@ -19,6 +19,7 @@ class IncomingInspectionController extends Controller
             perPage: $request->perPage(),
             q: $request->term(),
             result: $request->result(),
+            sort: $request->sort(),
         ));
     }
 

@@ -7,6 +7,7 @@ use App\Modules\Quality\Exceptions\CapaClosedException;
 use App\Modules\Quality\Exceptions\IncompleteCapaException;
 use App\Modules\Quality\Models\Capa;
 use App\Modules\Quality\Models\Enums\CapaStatus;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 /**
@@ -20,12 +21,19 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
  */
 class CapaService
 {
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /** The columns the register sorts on besides id (ListCapasRequest validates the same list). */
+    public const SORTABLE = ['title', 'status', 'due_date'];
+
+    /**
+     * Newest first unless `$sort` (a validated column, ListSort spelling)
+     * says otherwise. `due_date` is nullable, so an undated CAPA sorts
+     * last in either direction.
+     */
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return Capa::query()
-            ->with(['nonConformanceReport', 'ownerEmployee', 'createdBy'])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+        $query = Capa::query()->with(['nonConformanceReport', 'ownerEmployee', 'createdBy']);
+
+        return ListSort::apply($query, $sort, self::SORTABLE, '-id', ['due_date'])->paginate($perPage);
     }
 
     public function openCount(): int

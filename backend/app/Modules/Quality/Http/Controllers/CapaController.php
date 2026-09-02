@@ -4,6 +4,7 @@ namespace App\Modules\Quality\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Quality\Http\Requests\CloseCapaRequest;
+use App\Modules\Quality\Http\Requests\ListCapasRequest;
 use App\Modules\Quality\Http\Requests\StoreCapaRequest;
 use App\Modules\Quality\Http\Requests\UpdateCapaRequest;
 use App\Modules\Quality\Http\Resources\CapaResource;
@@ -15,9 +16,12 @@ class CapaController extends Controller
 {
     public function __construct(private readonly CapaService $capas) {}
 
-    public function index(): AnonymousResourceCollection
+    public function index(ListCapasRequest $request): AnonymousResourceCollection
     {
-        return CapaResource::collection($this->capas->paginate());
+        return CapaResource::collection($this->capas->paginate(
+            perPage: $request->perPage(),
+            sort: $request->sort(),
+        ));
     }
 
     public function store(StoreCapaRequest $request): CapaResource
