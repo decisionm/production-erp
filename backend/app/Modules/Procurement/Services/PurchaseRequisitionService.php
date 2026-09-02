@@ -3,6 +3,7 @@
 namespace App\Modules\Procurement\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
+use App\Modules\Procurement\Exceptions\SelfDecisionException;
 use App\Modules\Procurement\Models\Enums\PurchaseRequisitionStatus;
 use App\Modules\Procurement\Models\PurchaseRequisition;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -168,7 +169,7 @@ class PurchaseRequisitionService
         return $this->decide($requisition, PurchaseRequisitionStatus::Approved, [
             'approved_by' => $approvedBy,
             'approved_at' => now(),
-        ]);
+        ], $approvedBy, 'approved');
     }
 
     public function reject(PurchaseRequisition $requisition, ?int $rejectedBy = null): PurchaseRequisition
@@ -176,7 +177,7 @@ class PurchaseRequisitionService
         return $this->decide($requisition, PurchaseRequisitionStatus::Rejected, [
             'rejected_by' => $rejectedBy,
             'rejected_at' => now(),
-        ]);
+        ], $rejectedBy, 'rejected');
     }
 
     /**
@@ -188,11 +189,17 @@ class PurchaseRequisitionService
      *
      * @param  array<string, mixed>  $stamps
      */
-    private function decide(PurchaseRequisition $requisition, PurchaseRequisitionStatus $target, array $stamps): PurchaseRequisition
+    private function decide(PurchaseRequisition $requisition, PurchaseRequisitionStatus $target, array $stamps, ?int $decidedBy, string $verb): PurchaseRequisition
     {
-        return DB::transaction(function () use ($requisition, $target, $stamps) {
+        return DB::transaction(function () use ($requisition, $target, $stamps, $decidedBy, $verb) {
             $locked = PurchaseRequisition::query()->lockForUpdate()->findOrFail($requisition->id);
             $this->guardStatus($locked, PurchaseRequisitionStatus::Draft, $target);
+
+            // DEC-20260902-025: no Administrator exemption, so this is a plain
+            // id comparison and nothing consults roles.
+            if ($decidedBy !== null && $locked->requested_by !== null && (int) $locked->requested_by === (int) $decidedBy) {
+                throw SelfDecisionException::forRequisition($locked->id, $verb);
+            }
 
             $locked->forceFill(['status' => $target, ...$stamps])->save();
 

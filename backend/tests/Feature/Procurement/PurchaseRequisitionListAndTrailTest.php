@@ -39,14 +39,20 @@ class PurchaseRequisitionListAndTrailTest extends TestCase
 
     private User $desk;
 
+    private User $approver;
+
     protected function setUp(): void
     {
         parent::setUp();
 
         $this->desk = User::factory()->create(['name' => 'Procurement Desk', 'is_active' => true]);
+        // DEC-20260902-025: every requisition below is raised by the desk, so
+        // deciding one needs a second user — the requester cannot.
+        $this->approver = User::factory()->create(['name' => 'Approvals Desk', 'is_active' => true]);
         foreach (['procurement.view', 'procurement.manage'] as $permission) {
             Permission::findOrCreate($permission, 'web');
             $this->desk->givePermissionTo($permission);
+            $this->approver->givePermissionTo($permission);
         }
         Sanctum::actingAs($this->desk);
     }
@@ -85,31 +91,33 @@ class PurchaseRequisitionListAndTrailTest extends TestCase
     {
         $requisition = $this->requisition(PurchaseRequisitionStatus::Draft);
 
+        Sanctum::actingAs($this->approver);
         $data = $this->postJson("/api/v1/procurement/purchase-requisitions/{$requisition->id}/approve")
             ->assertOk()
             ->json('data');
 
         $this->assertSame('approved', $data['status']);
-        $this->assertSame('Procurement Desk', $data['approved_by']);
+        $this->assertSame('Approvals Desk', $data['approved_by']);
         $this->assertNotNull($data['approved_at']);
         $this->assertNull($data['rejected_by']);
 
         // The stamp survives to the list read.
         $row = collect($this->getJson('/api/v1/procurement/purchase-requisitions')->assertOk()->json('data'))
             ->firstWhere('id', $requisition->id);
-        $this->assertSame('Procurement Desk', $row['approved_by']);
+        $this->assertSame('Approvals Desk', $row['approved_by']);
     }
 
     public function test_rejecting_stamps_the_other_pair(): void
     {
         $requisition = $this->requisition(PurchaseRequisitionStatus::Draft);
 
+        Sanctum::actingAs($this->approver);
         $data = $this->postJson("/api/v1/procurement/purchase-requisitions/{$requisition->id}/reject")
             ->assertOk()
             ->json('data');
 
         $this->assertSame('rejected', $data['status']);
-        $this->assertSame('Procurement Desk', $data['rejected_by']);
+        $this->assertSame('Approvals Desk', $data['rejected_by']);
         $this->assertNotNull($data['rejected_at']);
         $this->assertNull($data['approved_by']);
     }
