@@ -85,14 +85,29 @@ class GoodsReceiptSearchTest extends TestCase
 
     public function test_a_bare_number_is_still_the_receipts_own_number_and_never_also_the_order(): void
     {
-        // The case that would blur: receipt r2's id equals the Cap Masters
-        // order's id, which carries TWO receipts. Asserted, not assumed —
-        // on a fresh in-memory database both are the second row created.
-        $this->assertSame($this->orders['cm']->id, $this->receipts['r2']->id, 'fixture precondition');
+        // The case that would blur: a receipt whose own number equals the
+        // number of an order that carries OTHER receipts. Built with an
+        // explicit shared id, not assumed from insertion order — each table
+        // keeps its own auto-increment counter, and on MySQL neither resets
+        // between tests, so "both are the second row" holds on sqlite alone
+        // (it failed on the MySQL 8 job with 29 !== 27).
+        $n = 1 + max((int) PurchaseOrder::max('id'), (int) GoodsReceiptNote::max('id'));
 
-        $bare = (string) $this->receipts['r2']->id;
-        $this->assertIds(['r2'], $this->receipts, $this->list(['q' => $bare]), 'a bare number is GRN-{n}, not also PO-{n}');
-        $this->assertIds(['r2'], $this->receipts, $this->list(['q' => "GRN-{$bare}"]));
+        // No digit anywhere else on these rows: `q` also reads references and
+        // item names by substring, and the shared number is whatever the
+        // counters happen to be, so "DC-4" or "CAP-28" could match it by
+        // accident and hide the very blur this test exists to refuse.
+        $blur = $this->order($this->capMasters, [$this->resin], id: $n);
+        $fixtures = [
+            'onBlurA' => $this->receipt($blur, '2026-08-04 09:00:00', 'DC-BLUR-A', [$this->resin], id: $n + 1),
+            'onBlurB' => $this->receipt($blur, '2026-08-05 09:00:00', 'DC-BLUR-B', [$this->resin], id: $n + 2),
+            'own' => $this->receipt($this->orders['relpet'], '2026-08-06 09:00:00', 'DC-OWN', [$this->resin], id: $n),
+        ];
+        $this->assertSame($blur->id, $fixtures['own']->id, 'fixture precondition');
+
+        $this->assertIds(['onBlurA', 'onBlurB'], $fixtures, $this->list(['q' => "PO-{$n}"]), 'PO-{n} is the order and its receipts');
+        $this->assertIds(['own'], $fixtures, $this->list(['q' => (string) $n]), 'a bare number is GRN-{n}, not also PO-{n}');
+        $this->assertIds(['own'], $fixtures, $this->list(['q' => "GRN-{$n}"]));
     }
 
     public function test_q_finds_receipts_by_the_items_sku_or_name(): void
@@ -132,14 +147,23 @@ class GoodsReceiptSearchTest extends TestCase
 
     // ---- helpers ----------------------------------------------------------------
 
-    /** @param  list<Item>  $items */
-    private function order(Vendor $vendor, array $items): PurchaseOrder
+    /**
+     * @param  list<Item>  $items
+     * @param  int|null  $id  an explicit primary key, for a test that needs two
+     *                        documents to share a number — set on the instance,
+     *                        since `id` is deliberately not fillable
+     */
+    private function order(Vendor $vendor, array $items, ?int $id = null): PurchaseOrder
     {
-        $order = PurchaseOrder::create([
+        $order = new PurchaseOrder([
             'vendor_id' => $vendor->id,
             'status' => PurchaseOrderStatus::Sent,
             'order_date' => '2026-07-20',
         ]);
+        if ($id !== null) {
+            $order->id = $id;
+        }
+        $order->save();
         foreach ($items as $item) {
             $order->lines()->create(['item_id' => $item->id, 'quantity' => '12000', 'unit_price' => '1.0000', 'quantity_received' => 0]);
         }
@@ -147,15 +171,22 @@ class GoodsReceiptSearchTest extends TestCase
         return $order;
     }
 
-    /** @param  list<Item>  $items */
-    private function receipt(PurchaseOrder $order, string $receivedAtUtc, string $reference, array $items): GoodsReceiptNote
+    /**
+     * @param  list<Item>  $items
+     * @param  int|null  $id  see order()
+     */
+    private function receipt(PurchaseOrder $order, string $receivedAtUtc, string $reference, array $items, ?int $id = null): GoodsReceiptNote
     {
-        $grn = GoodsReceiptNote::create([
+        $grn = new GoodsReceiptNote([
             'purchase_order_id' => $order->id,
             'warehouse_id' => $this->rm->id,
             'reference' => $reference,
             'received_date' => $receivedAtUtc,
         ]);
+        if ($id !== null) {
+            $grn->id = $id;
+        }
+        $grn->save();
         foreach ($items as $item) {
             $line = $order->lines()->where('item_id', $item->id)->first();
             $grn->lines()->create(['purchase_order_line_id' => $line->id, 'item_id' => $item->id, 'quantity' => '1000', 'unit_cost' => '1.0000']);
