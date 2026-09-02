@@ -287,7 +287,17 @@ purchase rates."
 - **GAP:** the GRN refuses a lots block for any item not in kilograms; the
   build adds handling units for counted materials, their labels, the unit-wise
   hold release and the unit scan at issue.
-- **OPEN:** the Tally rejection voucher — Accounts, not the floor.
+- **VERIFIED as a decision:** DEC-20260902-015. No Tally voucher for an
+  incoming rejection. The rejected quantity and the Rejections Out reference
+  are shown on the Supplier Bill screen against the GRN line so Accounts can
+  match the supplier's debit or credit note; Accounts makes the Tally entry from
+  the paper. Q68 untouched. Whether the bill may exceed the accepted quantity
+  is expressly not decided: the bill stays a record of the paper.
+- **GAP:** the Supplier Bill screen does not show the inspection's rejected
+  quantity or Rejections Out reference against a GRN line today.
+
+Section 5 is complete: DEC-20260902-011 to -015 cover the screen, whole-bag
+rejection, the counted-material hold, handling units and the Tally boundary.
 
 ## Sections still to capture
 
