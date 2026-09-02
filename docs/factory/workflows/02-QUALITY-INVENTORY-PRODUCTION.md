@@ -354,7 +354,30 @@ record's source.
   strings already exist; the build is the rollout and the colour-only warning
   check.
 
+## 8. Batch lifecycle: the approval chain's posting gate
+
+### Current application
+
+- Chain: complete → quality check → Plant Manager → Accounts → synced or
+  failed. Accounts approval queues the Stock Journal (one per shift,
+  DEC-20260807-010).
+- A posting gate can refuse Accounts approval when the voucher is not
+  postable; shipped watch-only (`require_postable_voucher` false). A 31-Jul
+  owner line lived only in the config comment.
+- Citations: [research note](research/2026-09-02-quality-inventory-production-ground-truth.md) §3b, §3f, §4.
+
+### Result
+
+- **VERIFIED as a decision:** DEC-20260902-018. Accounts approval refuses a
+  batch whose Stock Journal cannot post, naming the cause. Same rollout as the
+  readiness gate: Tally masters loaded and the preview checked against real
+  batches on live first, then the switch. Fixture batches exempt.
+- **GAP (rollout, not code):** the switch exists; the live preview run and the
+  master-data corrections have not been done for this purpose.
+
 ## Sections still to capture
 
-- Batch lifecycle: queue, start, run recording, complete, QC, approvals.
+- Batch lifecycle: queue, start, run recording, complete — the remaining open
+  points (Q45 default packaging, Q90 category refusal, Q93 factory rules,
+  variance bands).
 - Store and held stock.
