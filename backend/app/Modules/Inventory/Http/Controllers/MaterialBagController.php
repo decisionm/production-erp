@@ -3,6 +3,7 @@
 namespace App\Modules\Inventory\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Inventory\Http\Requests\ListMaterialBagsRequest;
 use App\Modules\Inventory\Http\Resources\MaterialBagResource;
 use App\Modules\Inventory\Services\TraceabilityService;
 use Illuminate\Http\Request;
@@ -12,11 +13,17 @@ class MaterialBagController extends Controller
 {
     public function __construct(private readonly TraceabilityService $traceability) {}
 
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(ListMaterialBagsRequest $request): AnonymousResourceCollection
     {
+        $validated = $request->validated();
+
         return MaterialBagResource::collection($this->traceability->paginateBags(
-            $request->query('item_id') ? (int) $request->query('item_id') : null,
-            $request->query('status'),
+            ! empty($validated['item_id']) ? (int) $validated['item_id'] : null,
+            $validated['status'] ?? null,
+            // Read for the first time (03-Sep-2026): the bench's pager asked
+            // for a size the server never heard.
+            (int) ($validated['per_page'] ?? 20),
+            $request->sort(),
         ));
     }
 

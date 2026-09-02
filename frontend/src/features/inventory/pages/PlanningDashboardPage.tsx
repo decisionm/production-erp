@@ -4,7 +4,9 @@ import { getFulfilmentPlanning } from '@/features/inventory/api';
 import { planningBasisLine, planningEtaCell } from '@/features/inventory/planning';
 import type { FulfilmentPlanningRow, FulfilmentPlanningTarget } from '@/features/inventory/types';
 import { formatQuantity } from '@/features/material-flow/words';
+import { columnSorter } from '@/lib/clientSort';
 import { itemLabel } from '@/lib/itemLabel';
+import { TABLE_STICKY } from '@/lib/tableProps';
 
 /**
  * WHEN THE FACTORY COULD HAVE IT — the ETA behind every open production
@@ -58,6 +60,7 @@ export default function PlanningDashboardPage() {
             </Card>
 
             <Table<FulfilmentPlanningRow>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 // Keyed by the ORDER LINE: the planning walk answers "when is
                 // this line's shortfall ready", and `request_id` appears only
@@ -67,9 +70,12 @@ export default function PlanningDashboardPage() {
                 dataSource={data?.data}
                 pagination={false}
                 locale={{ emptyText: isError ? 'The plan could not be read.' : 'Nothing is queued for production.' }}
+                // The whole plan is here (no pager), so the sorters are honest
+                // client sorters over every row; an undatable row sorts last.
                 columns={[
                     {
                         title: 'Item',
+                        sorter: columnSorter((row) => (row.item ? itemLabel(row.item) : null), 'text'),
                         render: (_, row) => (
                             <Space direction="vertical" size={0}>
                                 <span>{itemLabel(row.item)}</span>
@@ -79,19 +85,31 @@ export default function PlanningDashboardPage() {
                             </Space>
                         ),
                     },
-                    { title: 'Needed', align: 'right', render: (_, row) => <span style={numeric}>{formatQuantity(row.needed)}</span> },
-                    { title: 'Free to issue', align: 'right', render: (_, row) => <span style={numeric}>{formatQuantity(row.free)}</span> },
+                    {
+                        title: 'Needed',
+                        align: 'right',
+                        sorter: columnSorter((row) => row.needed, 'number'),
+                        render: (_, row) => <span style={numeric}>{formatQuantity(row.needed)}</span>,
+                    },
+                    {
+                        title: 'Free to issue',
+                        align: 'right',
+                        sorter: columnSorter((row) => row.free, 'number'),
+                        render: (_, row) => <span style={numeric}>{formatQuantity(row.free)}</span>,
+                    },
                     {
                         // The honest "why is my order not first" figure, and
                         // one that stays knowable even when nothing behind an
                         // unestimable product can be dated.
                         title: 'Queued ahead',
                         align: 'right',
+                        sorter: columnSorter((row) => row.queued_ahead, 'number'),
                         render: (_, row) => <span style={numeric}>{row.queued_ahead}</span>,
                     },
                     {
                         title: 'Per shift',
                         align: 'right',
+                        sorter: columnSorter((row) => row.capacity_per_shift, 'number'),
                         render: (_, row) =>
                             row.capacity_per_shift === null ? (
                                 <Typography.Text type="secondary">—</Typography.Text>
@@ -101,6 +119,8 @@ export default function PlanningDashboardPage() {
                     },
                     {
                         title: 'Ready',
+                        // A refusal has no date and sorts last either way.
+                        sorter: columnSorter((row) => (row.cannot_estimate ? null : row.estimated_ready_date), 'date'),
                         render: (_, row) => {
                             const cell = planningEtaCell(row);
 

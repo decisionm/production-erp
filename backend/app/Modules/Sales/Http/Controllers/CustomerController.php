@@ -3,6 +3,7 @@
 namespace App\Modules\Sales\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Sales\Http\Requests\ListCustomersRequest;
 use App\Modules\Sales\Http\Requests\StoreCustomerRequest;
 use App\Modules\Sales\Http\Requests\UpdateCustomerRequest;
 use App\Modules\Sales\Http\Resources\CustomerResource;
@@ -27,14 +28,14 @@ class CustomerController extends Controller
      * it. Clamped at 200 so a client cannot ask the server to build the whole
      * list in one response.
      */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(ListCustomersRequest $request): AnonymousResourceCollection
     {
         // is_numeric first: (int) 'abc' is 0, which the clamp turned into ONE
         // row per page rather than falling back to the documented default.
         $raw = $request->query('per_page');
         $perPage = is_numeric($raw) ? max(1, min(200, (int) $raw)) : 20;
 
-        return CustomerResource::collection($this->customers->paginate($perPage));
+        return CustomerResource::collection($this->customers->paginate($perPage, $request->sort()));
     }
 
     public function store(StoreCustomerRequest $request): CustomerResource

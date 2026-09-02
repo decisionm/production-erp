@@ -3,13 +3,13 @@
 namespace App\Modules\Inventory\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Inventory\Http\Requests\ListBatchesRequest;
 use App\Modules\Inventory\Http\Requests\StoreBatchRequest;
 use App\Modules\Inventory\Http\Resources\BatchResource;
 use App\Modules\Inventory\Http\Resources\StockMovementResource;
 use App\Modules\Inventory\Models\Batch;
 use App\Modules\Inventory\Services\BatchService;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class BatchController extends Controller
@@ -32,13 +32,14 @@ class BatchController extends Controller
      * issued. That question is open in PENDING-OWNER-QUESTIONS and is not
      * answered here.
      */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(ListBatchesRequest $request): AnonymousResourceCollection
     {
         return BatchResource::collection($this->batches->paginate(
             itemId: $this->filterId($request, 'item_id'),
             perPage: $this->perPage($request),
             search: $this->searchTerm($request),
             code: $this->searchTerm($request, 'code'),
+            sort: $request->sort(),
         ));
     }
 

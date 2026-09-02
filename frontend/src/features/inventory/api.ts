@@ -42,6 +42,8 @@ export interface ListParams {
     per_page?: number;
     search?: string;
     code?: string;
+    /** The list's own sortable columns in the ListSort spelling (bare = ascending, "-" = descending). */
+    sort?: string;
 }
 
 /**
@@ -243,6 +245,8 @@ export async function listStockMovements(params?: {
     warehouse_id?: number;
     /** A substring of the movement's reference (ListStockMovementsRequest). */
     q?: string;
+    /** ListStockMovementsRequest::SORTABLE in the ListSort spelling; absent is newest first. */
+    sort?: string;
     per_page?: number;
     page?: number;
 }): Promise<Paginated<StockMovement>> {
@@ -404,6 +408,9 @@ export async function listMaterialBags(params?: {
     item_id?: number;
     status?: string;
     page?: number;
+    per_page?: number;
+    /** ListMaterialBagsRequest::SORTABLE in the ListSort spelling; absent is oldest bag first. */
+    sort?: string;
 }): Promise<Paginated<MaterialBag>> {
     const { data } = await api.get<Paginated<MaterialBag>>('/inventory/material-bags', { params });
     return data;
@@ -456,6 +463,7 @@ export async function listFulfilmentQueue(
     const { data } = await api.get<Paginated<FulfilmentQueueRow>>('/inventory/fulfilment/queue', {
         params: {
             state: filters.state,
+            sort: filters.sort,
             page: filters.page,
             per_page: filters.per_page,
         },

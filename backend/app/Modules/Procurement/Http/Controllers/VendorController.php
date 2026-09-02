@@ -3,6 +3,7 @@
 namespace App\Modules\Procurement\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Procurement\Http\Requests\ListVendorsRequest;
 use App\Modules\Procurement\Http\Requests\StoreVendorRequest;
 use App\Modules\Procurement\Http\Requests\UpdateVendorRequest;
 use App\Modules\Procurement\Http\Resources\VendorResource;
@@ -39,7 +40,7 @@ class VendorController extends Controller
      * `unclassified=1` widens that to also include vendors with none, or —
      * with no `classification[]` — narrows to only those.
      */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(ListVendorsRequest $request): AnonymousResourceCollection
     {
         $search = $request->query('q');
         $classifications = $request->query('classification');
@@ -51,6 +52,7 @@ class VendorController extends Controller
                 is_string($search) ? $search : null,
                 $classifications,
                 $request->boolean('unclassified'),
+                $request->sort(),
             ),
         );
     }

@@ -52,6 +52,7 @@ import type {
     ItemRow,
     ItemTrackingType,
 } from '@/features/inventory/types';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 import { TABLE_STICKY } from '@/lib/tableProps';
 
 const trackingTypeOptions: { value: ItemTrackingType; label: string }[] = [
@@ -184,6 +185,13 @@ export default function ItemsPage() {
             .map((uom) => ({ text: uom, value: uom })),
         [allItems],
     );
+    // Category and Tracking filters over the rows on screen, labelled as the
+    // cells label them — "Unclassified" is offered as the empty choice.
+    const categoryFilters = useMemo(
+        () => filterOptions(rows, (row) => row.category, (value) => categoryLabel(value as ItemCategoryValue)),
+        [rows],
+    );
+    const trackingFilters = useMemo(() => filterOptions(rows, (row) => row.tracking_type), [rows]);
 
     const selectWarning = (next: WarningFilter) => {
         setWarning(next);
@@ -389,6 +397,8 @@ export default function ItemsPage() {
                         hidden: facet !== CATEGORY_FACET_ALL,
                         title: 'Category',
                         dataIndex: 'category',
+                        filters: categoryFilters,
+                        onFilter: onFilterBy((row: ItemRow) => row.category),
                         sorter: (a: ItemRow, b: ItemRow) =>
                             (a.category ?? '\uffff').localeCompare(b.category ?? '\uffff'),
                         render: (value: ItemCategoryValue | null | undefined, row: ItemRow) => {
@@ -452,11 +462,20 @@ export default function ItemsPage() {
                         onFilter: (value, row: ItemRow) => (row.uom ?? '') === value,
                         sorter: (a: ItemRow, b: ItemRow) => (a.uom ?? '').localeCompare(b.uom ?? ''),
                     },
-                    { title: 'HSN/SAC', dataIndex: 'hsn_sac_code' },
-                    { title: 'Reorder Level', dataIndex: 'reorder_level' },
+                    {
+                        title: 'HSN/SAC',
+                        dataIndex: 'hsn_sac_code',
+                        sorter: columnSorter((row: ItemRow) => row.hsn_sac_code, 'text'),
+                    },
+                    {
+                        title: 'Reorder Level',
+                        dataIndex: 'reorder_level',
+                        sorter: columnSorter((row: ItemRow) => row.reorder_level, 'number'),
+                    },
                     {
                         title: 'Nominal Wt (g)',
                         dataIndex: 'nominal_weight_grams',
+                        sorter: columnSorter((row: ItemRow) => row.nominal_weight_grams, 'number'),
                         render: (v: string | null | undefined) => v ?? '—',
                     },
                     {
@@ -464,6 +483,9 @@ export default function ItemsPage() {
                         // carry this — a dash, not a blank tag claiming "none".
                         title: 'Tracking',
                         dataIndex: 'tracking_type',
+                        filters: trackingFilters,
+                        onFilter: onFilterBy((row: ItemRow) => row.tracking_type),
+                        sorter: columnSorter((row: ItemRow) => row.tracking_type, 'text'),
                         render: (type: ItemTrackingType | undefined) => (type
                             ? <Tag color={trackingTypeColor[type]}>{type}</Tag>
                             : '—'),

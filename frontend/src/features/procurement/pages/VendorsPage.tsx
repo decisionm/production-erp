@@ -15,7 +15,16 @@ import TallyVendorReviewPage from '@/features/procurement/pages/TallyVendorRevie
 import { vendorActiveTab } from '@/features/procurement/vendorTabs';
 import { vendorLedgerWords } from '@/features/procurement/documentWords';
 import { DEFAULT_VENDOR_VIEW, VENDOR_CLASSIFICATIONS, classificationLabel, type VendorClassification } from '@/features/procurement/vendorClassification';
-import type { ListParams, ListParamsSpec } from '@/lib/listParams';
+import {
+    UNCLASSIFIED_FILTER_VALUE,
+    VENDOR_DEFAULT_SORT,
+    VENDOR_LIST_SPEC,
+    VENDOR_SORT_FIELDS,
+    type VendorListParams,
+    vendorListSort,
+} from '@/features/procurement/vendorList';
+import { TABLE_STICKY } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { useListParams } from '@/lib/useListParams';
 
 // The New Vendor form does NOT ask for a code. The server mints "V-0001" and
@@ -51,27 +60,6 @@ const editVendorSchema = vendorSchema.extend({
 
 type VendorFormValues = z.infer<typeof vendorSchema>;
 type EditVendorFormValues = z.infer<typeof editVendorSchema>;
-
-/** The Vendors tab's own pseudo-class — sent as `unclassified=1`, never as a real classification value. */
-const UNCLASSIFIED_FILTER_VALUE = '__unclassified';
-
-interface VendorListParams extends ListParams {
-    classification?: string[];
-}
-
-/**
- * DEC-20260902-026: the Vendors tab's classification filter lives in the
- * URL, the same as every other list's filters (useListParams) — a refresh
- * or a pasted link keeps the chosen view. No `classification` key on the
- * URL means the default view (the three material classes); a page with no
- * list-params hook yet gets one, per the sibling pages' pattern.
- */
-const VENDOR_LIST_SPEC: ListParamsSpec = {
-    lists: ['classification'],
-    allowed: {
-        classification: [...VENDOR_CLASSIFICATIONS.map((c) => c.value), UNCLASSIFIED_FILTER_VALUE],
-    },
-};
 
 /**
  * THE ONE VENDOR MASTER (DEC-20260825-003).
@@ -123,19 +111,24 @@ export default function VendorsPage() {
     const [search, setSearch] = useState('');
 
     // DEC-20260902-026: the classification filter, kept in the URL
-    // (useListParams). Unset on the URL = the default view (the three
-    // material classes); the pseudo-value `__unclassified` is split off
-    // before it reaches the API as `unclassified=1`.
+    // (useListParams, vendorList.ts). Unset on the URL = the default view
+    // (the three material classes); the pseudo-value `__unclassified` is
+    // split off before it reaches the API as `unclassified=1`. The column
+    // SORT (03-Sep-2026) lives beside it and is the server's too: the
+    // master is paged, so a sorter over the loaded page would order 50 of
+    // 628 rows and call it the order of the master.
     const { params: listParams, setParams: setListParams } = useListParams<VendorListParams>(VENDOR_LIST_SPEC);
     const selectedClassification = listParams.classification ?? DEFAULT_VENDOR_VIEW;
     const classificationFilter = selectedClassification.filter(
         (value): value is VendorClassification => value !== UNCLASSIFIED_FILTER_VALUE,
     ) as VendorClassification[];
     const unclassifiedFilter = selectedClassification.includes(UNCLASSIFIED_FILTER_VALUE);
+    const sort = vendorListSort(listParams.sort);
 
     const { data, isLoading, isPending, isError, error, refetch } = useQuery({
-        queryKey: ['procurement', 'vendors', page, perPage, search, classificationFilter, unclassifiedFilter],
-        queryFn: () => listVendors(page, perPage, search, classificationFilter, unclassifiedFilter),
+        queryKey: ['procurement', 'vendors', page, perPage, search, classificationFilter, unclassifiedFilter, sort],
+        queryFn: () => listVendors(page, perPage, search, classificationFilter, unclassifiedFilter, sort),
+        placeholderData: (previous) => previous,
     });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['procurement', 'vendors'] });
@@ -235,10 +228,18 @@ export default function VendorsPage() {
             </Space>
 
             <Table<Vendor>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queries the
+                // whole master from page 1.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setPage(1);
+                    setListParams({ sort: sortParamFromSorter(sorter, VENDOR_SORT_FIELDS, VENDOR_DEFAULT_SORT) });
+                }}
                 locale={{
                     emptyText: (
                         <ListEmpty
@@ -287,8 +288,20 @@ export default function VendorsPage() {
                     },
                 }}
                 columns={[
-                    { title: 'Code', dataIndex: 'code' },
-                    { title: 'Name', dataIndex: 'name' },
+                    {
+                        title: 'Code',
+                        dataIndex: 'code',
+                        key: 'code',
+                        sorter: true,
+                        sortOrder: columnSortOrder('code', listParams.sort, VENDOR_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', listParams.sort, VENDOR_DEFAULT_SORT),
+                    },
                     {
                         title: 'Classification',
                         render: (_, row) =>
@@ -299,7 +312,14 @@ export default function VendorsPage() {
                     { title: 'Email', dataIndex: 'email' },
                     { title: 'Phone', dataIndex: 'phone' },
                     { title: 'GSTIN', dataIndex: 'gstin' },
-                    { title: 'State', dataIndex: 'state_code', render: (code: string | null, row: Vendor) => (code ? `${code} — ${row.state_name ?? 'Unknown code'}` : '') },
+                    {
+                        title: 'State',
+                        dataIndex: 'state_code',
+                        key: 'state_code',
+                        sorter: true,
+                        sortOrder: columnSortOrder('state_code', listParams.sort, VENDOR_DEFAULT_SORT),
+                        render: (code: string | null, row: Vendor) => (code ? `${code} — ${row.state_name ?? 'Unknown code'}` : ''),
+                    },
                     {
                         title: 'Tally ledger',
                         // vendorLedgerWords: most imported vendors carry a
@@ -343,6 +363,9 @@ export default function VendorsPage() {
                     {
                         title: 'Status',
                         dataIndex: 'is_active',
+                        key: 'is_active',
+                        sorter: true,
+                        sortOrder: columnSortOrder('is_active', listParams.sort, VENDOR_DEFAULT_SORT),
                         render: (_: boolean, row) => <ConfigurationStatusTag entity="vendor" row={row} />,
                     },
                     {

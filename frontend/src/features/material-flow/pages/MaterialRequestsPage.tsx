@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Col, Empty, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { listShifts, listWorkCenters, machineLabel } from '@/features/production/api';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 import { itemLabel } from '@/lib/itemLabel';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { narrowingKeys } from '@/lib/listParams';
@@ -354,8 +355,12 @@ export default function MaterialRequestsPage() {
             <Table<ProductionFloorStock>
                 rowKey="item_id"
                 size="small"
+                sticky={TABLE_STICKY}
+                scroll={{ x: 'max-content' }}
                 loading={floorQuery.isLoading}
                 dataSource={floorQuery.data?.data}
+                // The whole floor is here (no pager), so these are honest
+                // client sorters and filters over every row.
                 pagination={false}
                 locale={{
                     emptyText: (
@@ -388,16 +393,28 @@ export default function MaterialRequestsPage() {
                         // display_name carried through: rebuilding the input
                         // by hand is what kept the ERP's own name off this
                         // table while the payload was already sending it.
+                        sorter: columnSorter(
+                            (row) => itemLabel({ sku: row.sku, name: row.name, display_name: row.display_name }),
+                            'text',
+                        ),
                         render: (_, row) => itemLabel({ sku: row.sku, name: row.name, display_name: row.display_name }),
                     },
                     {
                         title: `In ${LOCATION_LABEL.production_wip}`,
                         align: 'right',
+                        sorter: columnSorter((row) => row.quantity, 'number'),
                         render: (_, row) => formatQuantity(row.quantity),
                     },
-                    { title: 'UOM', dataIndex: 'uom', render: (uom: string | null) => uom ?? '—' },
+                    {
+                        title: 'UOM',
+                        dataIndex: 'uom',
+                        filters: filterOptions(floorQuery.data?.data ?? [], (row) => row.uom),
+                        onFilter: onFilterBy((row: ProductionFloorStock) => row.uom),
+                        render: (uom: string | null) => uom ?? '—',
+                    },
                     {
                         title: 'Last issued',
+                        sorter: columnSorter((row) => row.last_issued_at, 'date'),
                         render: (_, row) => (row.last_issued_at ? new Date(row.last_issued_at).toLocaleString() : '—'),
                     },
                     { title: 'Issue', render: (_, row) => row.last_issue_number ?? '—' },

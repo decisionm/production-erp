@@ -2,10 +2,12 @@
 
 namespace App\Modules\Procurement\Services;
 
+use App\Modules\Procurement\Http\Requests\ListVendorsRequest;
 use App\Modules\Procurement\Models\Vendor;
 use App\Support\Configuration\DependencyCheck;
 use App\Support\Configuration\HardDeleteAuthority;
 use App\Support\Configuration\ManagesConfigurationLifecycle;
+use App\Support\Lists\ListSort;
 use Closure;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\QueryException;
@@ -42,11 +44,11 @@ class VendorService
      * widens that same filter to also include vendors with none at all, or
      * — with no classifications passed — narrows to only those.
      */
-    public function paginate(int $perPage = 20, ?string $search = null, ?array $classifications = null, bool $unclassified = false): LengthAwarePaginator
+    public function paginate(int $perPage = 20, ?string $search = null, ?array $classifications = null, bool $unclassified = false, ?string $sort = null): LengthAwarePaginator
     {
         $term = $search !== null ? trim($search) : '';
 
-        return Vendor::query()
+        $query = Vendor::query()
             ->with('classifications')
             ->when($term !== '', fn ($vendors) => $this->query->whereVendorMatches($vendors, $term))
             ->when($classifications !== null && $classifications !== [] && ! $unclassified,
@@ -56,8 +58,10 @@ class VendorService
                     ->whereHas('classifications', fn ($c) => $c->whereIn('classification', $classifications))
                     ->orWhereDoesntHave('classifications')))
             ->when(($classifications === null || $classifications === []) && $unclassified,
-                fn ($vendors) => $vendors->whereDoesntHave('classifications'))
-            ->orderBy('name')
+                fn ($vendors) => $vendors->whereDoesntHave('classifications'));
+
+        // Name order unless asked otherwise (ListVendorsRequest::SORTABLE).
+        return ListSort::apply($query, $sort, ListVendorsRequest::SORTABLE, 'name')
             ->paginate($perPage);
     }
 

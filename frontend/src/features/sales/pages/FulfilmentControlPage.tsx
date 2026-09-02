@@ -5,6 +5,7 @@ import { approveDispatchQuality, listFulfilmentControl, revokeDispatchQuality } 
 import { NOT_RECORDED } from '@/features/sales/types';
 import type { FulfilmentControlRow } from '@/features/sales/types';
 import { formatQuantity } from '@/features/material-flow/words';
+import { filterOptions, onFilterBy } from '@/lib/clientSort';
 import { itemLabel } from '@/lib/itemLabel';
 import { apiRefusalMessage } from '@/features/material-flow/api';
 import { hasManageAccess } from '@/features/auth/permissions';
@@ -28,7 +29,9 @@ import { useAuthStore } from '@/features/auth/store';
  * THE SERVER DECIDES THE ORDER (rows arrive sorted by who needs a human
  * soonest, over-promised stock first) so no column carries a `sorter`: one
  * that did would re-sort the rows in front of the reader and quietly defeat
- * the ordering the server computed across the whole board.
+ * the ordering the server computed across the whole board. Column FILTERS
+ * (Blocker, Who acts next, Production, Internal QA) narrow the board and
+ * leave that order intact — the whole board is here, so they are honest.
  *
  * AND IT NEVER SHOWS A FALSE GREEN. Five fields have no source in this build —
  * the store's rejected quantity, planned and completed production, internal QA
@@ -175,6 +178,8 @@ export default function FulfilmentControlPage() {
                         title: 'Blocker',
                         key: 'blocker',
                         fixed: 'left',
+                        filters: filterOptions(rows, (row) => row.blocker.code, (code) => String(code).replace(/_/g, ' ')),
+                        onFilter: onFilterBy((row: FulfilmentControlRow) => row.blocker.code),
                         render: (_, row) => (
                             <Tooltip title={row.blocker.summary}>
                                 <Tag color={blockerTone(row.blocker.code)}>{row.blocker.code.replace(/_/g, ' ')}</Tag>
@@ -184,6 +189,8 @@ export default function FulfilmentControlPage() {
                     {
                         title: 'Who acts next',
                         key: 'team',
+                        filters: filterOptions(rows, (row) => row.blocker.team),
+                        onFilter: onFilterBy((row: FulfilmentControlRow) => row.blocker.team),
                         render: (_, row) => <strong>{row.blocker.team}</strong>,
                     },
                     {
@@ -247,6 +254,8 @@ export default function FulfilmentControlPage() {
                     {
                         title: 'Production',
                         key: 'production',
+                        filters: filterOptions(rows, (row) => row.production.status, (status) => String(status).replace(/_/g, ' ')),
+                        onFilter: onFilterBy((row: FulfilmentControlRow) => row.production.status),
                         render: (_, row) =>
                             row.production.status
                                 ? `${row.production.status.replace(/_/g, ' ')} · ${formatQuantity(row.production.requested, row.item?.uom)}`
@@ -265,6 +274,9 @@ export default function FulfilmentControlPage() {
                     {
                         title: 'Internal QA',
                         key: 'qa',
+                        // The two words the cell shows, never the raw state.
+                        filters: filterOptions(rows, (row) => (row.quality.state === 'approved' ? 'approved' : 'pending')),
+                        onFilter: onFilterBy((row: FulfilmentControlRow) => (row.quality.state === 'approved' ? 'approved' : 'pending')),
                         render: (_, row) =>
                             row.quality.state === 'approved' ? (
                                 <Tooltip

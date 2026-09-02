@@ -1,13 +1,23 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, DatePicker, Drawer, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
 import { createBatch, getBatchLedger, listBatches, listAllItems } from '@/features/inventory/api';
+import {
+    BATCH_DEFAULT_SORT,
+    BATCH_LIST_SPEC,
+    BATCH_SORT_FIELDS,
+    type BatchListParams,
+    batchListRequest,
+} from '@/features/inventory/batchList';
 import type { Batch, BatchLedger } from '@/features/inventory/types';
 import { itemLabel } from '@/lib/itemLabel';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const batchSchema = z.object({
     item_id: z.number({ error: 'Item is required' }),
@@ -25,16 +35,22 @@ export default function BatchesPage() {
     const [barcodeBatch, setBarcodeBatch] = useState<Batch | null>(null);
     const queryClient = useQueryClient();
 
-    // Server-side paging and a server-side search. The table read the first
-    // twenty batches — newest first — so every older lot was invisible, and a
-    // browser-side filter over those twenty could not find one either.
-    const [page, setPage] = useState(1);
-    const [perPage, setPerPage] = useState(20);
-    const [search, setSearch] = useState('');
+    // Server-side paging, search AND ordering, all in the URL (useListParams).
+    // The table read the first twenty batches — newest first — so every older
+    // lot was invisible, and a browser-side filter over those twenty could not
+    // find one either; a sorter over them would have been the same defect.
+    const { params, setParams, setPage } = useListParams<BatchListParams>(BATCH_LIST_SPEC);
+    const request = batchListRequest(params);
+    // What is typed; the URL (and the server) hear it on Enter or the button.
+    const [qDraft, setQDraft] = useState(params.q ?? '');
+    useEffect(() => {
+        setQDraft(params.q ?? '');
+    }, [params.q]);
 
     const { data, isLoading } = useQuery({
-        queryKey: ['inventory', 'batches', page, perPage, search],
-        queryFn: () => listBatches({ page, per_page: perPage, search: search || undefined }),
+        queryKey: ['inventory', 'batches', request],
+        queryFn: () => listBatches(request),
+        placeholderData: (previous) => previous,
     });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const itemOptions = items?.data.filter((i) => i.tracking_type === 'batch').map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
@@ -72,10 +88,9 @@ export default function BatchesPage() {
                         allowClear
                         placeholder="Batch number or item"
                         style={{ width: 260 }}
-                        onSearch={(value) => {
-                            setSearch(value.trim());
-                            setPage(1);
-                        }}
+                        value={qDraft}
+                        onChange={(event) => setQDraft(event.target.value)}
+                        onSearch={(value) => setParams({ q: value.trim() || undefined })}
                     />
                     <Button type="primary" onClick={() => setModalOpen(true)}>New Batch</Button>
                 </Space>
@@ -85,27 +100,42 @@ export default function BatchesPage() {
             </Typography.Paragraph>
 
             <Table<Batch>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={{
-                    current: page,
-                    pageSize: perPage,
-                    total: data?.meta?.total ?? data?.data?.length ?? 0,
-                    showSizeChanger: true,
-                    pageSizeOptions: [20, 50, 100, 200],
-                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} batches`,
-                    onChange: (nextPage, nextSize) => {
-                        setPage(nextPage);
-                        setPerPage(nextSize);
-                    },
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queries the
+                // whole list. Item renders a relation's label and has no
+                // server order, so it carries no sorter.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, BATCH_SORT_FIELDS, BATCH_DEFAULT_SORT) });
                 }}
+                pagination={serverPagination(data?.meta, setPage, 'batches')}
                 columns={[
                     { title: 'Item', render: (_, row) => itemLabel(row.item) },
-                    { title: 'Batch Number', dataIndex: 'batch_number' },
-                    { title: 'Manufactured', dataIndex: 'manufactured_date' },
-                    { title: 'Expiry', dataIndex: 'expiry_date' },
+                    {
+                        title: 'Batch Number',
+                        dataIndex: 'batch_number',
+                        key: 'batch_number',
+                        sorter: true,
+                        sortOrder: columnSortOrder('batch_number', params.sort, BATCH_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Manufactured',
+                        dataIndex: 'manufactured_date',
+                        key: 'manufactured_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('manufactured_date', params.sort, BATCH_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Expiry',
+                        dataIndex: 'expiry_date',
+                        key: 'expiry_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('expiry_date', params.sort, BATCH_DEFAULT_SORT),
+                    },
                     {
                         title: 'Actions',
                         render: (_, row) => (

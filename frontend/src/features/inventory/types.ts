@@ -496,6 +496,13 @@ export interface FulfilmentQueueRow {
  */
 export interface FulfilmentQueueFilters {
     state?: FulfilmentState;
+    /**
+     * FulfilmentQueueService::SORTABLE in the ListSort spelling — the order
+     * number (`sales_order_id`) or the ordered quantity (`quantity`), the
+     * two real columns of the queue's base query. Absent is the queue's own
+     * order (over-reserved first, S8).
+     */
+    sort?: string;
     page?: number;
     per_page?: number;
 }

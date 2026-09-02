@@ -3,12 +3,14 @@
 namespace App\Modules\Inventory\Services;
 
 use App\Modules\Core\Models\AppSetting;
+use App\Modules\Inventory\Http\Requests\ListWarehousesRequest;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Production\Services\FactoryDayBinService;
 use App\Modules\Production\Services\FactoryWarehouseResolver;
 use App\Support\Configuration\DependencyCheck;
 use App\Support\Configuration\HardDeleteAuthority;
 use App\Support\Configuration\ManagesConfigurationLifecycle;
+use App\Support\Lists\ListSort;
 use App\Support\Tally\HierarchyUpsert;
 use Closure;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -187,15 +189,16 @@ class WarehouseService
      * and skip another. Archived stores stay on the list; this is the admin
      * screen where they are reactivated from.
      */
-    public function paginate(int $perPage = 20, ?string $search = null): LengthAwarePaginator
+    public function paginate(int $perPage = 20, ?string $search = null, ?string $sort = null): LengthAwarePaginator
     {
-        return Warehouse::query()
+        $query = Warehouse::query()
             ->when($search !== null, function ($query) use ($search) {
                 $like = "%{$search}%";
                 $query->where(fn ($outer) => $outer->where('code', 'like', $like)->orWhere('name', 'like', $like));
-            })
-            ->orderBy('name')
-            ->orderBy('id')
+            });
+
+        // Name order unless asked otherwise (ListWarehousesRequest::SORTABLE).
+        return ListSort::apply($query, $sort, ListWarehousesRequest::SORTABLE, 'name')
             ->paginate($perPage);
     }
 
