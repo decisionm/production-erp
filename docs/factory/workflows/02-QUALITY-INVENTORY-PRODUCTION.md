@@ -277,10 +277,17 @@ purchase rates."
 - **GAP:** today a counted line is issuable the moment its GRN is saved, and a
   counted rejection moves no stock; the build adds the quantity hold and the
   Rejections Out issue for counted lines.
-- **OPEN (asked one at a time):**
-  1. Q87 parts one and three: what is one unit of a counted arrival, and what
-     carries its barcode?
-  2. The Tally rejection voucher: Accounts, not the floor.
+- **VERIFIED as a decision:** DEC-20260902-014. One unit of a counted arrival
+  is the supplier's handling unit — bundle, bale, pallet, roll or box. The GRN
+  records the unit count, the pieces per unit and one barcode per unit; the
+  pieces must sum to the received quantity. Quality accepts or rejects whole
+  units; the Store scans the unit at issue; a part-issued unit keeps its
+  barcode with a reduced balance. No label per piece; no supplier or rate on
+  the label. Q87 closed in full.
+- **GAP:** the GRN refuses a lots block for any item not in kilograms; the
+  build adds handling units for counted materials, their labels, the unit-wise
+  hold release and the unit scan at issue.
+- **OPEN:** the Tally rejection voucher — Accounts, not the floor.
 
 ## Sections still to capture
 

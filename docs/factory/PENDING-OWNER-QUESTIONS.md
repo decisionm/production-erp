@@ -2394,12 +2394,16 @@ gets recorded as answered.
 **Blocks:** nothing. Both answers are the shipped behaviour; what changes is
 where the office does the typing. *Open since 2026-08-31.*
 
-## Q87 · How should a COUNTED material record what physically arrived? — PARTLY RESOLVED
+## Q87 · How should a COUNTED material record what physically arrived? — RESOLVED
 
-**Partly resolved 2026-09-02 by DEC-20260902-013:** a counted arrival DOES
-wait for incoming QA — the whole line quantity is held until the inspection
-records accepted and rejected pieces, with no bags needed. Still open: what ONE
-unit of a counted arrival is, and what carries its barcode.
+**Resolved 2026-09-02 by DEC-20260902-013 and DEC-20260902-014:** a counted
+arrival waits for incoming QA on its whole line quantity (-013); one unit is
+the supplier's physical handling unit — bundle, bale, pallet, roll or box —
+and the GRN records the number of units, the pieces in each, and one barcode
+per unit; Quality accepts or rejects whole units; the Store scans the unit at
+issue and a part-issued unit keeps its barcode with a reduced piece balance;
+no label per carton, tray or pouch; no supplier or rate on the label (-014).
+The original question follows.
 
 Raised by answering Q77, not instead of it. The owner's answer there was
 "every purchased material must record its lots and bags", and that is now
