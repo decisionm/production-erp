@@ -28,7 +28,9 @@ class AttendanceImportController extends Controller
 
     public function index(ListAttendanceImportsRequest $request, HrmsListQuery $query): AnonymousResourceCollection
     {
-        return AttendanceImportResource::collection($this->imports->paginate($query->perPage($request->validated())));
+        $filters = $request->validated();
+
+        return AttendanceImportResource::collection($this->imports->paginate($query->perPage($filters), $filters));
     }
 
     public function store(StoreAttendanceImportRequest $request): JsonResponse

@@ -65,6 +65,16 @@ class HrmsListQuery
         });
     }
 
+    /** The import runs' `q`: the file name, or the period as typed ("2026-07"). */
+    public function whereImportRunMatches(Builder $runs, string $term): void
+    {
+        $runs->where(function (Builder $any) use ($term) {
+            $this->grammar->whereLike($any, 'file_name', $term);
+            $any->orWhere(fn (Builder $from) => $this->grammar->whereLike($from, 'period_from', $term));
+            $any->orWhere(fn (Builder $to) => $this->grammar->whereLike($to, 'period_to', $term));
+        });
+    }
+
     /** Inclusive range on a plain DATE column. */
     public function applyDateRange(Builder $query, string $column, ?string $from, ?string $to): void
     {

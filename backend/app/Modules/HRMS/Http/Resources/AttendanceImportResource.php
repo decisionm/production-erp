@@ -22,6 +22,17 @@ class AttendanceImportResource extends JsonResource
             // How many issue lines still wait for a person — the number on
             // the Apply button. Counted by the service on every read.
             'open_count' => (int) ($this->open_count ?? 0),
+            // The review chips' numbers: open issues by kind, answered
+            // issues, and lines that never needed anyone.
+            'counts' => [
+                'open' => (int) ($this->open_count ?? 0),
+                'in_no_out' => (int) ($this->in_no_out_count ?? 0),
+                'out_no_in' => (int) ($this->out_no_in_count ?? 0),
+                'no_punch' => (int) ($this->no_punch_count ?? 0),
+                'unknown_employee' => (int) ($this->unknown_employee_count ?? 0),
+                'resolved' => (int) ($this->resolved_count ?? 0),
+                'clean' => (int) ($this->clean_count ?? 0),
+            ],
             'uploaded_by' => $this->when($this->relationLoaded('uploader') && $this->uploader, fn () => [
                 'id' => $this->uploader->id,
                 'name' => $this->uploader->name,

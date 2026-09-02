@@ -128,6 +128,9 @@ class AttendanceImportTest extends TestCase
             ->assertJsonPath('data.day_count', 7)
             ->assertJsonPath('data.issue_count', 3)
             ->assertJsonPath('data.open_count', 3)
+            ->assertJsonPath('data.counts', [
+                'open' => 3, 'in_no_out' => 1, 'out_no_in' => 0, 'no_punch' => 1, 'unknown_employee' => 1, 'resolved' => 0, 'clean' => 4,
+            ])
             ->assertJsonPath('data.file_name', 'july.xlsx');
 
         $id = (int) $response->json('data.id');
@@ -377,5 +380,10 @@ class AttendanceImportTest extends TestCase
         $this->assertSame($second, $list->json('data.0.id'));
         $this->assertSame(3, $list->json('data.0.open_count'));
         $this->assertSame($first, $this->getJson('/api/v1/hrms/attendance-imports?per_page=1&page=2')->assertOk()->json('data.0.id'));
+
+        $this->assertSame(2, $this->getJson('/api/v1/hrms/attendance-imports?q=2026-07')->assertOk()->json('meta.total'), 'by period');
+        $this->assertSame(2, $this->getJson('/api/v1/hrms/attendance-imports?q=JULY')->assertOk()->json('meta.total'), 'by file name, any case');
+        $this->assertSame(0, $this->getJson('/api/v1/hrms/attendance-imports?q=2026-08')->assertOk()->json('meta.total'));
+        $this->getJson('/api/v1/hrms/attendance-imports?q='.str_repeat('a', 101))->assertUnprocessable()->assertJsonValidationErrors(['q']);
     }
 }

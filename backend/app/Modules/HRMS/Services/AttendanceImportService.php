@@ -82,10 +82,21 @@ class AttendanceImportService
 
     // ---- runs --------------------------------------------------------------------
 
-    /** The runs, newest first. */
-    public function paginate(int $perPage = HrmsListQuery::PER_PAGE_DEFAULT): LengthAwarePaginator
+    /**
+     * The runs, newest first. `q` matches the file name or the period as
+     * typed — "2026-07" finds July's run.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function paginate(int $perPage = HrmsListQuery::PER_PAGE_DEFAULT, array $filters = []): LengthAwarePaginator
     {
-        return $this->runsQuery()
+        $query = $this->runsQuery();
+
+        if (($term = $this->query->term($filters)) !== null) {
+            $this->query->whereImportRunMatches($query, $term);
+        }
+
+        return $query
             ->orderByDesc('id')
             ->paginate($perPage)
             ->withQueryString();
@@ -102,13 +113,23 @@ class AttendanceImportService
         return $this->runsQuery()->findOrFail($import->id);
     }
 
+    /**
+     * A run with its uploader and the review counts the screen's chips
+     * show: open issues in all and by kind, answered issues, clean lines.
+     * Seven correlated counts per row, on a list that grows by one a month.
+     */
     private function runsQuery(): Builder
     {
-        return AttendanceImport::query()
-            ->with('uploader')
-            ->withCount([
-                'lines as open_count' => fn (Builder $lines) => $lines->whereNotNull('issue')->whereNull('resolution'),
-            ]);
+        $counts = [
+            'lines as open_count' => fn (Builder $lines) => $lines->whereNotNull('issue')->whereNull('resolution'),
+            'lines as resolved_count' => fn (Builder $lines) => $lines->whereNotNull('issue')->whereNotNull('resolution'),
+            'lines as clean_count' => fn (Builder $lines) => $lines->whereNull('issue'),
+        ];
+        foreach (Issue::cases() as $issue) {
+            $counts["lines as {$issue->value}_count"] = fn (Builder $lines) => $lines->where('issue', $issue->value)->whereNull('resolution');
+        }
+
+        return AttendanceImport::query()->with('uploader')->withCount($counts);
     }
 
     /**

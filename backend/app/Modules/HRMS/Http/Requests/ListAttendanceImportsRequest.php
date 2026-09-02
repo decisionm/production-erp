@@ -16,6 +16,7 @@ class ListAttendanceImportsRequest extends FormRequest
     public function rules(): array
     {
         return [
+            'q' => ['sometimes', 'nullable', 'string', 'max:100'],
             'per_page' => ['sometimes', 'nullable', 'integer', 'between:1,'.HrmsListQuery::PER_PAGE_MAX],
             'page' => ['sometimes', 'nullable', 'integer', 'min:1'],
         ];
