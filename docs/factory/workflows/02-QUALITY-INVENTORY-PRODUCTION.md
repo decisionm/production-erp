@@ -467,9 +467,25 @@ record's source.
 - **VERIFIED (code):** requests and issues already refuse an item without the
   flag. **GAP:** no conflict warning and no audit of who set the flag.
 
+## 14. Store and held stock
+
+### Current application
+
+- The Store holds finished goods against a confirmed sales-order line, refuses
+  to hold more than exists, sends a shortage to Production, and performs the
+  dispatch (DEC-20260831-012, DEC-20260901-005). Tally originates the invoice;
+  the ERP imports and matches it.
+- When two lines want the same bottles the first hold keeps the stock; a Store
+  user may re-point a hold with a reason, audited.
+
+### Result
+
+- **VERIFIED as a decision:** DEC-20260902-028, Q62(a). The ERP never moves a
+  hold on its own. First hold wins; only a person re-points it.
+- **OPEN (one at a time):** Q62(b) approval for a re-point; (c) customer
+  priority; (d) production request queue order; (e) when a request is
+  answered; (f) parallel lines for planning dates.
+
 ## Sections still to capture
 
-- Store and held stock: governed by DEC-20260831-012 (hold, quality approval,
-  dispatch as ERP acts; Tally originates the invoice) and DEC-20260901-005
-  (the Store dispatches). To be written as a baseline section once chapter 1's
-  leftovers are recorded.
+- None. Chapter 2 is complete once Q62(b)–(f) are answered or deferred.
