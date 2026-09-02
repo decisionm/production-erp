@@ -215,10 +215,10 @@ to see each: rates → `carton-trace.view` or `finance.view`; supplier-identity 
    given, always alias, limit rows, prefer aggregates, answer in one sentence
    plus a SQL block), the table specs from 3.2, the last four turns of this
    conversation (question, SQL, answer), then the question.
-2. Call the Anthropic Messages API (`config('ask-erp.model')`, default
-   `claude-sonnet-5`; timeout 45 s) through a small `AnthropicClient` on
-   Laravel's HTTP client. The response is parsed for a single ```sql block and
-   a sentence of explanation.
+2. Call the Anthropic Messages API through the official PHP SDK
+   (`config('ask-erp.model')`, default `claude-opus-5`, adaptive thinking,
+   `output_config.effort` from config; timeout 45 s). The answer is structured
+   JSON (`sql`, `answer_template`, `chart_hint`) via `output_config.format`.
 3. `SqlGuard::check($sql, $allowedTables, $columnsToStrip)`: one statement;
    begins with SELECT or WITH; refuses `;`, comments, `INTO`, `FOR UPDATE`,
    `LOCK`, `LOAD_FILE`, `SLEEP`, `BENCHMARK`, `information_schema`,
@@ -251,7 +251,8 @@ query"; SQL error → 422 with the MySQL message; guard refusal → 422.
 - New catalogue module `assistant` ("Ask ERP") in `PermissionService::MODULES`;
   Administrator receives it through the seeder as with every module. Others get
   it through the Roles screen.
-- Routes under `Route::prefix('ask-erp')->middleware('module:assistant')`:
+- Routes under `Route::prefix('ask-erp')->middleware('module-read:assistant')`
+  (view or manage on every verb; a question is a read):
   `GET conversations`, `POST conversations`, `GET conversations/{id}`,
   `POST conversations/{id}/ask`, `GET catalogue` (the tables this user may
   query, with labels — the page shows them as chips).

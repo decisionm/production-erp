@@ -1882,7 +1882,7 @@ use App\Modules\Assistant\Services\AskErpService;
 use App\Modules\Assistant\Services\SqlDraft;
 use App\Modules\Assistant\Services\SqlRequest;
 use App\Modules\Assistant\Services\SqlWriter;
-use App\Modules\Core\Models\User;
+use App\Models\User;
 use App\Modules\HRMS\Models\Employee;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Spatie\Permission\Models\Permission;
@@ -2067,7 +2067,7 @@ Models:
 // backend/app/Modules/Assistant/Models/AskErpConversation.php
 namespace App\Modules\Assistant\Models;
 
-use App\Modules\Core\Models\User;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -2112,7 +2112,7 @@ class AskErpMessage extends Model
 }
 ```
 
-Check `User` lives at `App\Modules\Core\Models\User` (grep `class User extends`); adjust the import if not.
+The User model is `App\Models\User`.
 
 Services:
 
@@ -2242,7 +2242,7 @@ use App\Modules\Assistant\Exceptions\AskErpException;
 use App\Modules\Assistant\Exceptions\SqlRefusedException;
 use App\Modules\Assistant\Models\AskErpConversation;
 use App\Modules\Assistant\Models\AskErpMessage;
-use App\Modules\Core\Models\User;
+use App\Models\User;
 use Illuminate\Support\Facades\Log;
 
 class AskErpService
@@ -2378,7 +2378,7 @@ use App\Modules\Assistant\Models\AskErpConversation;
 use App\Modules\Assistant\Services\SqlDraft;
 use App\Modules\Assistant\Services\SqlRequest;
 use App\Modules\Assistant\Services\SqlWriter;
-use App\Modules\Core\Models\User;
+use App\Models\User;
 use App\Modules\HRMS\Models\Employee;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -2673,7 +2673,7 @@ Routes — in `backend/routes/api.php`, inside the authenticated `v1` group next
         // view. `module:assistant` gates the page; what the page may READ is
         // decided per table inside SchemaRetriever from the login's other
         // module permissions, and per column by SensitiveColumns.
-        Route::prefix('ask-erp')->middleware('module:assistant')->group(function () {
+        Route::prefix('ask-erp')->middleware('module-read:assistant')->group(function () {
             Route::get('catalogue', [AskErpController::class, 'catalogue']);
             Route::get('conversations', [AskErpController::class, 'index']);
             Route::post('conversations', [AskErpController::class, 'store']);
@@ -3090,7 +3090,7 @@ import { askQuestion, createConversation, getCatalogue, getConversation, listCon
 import AnswerCard from '@/features/ask-erp/components/AnswerCard';
 import TableChips from '@/features/ask-erp/components/TableChips';
 import type { AskErpMessage, AskResult } from '@/features/ask-erp/types';
-import { apiErrorMessage } from '@/lib/apiError';
+import { apiErrorSummary } from '@/lib/apiError';
 
 /**
  * ASK ERP. Left: this login's conversations (server search + paging).
@@ -3197,7 +3197,7 @@ export default function AskErpPage() {
                                 </List.Item>
                             )}
                         />
-                        {ask.isError ? <Alert type="error" showIcon message={apiErrorMessage(ask.error)} /> : null}
+                        {ask.isError ? <Alert type="error" showIcon message={apiErrorSummary(ask.error)} /> : null}
                         <div ref={bottomRef} />
                     </div>
                     <Space.Compact style={{ width: '100%' }}>
@@ -3218,7 +3218,7 @@ export default function AskErpPage() {
 }
 ```
 
-Read `frontend/src/lib/apiError.ts` for the exact exported name of the message extractor and use that (the code above assumes `apiErrorMessage(error)`).
+Read `frontend/src/lib/apiError.ts` for the exact exported name of the message extractor and use that (the code above assumes `apiErrorSummary(error)`).
 
 Wiring:
 
