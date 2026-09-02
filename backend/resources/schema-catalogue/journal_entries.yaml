@@ -1,0 +1,39 @@
+table: journal_entries
+module: finance
+label: 'Journal Entries'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: entry_date
+    type: date
+  -
+    name: reference
+    type: string
+    nullable: true
+  -
+    name: memo
+    type: string
+    nullable: true
+  -
+    name: status
+    type: string
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'journal_entries.created_by = users.id'
+keywords: {}
+questions: {}

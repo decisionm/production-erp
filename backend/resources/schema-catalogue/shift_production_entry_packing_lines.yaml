@@ -1,0 +1,60 @@
+table: shift_production_entry_packing_lines
+module: production
+label: 'Shift Production Entry Packing Lines'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: shift_production_entry_id
+    type: integer
+    references: shift_production_entries.id
+  -
+    name: production_standard_packaging_id
+    type: integer
+    nullable: true
+    references: production_standard_packagings.id
+  -
+    name: position
+    type: integer
+  -
+    name: mode
+    type: string
+  -
+    name: boxes
+    type: integer
+  -
+    name: nos_per_box
+    type: integer
+  -
+    name: loose_inner
+    type: integer
+    nullable: true
+  -
+    name: nos_per_inner
+    type: integer
+    nullable: true
+  -
+    name: derived_pieces
+    type: integer
+  -
+    name: actual_pieces
+    type: integer
+  -
+    name: override_reason
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'shift_production_entry_packing_lines.production_standard_packaging_id = production_standard_packagings.id'
+  - 'shift_production_entry_packing_lines.shift_production_entry_id = shift_production_entries.id'
+keywords: {}
+questions: {}

@@ -1,0 +1,42 @@
+table: salary_components
+module: payroll
+label: 'Salary Components'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: code
+    type: string
+  -
+    name: name
+    type: string
+  -
+    name: type
+    type: string
+  -
+    name: calculation_type
+    type: string
+  -
+    name: percentage
+    type: decimal
+    nullable: true
+  -
+    name: is_active
+    type: integer
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+joins: {}
+keywords: {}
+questions: {}

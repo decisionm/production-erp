@@ -1,0 +1,46 @@
+table: deliveries
+module: sales
+label: Deliveries
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: sales_order_id
+    type: integer
+    references: sales_orders.id
+  -
+    name: warehouse_id
+    type: integer
+    references: warehouses.id
+  -
+    name: reference
+    type: string
+    nullable: true
+  -
+    name: delivered_date
+    type: datetime
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'deliveries.created_by = users.id'
+  - 'deliveries.warehouse_id = warehouses.id'
+  - 'deliveries.sales_order_id = sales_orders.id'
+keywords: {}
+questions: {}

@@ -1,0 +1,52 @@
+table: molds
+module: production
+label: Molds
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: code
+    type: string
+  -
+    name: name
+    type: string
+  -
+    name: cavity_count
+    type: integer
+    nullable: true
+  -
+    name: status
+    type: string
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: updated_by
+    type: integer
+    nullable: true
+    references: users.id
+joins:
+  - 'molds.updated_by = users.id'
+  - 'molds.created_by = users.id'
+keywords: {}
+questions: {}

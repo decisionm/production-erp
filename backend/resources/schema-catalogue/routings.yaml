@@ -1,0 +1,34 @@
+table: routings
+module: production
+label: Routings
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: name
+    type: string
+  -
+    name: is_active
+    type: integer
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+joins:
+  - 'routings.item_id = items.id'
+keywords: {}
+questions: {}

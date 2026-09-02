@@ -1,0 +1,42 @@
+table: users
+module: users
+label: Users
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: name
+    type: string
+  -
+    name: email
+    type: string
+  -
+    name: email_verified_at
+    type: datetime
+    nullable: true
+  -
+    name: password
+    type: string
+  -
+    name: remember_token
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: is_active
+    type: integer
+  -
+    name: is_system
+    type: integer
+joins: {}
+keywords: {}
+questions: {}

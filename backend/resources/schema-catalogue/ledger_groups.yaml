@@ -1,0 +1,40 @@
+table: ledger_groups
+module: finance
+label: 'Ledger Groups'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: tally_guid
+    type: string
+    nullable: true
+  -
+    name: name
+    type: string
+  -
+    name: tally_parent_name
+    type: string
+    nullable: true
+  -
+    name: parent_id
+    type: integer
+    nullable: true
+    references: ledger_groups.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+joins:
+  - 'ledger_groups.parent_id = ledger_groups.id'
+keywords: {}
+questions: {}

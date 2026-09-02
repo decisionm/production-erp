@@ -1,0 +1,36 @@
+table: gst_rates
+module: compliance
+label: 'Gst Rates'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: hsn_sac_code
+    type: string
+  -
+    name: description
+    type: string
+    nullable: true
+  -
+    name: rate_percent
+    type: decimal
+  -
+    name: is_active
+    type: integer
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+joins: {}
+keywords: {}
+questions: {}

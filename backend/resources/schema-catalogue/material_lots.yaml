@@ -1,0 +1,71 @@
+table: material_lots
+module: inventory
+label: 'Material Lots'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: grn_id
+    type: integer
+    nullable: true
+    references: goods_receipt_notes.id
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: supplier_lot_no
+    type: string
+    nullable: true
+  -
+    name: received_date
+    type: date
+  -
+    name: bag_count
+    type: integer
+  -
+    name: bag_weight_kg
+    type: decimal
+    nullable: true
+  -
+    name: total_received_kg
+    type: decimal
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: goods_receipt_note_line_id
+    type: integer
+    nullable: true
+    references: goods_receipt_note_lines.id
+  -
+    name: receipt_rate_per_kg
+    type: decimal
+    nullable: true
+  -
+    name: rate_source
+    type: string
+    nullable: true
+joins:
+  - 'material_lots.goods_receipt_note_line_id = goods_receipt_note_lines.id'
+  - 'material_lots.grn_id = goods_receipt_notes.id'
+  - 'material_lots.item_id = items.id'
+  - 'material_lots.created_by = users.id'
+keywords: {}
+questions: {}

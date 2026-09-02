@@ -1,0 +1,26 @@
+table: tally_ledger_mappings
+module: finance
+label: 'Tally Ledger Mappings'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: role
+    type: string
+  -
+    name: tally_ledger_name
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins: {}
+keywords: {}
+questions: {}

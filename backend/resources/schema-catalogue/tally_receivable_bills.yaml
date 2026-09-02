@@ -1,0 +1,55 @@
+table: tally_receivable_bills
+module: tally-sync
+label: 'Tally Receivable Bills'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: party_ledger_name
+    type: string
+  -
+    name: party_ledger_guid
+    type: string
+    nullable: true
+  -
+    name: bill_reference
+    type: string
+    nullable: true
+  -
+    name: bill_date
+    type: date
+    nullable: true
+  -
+    name: due_date
+    type: date
+    nullable: true
+  -
+    name: closing_amount
+    type: decimal
+  -
+    name: opening_amount
+    type: decimal
+    nullable: true
+  -
+    name: as_of
+    type: date
+  -
+    name: tally_company
+    type: string
+    nullable: true
+  -
+    name: tally_synced_at
+    type: datetime
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins: {}
+keywords: {}
+questions: {}

@@ -1,0 +1,82 @@
+table: production_standard_packagings
+module: production
+label: 'Production Standard Packagings'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: production_standard_id
+    type: integer
+    references: production_standards.id
+  -
+    name: mode
+    type: string
+  -
+    name: nos_per_pouch
+    type: integer
+    nullable: true
+  -
+    name: pouches_per_box
+    type: integer
+    nullable: true
+  -
+    name: nos_per_tray
+    type: integer
+    nullable: true
+  -
+    name: trays_per_box
+    type: integer
+    nullable: true
+  -
+    name: nos_per_box
+    type: integer
+    nullable: true
+  -
+    name: is_default
+    type: integer
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: item_id
+    type: integer
+    nullable: true
+    references: items.id
+  -
+    name: item_set_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: item_set_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: updated_by
+    type: integer
+    nullable: true
+    references: users.id
+joins:
+  - 'production_standard_packagings.updated_by = users.id'
+  - 'production_standard_packagings.item_set_by = users.id'
+  - 'production_standard_packagings.item_id = items.id'
+  - 'production_standard_packagings.production_standard_id = production_standards.id'
+  - 'production_standard_packagings.created_by = users.id'
+keywords: {}
+questions: {}

@@ -1,0 +1,57 @@
+table: production_downtime_events
+module: production
+label: 'Production Downtime Events'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: shift_production_entry_id
+    type: integer
+    nullable: true
+    references: shift_production_entries.id
+  -
+    name: work_center_id
+    type: integer
+    references: work_centers.id
+  -
+    name: downtime_reason_id
+    type: integer
+    references: downtime_reasons.id
+  -
+    name: production_date
+    type: date
+  -
+    name: minutes
+    type: decimal
+  -
+    name: is_planned
+    type: integer
+  -
+    name: known_before_start
+    type: integer
+  -
+    name: note
+    type: string
+    nullable: true
+  -
+    name: recorded_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'production_downtime_events.recorded_by = users.id'
+  - 'production_downtime_events.downtime_reason_id = downtime_reasons.id'
+  - 'production_downtime_events.work_center_id = work_centers.id'
+  - 'production_downtime_events.shift_production_entry_id = shift_production_entries.id'
+keywords: {}
+questions: {}

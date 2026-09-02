@@ -1,0 +1,41 @@
+table: shift_scraps
+module: production
+label: 'Shift Scraps'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: shift_production_entry_id
+    type: integer
+    references: shift_production_entries.id
+  -
+    name: type
+    type: string
+  -
+    name: quantity_nos
+    type: decimal
+    nullable: true
+  -
+    name: quantity_kg
+    type: decimal
+    nullable: true
+  -
+    name: scrap_reason_id
+    type: integer
+    nullable: true
+    references: scrap_reasons.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'shift_scraps.scrap_reason_id = scrap_reasons.id'
+  - 'shift_scraps.shift_production_entry_id = shift_production_entries.id'
+keywords: {}
+questions: {}

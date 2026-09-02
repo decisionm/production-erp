@@ -1,0 +1,75 @@
+table: mold_change_logs
+module: production
+label: 'Mold Change Logs'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: work_center_id
+    type: integer
+    references: work_centers.id
+  -
+    name: shift_id
+    type: integer
+    references: shifts.id
+  -
+    name: production_date
+    type: date
+  -
+    name: changed_from_item_id
+    type: integer
+    nullable: true
+    references: items.id
+  -
+    name: changed_to_item_id
+    type: integer
+    references: items.id
+  -
+    name: from_time
+    type: datetime
+  -
+    name: to_time
+    type: datetime
+    nullable: true
+  -
+    name: total_minutes
+    type: decimal
+    nullable: true
+  -
+    name: status
+    type: string
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: changed_to_mold_id
+    type: integer
+    nullable: true
+    references: molds.id
+  -
+    name: changed_from_mold_id
+    type: integer
+    nullable: true
+    references: molds.id
+joins:
+  - 'mold_change_logs.changed_from_mold_id = molds.id'
+  - 'mold_change_logs.created_by = users.id'
+  - 'mold_change_logs.changed_to_item_id = items.id'
+  - 'mold_change_logs.changed_from_item_id = items.id'
+  - 'mold_change_logs.shift_id = shifts.id'
+  - 'mold_change_logs.work_center_id = work_centers.id'
+  - 'mold_change_logs.changed_to_mold_id = molds.id'
+keywords: {}
+questions: {}

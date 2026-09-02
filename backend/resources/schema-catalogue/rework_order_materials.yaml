@@ -1,0 +1,35 @@
+table: rework_order_materials
+module: production
+label: 'Rework Order Materials'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: rework_order_id
+    type: integer
+    references: rework_orders.id
+  -
+    name: component_item_id
+    type: integer
+    references: items.id
+  -
+    name: quantity_required
+    type: decimal
+  -
+    name: quantity_issued
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'rework_order_materials.component_item_id = items.id'
+  - 'rework_order_materials.rework_order_id = rework_orders.id'
+keywords: {}
+questions: {}

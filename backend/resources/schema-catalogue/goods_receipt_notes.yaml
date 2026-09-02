@@ -1,0 +1,66 @@
+table: goods_receipt_notes
+module: procurement
+label: 'Goods Receipt Notes'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: purchase_order_id
+    type: integer
+    references: purchase_orders.id
+  -
+    name: warehouse_id
+    type: integer
+    references: warehouses.id
+  -
+    name: reference
+    type: string
+    nullable: true
+  -
+    name: received_date
+    type: datetime
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: receipt_key
+    type: string
+    nullable: true
+  -
+    name: receipt_payload_hash
+    type: string
+    nullable: true
+  -
+    name: receipt_note_reference
+    type: string
+    nullable: true
+  -
+    name: tracking_number
+    type: string
+    nullable: true
+  -
+    name: tally_staging
+    type: string
+    nullable: true
+joins:
+  - 'goods_receipt_notes.created_by = users.id'
+  - 'goods_receipt_notes.warehouse_id = warehouses.id'
+  - 'goods_receipt_notes.purchase_order_id = purchase_orders.id'
+keywords: {}
+questions: {}

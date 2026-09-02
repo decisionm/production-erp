@@ -1,0 +1,56 @@
+table: opportunities
+module: crm
+label: Opportunities
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: name
+    type: string
+  -
+    name: customer_id
+    type: integer
+    references: customers.id
+  -
+    name: lead_id
+    type: integer
+    nullable: true
+    references: leads.id
+  -
+    name: stage
+    type: string
+  -
+    name: estimated_value
+    type: decimal
+  -
+    name: probability
+    type: decimal
+  -
+    name: expected_close_date
+    type: date
+    nullable: true
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: assigned_to
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'opportunities.assigned_to = users.id'
+  - 'opportunities.lead_id = leads.id'
+  - 'opportunities.customer_id = customers.id'
+keywords: {}
+questions: {}

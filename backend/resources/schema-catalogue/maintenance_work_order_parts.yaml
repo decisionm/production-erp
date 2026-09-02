@@ -1,0 +1,40 @@
+table: maintenance_work_order_parts
+module: production
+label: 'Maintenance Work Order Parts'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: maintenance_work_order_id
+    type: integer
+    references: maintenance_work_orders.id
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: warehouse_id
+    type: integer
+    references: warehouses.id
+  -
+    name: quantity
+    type: decimal
+  -
+    name: unit_cost
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'maintenance_work_order_parts.warehouse_id = warehouses.id'
+  - 'maintenance_work_order_parts.item_id = items.id'
+  - 'maintenance_work_order_parts.maintenance_work_order_id = maintenance_work_orders.id'
+keywords: {}
+questions: {}

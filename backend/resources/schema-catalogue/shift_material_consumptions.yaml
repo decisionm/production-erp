@@ -1,0 +1,59 @@
+table: shift_material_consumptions
+module: production
+label: 'Shift Material Consumptions'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: shift_production_entry_id
+    type: integer
+    references: shift_production_entries.id
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: warehouse_id
+    type: integer
+    references: warehouses.id
+  -
+    name: quantity_issued_kg
+    type: decimal
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: added_reason
+    type: string
+    nullable: true
+  -
+    name: added_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: substitutes_item_id
+    type: integer
+    nullable: true
+    references: items.id
+joins:
+  - 'shift_material_consumptions.substitutes_item_id = items.id'
+  - 'shift_material_consumptions.created_by = users.id'
+  - 'shift_material_consumptions.warehouse_id = warehouses.id'
+  - 'shift_material_consumptions.item_id = items.id'
+  - 'shift_material_consumptions.shift_production_entry_id = shift_production_entries.id'
+  - 'shift_material_consumptions.added_by = users.id'
+keywords: {}
+questions: {}

@@ -1,0 +1,35 @@
+table: quotation_lines
+module: sales
+label: 'Quotation Lines'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: quotation_id
+    type: integer
+    references: quotations.id
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: quantity
+    type: decimal
+  -
+    name: unit_price
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'quotation_lines.item_id = items.id'
+  - 'quotation_lines.quotation_id = quotations.id'
+keywords: {}
+questions: {}

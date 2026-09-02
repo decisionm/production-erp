@@ -1,0 +1,57 @@
+table: leads
+module: crm
+label: Leads
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: name
+    type: string
+  -
+    name: email
+    type: string
+    nullable: true
+  -
+    name: phone
+    type: string
+    nullable: true
+  -
+    name: company
+    type: string
+    nullable: true
+  -
+    name: source
+    type: string
+    nullable: true
+  -
+    name: status
+    type: string
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: assigned_to
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: converted_customer_id
+    type: integer
+    nullable: true
+    references: customers.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'leads.converted_customer_id = customers.id'
+  - 'leads.assigned_to = users.id'
+keywords: {}
+questions: {}

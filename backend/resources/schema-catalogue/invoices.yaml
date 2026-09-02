@@ -1,0 +1,49 @@
+table: invoices
+module: sales
+label: Invoices
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: sales_order_id
+    type: integer
+    references: sales_orders.id
+  -
+    name: customer_id
+    type: integer
+    references: customers.id
+  -
+    name: status
+    type: string
+  -
+    name: invoice_date
+    type: date
+  -
+    name: due_date
+    type: date
+    nullable: true
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'invoices.created_by = users.id'
+  - 'invoices.customer_id = customers.id'
+  - 'invoices.sales_order_id = sales_orders.id'
+keywords: {}
+questions: {}

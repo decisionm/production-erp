@@ -1,0 +1,55 @@
+table: leave_requests
+module: hrms
+label: 'Leave Requests'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: employee_id
+    type: integer
+    references: employees.id
+  -
+    name: leave_type_id
+    type: integer
+    references: leave_types.id
+  -
+    name: start_date
+    type: date
+  -
+    name: end_date
+    type: date
+  -
+    name: days
+    type: decimal
+  -
+    name: reason
+    type: string
+    nullable: true
+  -
+    name: status
+    type: string
+  -
+    name: approved_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: decided_at
+    type: datetime
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'leave_requests.approved_by = users.id'
+  - 'leave_requests.leave_type_id = leave_types.id'
+  - 'leave_requests.employee_id = employees.id'
+keywords: {}
+questions: {}

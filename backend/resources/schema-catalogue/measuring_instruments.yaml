@@ -1,0 +1,46 @@
+table: measuring_instruments
+module: quality
+label: 'Measuring Instruments'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: code
+    type: string
+  -
+    name: name
+    type: string
+  -
+    name: location
+    type: string
+    nullable: true
+  -
+    name: calibration_frequency_days
+    type: integer
+  -
+    name: last_calibrated_date
+    type: date
+    nullable: true
+  -
+    name: next_calibration_due
+    type: date
+  -
+    name: status
+    type: string
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+joins: {}
+keywords: {}
+questions: {}

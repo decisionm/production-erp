@@ -1,0 +1,42 @@
+table: calibration_records
+module: quality
+label: 'Calibration Records'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: measuring_instrument_id
+    type: integer
+    references: measuring_instruments.id
+  -
+    name: calibrated_date
+    type: date
+  -
+    name: certificate_number
+    type: string
+    nullable: true
+  -
+    name: result
+    type: string
+  -
+    name: performed_by
+    type: string
+    nullable: true
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'calibration_records.measuring_instrument_id = measuring_instruments.id'
+keywords: {}
+questions: {}

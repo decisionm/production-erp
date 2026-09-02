@@ -1,0 +1,84 @@
+table: work_centers
+module: machine-master
+label: 'Work Centers'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: code
+    type: string
+  -
+    name: name
+    type: string
+  -
+    name: is_active
+    type: integer
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+  -
+    name: capacity_hours_per_day
+    type: decimal
+    nullable: true
+  -
+    name: display_sequence
+    type: integer
+    nullable: true
+  -
+    name: capacity_class
+    type: string
+    nullable: true
+  -
+    name: min_cavities
+    type: integer
+    nullable: true
+  -
+    name: max_cavities
+    type: integer
+    nullable: true
+  -
+    name: permitted_cavities
+    type: string
+    nullable: true
+  -
+    name: cycle_time_min
+    type: decimal
+    nullable: true
+  -
+    name: cycle_time_max
+    type: decimal
+    nullable: true
+  -
+    name: default_shift_hours
+    type: decimal
+    nullable: true
+  -
+    name: confirmation_status
+    type: string
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: updated_by
+    type: integer
+    nullable: true
+    references: users.id
+joins:
+  - 'work_centers.updated_by = users.id'
+  - 'work_centers.created_by = users.id'
+keywords: {}
+questions: {}

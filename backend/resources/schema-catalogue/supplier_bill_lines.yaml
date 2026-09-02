@@ -1,0 +1,44 @@
+table: supplier_bill_lines
+module: procurement
+label: 'Supplier Bill Lines'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: supplier_bill_id
+    type: integer
+    references: supplier_bills.id
+  -
+    name: goods_receipt_note_line_id
+    type: integer
+    nullable: true
+    references: goods_receipt_note_lines.id
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: quantity
+    type: decimal
+  -
+    name: rate
+    type: decimal
+  -
+    name: amount
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'supplier_bill_lines.item_id = items.id'
+  - 'supplier_bill_lines.goods_receipt_note_line_id = goods_receipt_note_lines.id'
+  - 'supplier_bill_lines.supplier_bill_id = supplier_bills.id'
+keywords: {}
+questions: {}

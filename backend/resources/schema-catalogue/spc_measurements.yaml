@@ -1,0 +1,40 @@
+table: spc_measurements
+module: quality
+label: 'Spc Measurements'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: spc_characteristic_id
+    type: integer
+    references: spc_characteristics.id
+  -
+    name: value
+    type: decimal
+  -
+    name: measured_at
+    type: datetime
+  -
+    name: recorded_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'spc_measurements.recorded_by = users.id'
+  - 'spc_measurements.spc_characteristic_id = spc_characteristics.id'
+keywords: {}
+questions: {}

@@ -1,0 +1,39 @@
+table: purchase_order_revisions
+module: procurement
+label: 'Purchase Order Revisions'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: purchase_order_id
+    type: integer
+    references: purchase_orders.id
+  -
+    name: revision_no
+    type: integer
+  -
+    name: kind
+    type: string
+  -
+    name: lines_json
+    type: string
+  -
+    name: amended_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: reason
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+joins:
+  - 'purchase_order_revisions.amended_by = users.id'
+  - 'purchase_order_revisions.purchase_order_id = purchase_orders.id'
+keywords: {}
+questions: {}

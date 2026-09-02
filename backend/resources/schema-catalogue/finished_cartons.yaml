@@ -1,0 +1,53 @@
+table: finished_cartons
+module: production
+label: 'Finished Cartons'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: shift_production_entry_id
+    type: integer
+    references: shift_production_entries.id
+  -
+    name: carton_no
+    type: string
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: pieces
+    type: decimal
+  -
+    name: is_partial
+    type: integer
+  -
+    name: status
+    type: string
+  -
+    name: delivery_id
+    type: integer
+    nullable: true
+    references: deliveries.id
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'finished_cartons.created_by = users.id'
+  - 'finished_cartons.delivery_id = deliveries.id'
+  - 'finished_cartons.item_id = items.id'
+  - 'finished_cartons.shift_production_entry_id = shift_production_entries.id'
+keywords: {}
+questions: {}

@@ -1,0 +1,80 @@
+table: stock_movements
+module: inventory
+label: 'Stock Movements'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: warehouse_id
+    type: integer
+    references: warehouses.id
+  -
+    name: type
+    type: string
+  -
+    name: quantity
+    type: decimal
+  -
+    name: unit_cost
+    type: decimal
+    nullable: true
+  -
+    name: reference
+    type: string
+    nullable: true
+  -
+    name: transfer_group
+    type: string
+    nullable: true
+  -
+    name: movement_date
+    type: datetime
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: batch_id
+    type: integer
+    nullable: true
+    references: batches.id
+  -
+    name: serial_number_id
+    type: integer
+    nullable: true
+    references: serial_numbers.id
+  -
+    name: purpose
+    type: string
+    nullable: true
+  -
+    name: quality_state
+    type: string
+    nullable: true
+joins:
+  - 'stock_movements.serial_number_id = serial_numbers.id'
+  - 'stock_movements.batch_id = batches.id'
+  - 'stock_movements.item_id = items.id'
+  - 'stock_movements.warehouse_id = warehouses.id'
+  - 'stock_movements.created_by = users.id'
+keywords: {}
+questions: {}

@@ -1,0 +1,33 @@
+table: payslip_lines
+module: payroll
+label: 'Payslip Lines'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: payslip_id
+    type: integer
+    references: payslips.id
+  -
+    name: label
+    type: string
+  -
+    name: type
+    type: string
+  -
+    name: amount
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'payslip_lines.payslip_id = payslips.id'
+keywords: {}
+questions: {}

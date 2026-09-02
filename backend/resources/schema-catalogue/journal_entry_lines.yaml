@@ -1,0 +1,39 @@
+table: journal_entry_lines
+module: finance
+label: 'Journal Entry Lines'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: journal_entry_id
+    type: integer
+    references: journal_entries.id
+  -
+    name: gl_account_id
+    type: integer
+    references: gl_accounts.id
+  -
+    name: debit
+    type: decimal
+  -
+    name: credit
+    type: decimal
+  -
+    name: memo
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'journal_entry_lines.gl_account_id = gl_accounts.id'
+  - 'journal_entry_lines.journal_entry_id = journal_entries.id'
+keywords: {}
+questions: {}

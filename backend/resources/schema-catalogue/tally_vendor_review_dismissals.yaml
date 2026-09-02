@@ -1,0 +1,38 @@
+table: tally_vendor_review_dismissals
+module: procurement
+label: 'Tally Vendor Review Dismissals'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: tally_ledger_guid
+    type: string
+  -
+    name: field
+    type: string
+  -
+    name: dismissed_value
+    type: string
+    nullable: true
+  -
+    name: dismissed_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: dismissed_at
+    type: datetime
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'tally_vendor_review_dismissals.dismissed_by = users.id'
+keywords: {}
+questions: {}

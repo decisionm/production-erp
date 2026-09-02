@@ -1,0 +1,56 @@
+table: sales_order_lines
+module: sales
+label: 'Sales Order Lines'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: sales_order_id
+    type: integer
+    references: sales_orders.id
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: quantity
+    type: decimal
+  -
+    name: unit_price
+    type: decimal
+  -
+    name: quantity_delivered
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: quality_approved_at
+    type: datetime
+    nullable: true
+  -
+    name: quality_approved_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: quality_approved_quantity
+    type: decimal
+    nullable: true
+  -
+    name: quality_approval_note
+    type: string
+    nullable: true
+joins:
+  - 'sales_order_lines.quality_approved_by = users.id'
+  - 'sales_order_lines.sales_order_id = sales_orders.id'
+  - 'sales_order_lines.item_id = items.id'
+keywords: {}
+questions: {}

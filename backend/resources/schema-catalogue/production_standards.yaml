@@ -1,0 +1,119 @@
+table: production_standards
+module: production
+label: 'Production Standards'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: item_id
+    type: integer
+    nullable: true
+    references: items.id
+  -
+    name: source_product_name
+    type: string
+  -
+    name: cavities
+    type: integer
+    nullable: true
+  -
+    name: unit_weight_grams
+    type: decimal
+    nullable: true
+  -
+    name: cycle_time
+    type: decimal
+    nullable: true
+  -
+    name: cycle_time_raw
+    type: string
+    nullable: true
+  -
+    name: status
+    type: string
+  -
+    name: unresolved_reason
+    type: string
+    nullable: true
+  -
+    name: source
+    type: string
+    nullable: true
+  -
+    name: source_reference
+    type: string
+    nullable: true
+  -
+    name: confirmation_status
+    type: string
+    nullable: true
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: approved_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: approved_at
+    type: datetime
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+  -
+    name: carton_spec
+    type: string
+    nullable: true
+  -
+    name: tray_spec
+    type: string
+    nullable: true
+  -
+    name: pouch_spec
+    type: string
+    nullable: true
+  -
+    name: spec_provenance
+    type: string
+    nullable: true
+  -
+    name: item_attached_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: item_attached_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_by
+    type: integer
+    nullable: true
+    references: users.id
+joins:
+  - 'production_standards.updated_by = users.id'
+  - 'production_standards.created_by = users.id'
+  - 'production_standards.approved_by = users.id'
+  - 'production_standards.item_id = items.id'
+  - 'production_standards.item_attached_by = users.id'
+keywords: {}
+questions: {}

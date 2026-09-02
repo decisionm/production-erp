@@ -1,0 +1,71 @@
+table: work_orders
+module: production
+label: 'Work Orders'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: bom_id
+    type: integer
+    nullable: true
+    references: boms.id
+  -
+    name: routing_id
+    type: integer
+    nullable: true
+    references: routings.id
+  -
+    name: warehouse_id
+    type: integer
+    references: warehouses.id
+  -
+    name: quantity_planned
+    type: decimal
+  -
+    name: quantity_completed
+    type: decimal
+  -
+    name: material_cost
+    type: decimal
+  -
+    name: status
+    type: string
+  -
+    name: released_at
+    type: datetime
+    nullable: true
+  -
+    name: completed_at
+    type: datetime
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: scheduled_date
+    type: date
+    nullable: true
+joins:
+  - 'work_orders.created_by = users.id'
+  - 'work_orders.warehouse_id = warehouses.id'
+  - 'work_orders.routing_id = routings.id'
+  - 'work_orders.bom_id = boms.id'
+  - 'work_orders.item_id = items.id'
+keywords: {}
+questions: {}

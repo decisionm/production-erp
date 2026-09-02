@@ -1,0 +1,60 @@
+table: ledgers
+module: finance
+label: Ledgers
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: tally_guid
+    type: string
+    nullable: true
+  -
+    name: name
+    type: string
+  -
+    name: tally_group_name
+    type: string
+    nullable: true
+  -
+    name: ledger_group_id
+    type: integer
+    nullable: true
+    references: ledger_groups.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+  -
+    name: gstin
+    type: string
+    nullable: true
+  -
+    name: state_name
+    type: string
+    nullable: true
+  -
+    name: email
+    type: string
+    nullable: true
+  -
+    name: phone
+    type: string
+    nullable: true
+  -
+    name: tally_synced_at
+    type: datetime
+    nullable: true
+joins:
+  - 'ledgers.ledger_group_id = ledger_groups.id'
+keywords: {}
+questions: {}

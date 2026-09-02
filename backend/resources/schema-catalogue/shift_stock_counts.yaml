@@ -1,0 +1,44 @@
+table: shift_stock_counts
+module: production
+label: 'Shift Stock Counts'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: shift_id
+    type: integer
+    references: shifts.id
+  -
+    name: production_date
+    type: date
+  -
+    name: location_label
+    type: string
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: quantity_kg
+    type: decimal
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'shift_stock_counts.created_by = users.id'
+  - 'shift_stock_counts.item_id = items.id'
+  - 'shift_stock_counts.shift_id = shifts.id'
+keywords: {}
+questions: {}

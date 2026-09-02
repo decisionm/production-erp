@@ -1,0 +1,39 @@
+table: routing_operations
+module: production
+label: 'Routing Operations'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: routing_id
+    type: integer
+    references: routings.id
+  -
+    name: work_center_id
+    type: integer
+    references: work_centers.id
+  -
+    name: sequence
+    type: integer
+  -
+    name: name
+    type: string
+  -
+    name: standard_time_minutes
+    type: decimal
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'routing_operations.work_center_id = work_centers.id'
+  - 'routing_operations.routing_id = routings.id'
+keywords: {}
+questions: {}

@@ -1,0 +1,38 @@
+table: gst_registrations
+module: compliance
+label: 'Gst Registrations'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: gstin
+    type: string
+  -
+    name: state_code
+    type: string
+  -
+    name: state_name
+    type: string
+  -
+    name: is_primary
+    type: integer
+  -
+    name: is_active
+    type: integer
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+joins: {}
+keywords: {}
+questions: {}

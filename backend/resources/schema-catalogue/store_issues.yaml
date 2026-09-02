@@ -1,0 +1,69 @@
+table: store_issues
+module: inventory
+label: 'Store Issues'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: issue_number
+    type: string
+  -
+    name: material_request_id
+    type: integer
+    nullable: true
+  -
+    name: status
+    type: string
+  -
+    name: issued_by
+    type: integer
+    references: users.id
+  -
+    name: received_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: issued_at
+    type: datetime
+  -
+    name: closed_at
+    type: datetime
+    nullable: true
+  -
+    name: closed_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: cancellation_reason
+    type: string
+    nullable: true
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: issue_key
+    type: string
+    nullable: true
+  -
+    name: issue_payload_hash
+    type: string
+    nullable: true
+joins:
+  - 'store_issues.closed_by = users.id'
+  - 'store_issues.received_by = users.id'
+  - 'store_issues.issued_by = users.id'
+keywords: {}
+questions: {}

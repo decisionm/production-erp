@@ -1,0 +1,70 @@
+table: batch_resin_allocations
+module: production
+label: 'Batch Resin Allocations'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: shift_production_entry_id
+    type: integer
+    references: shift_production_entries.id
+  -
+    name: allocation_run
+    type: integer
+  -
+    name: day_bin_movement_id
+    type: integer
+    nullable: true
+    references: day_bin_movements.id
+  -
+    name: material_bag_id
+    type: integer
+    nullable: true
+    references: material_bags.id
+  -
+    name: material_lot_id
+    type: integer
+    nullable: true
+    references: material_lots.id
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: quantity_kg
+    type: decimal
+  -
+    name: rate_per_kg
+    type: decimal
+    nullable: true
+  -
+    name: amount
+    type: decimal
+    nullable: true
+  -
+    name: rate_source
+    type: string
+  -
+    name: reversed_at
+    type: datetime
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+joins:
+  - 'batch_resin_allocations.created_by = users.id'
+  - 'batch_resin_allocations.item_id = items.id'
+  - 'batch_resin_allocations.material_lot_id = material_lots.id'
+  - 'batch_resin_allocations.material_bag_id = material_bags.id'
+  - 'batch_resin_allocations.day_bin_movement_id = day_bin_movements.id'
+  - 'batch_resin_allocations.shift_production_entry_id = shift_production_entries.id'
+keywords: {}
+questions: {}

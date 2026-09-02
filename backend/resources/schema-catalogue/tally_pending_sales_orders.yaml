@@ -1,0 +1,64 @@
+table: tally_pending_sales_orders
+module: sales
+label: 'Tally Pending Sales Orders'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: party_ledger_name
+    type: string
+  -
+    name: party_ledger_guid
+    type: string
+    nullable: true
+  -
+    name: order_reference
+    type: string
+    nullable: true
+  -
+    name: order_date
+    type: date
+    nullable: true
+  -
+    name: due_date
+    type: date
+    nullable: true
+  -
+    name: stock_item_name
+    type: string
+    nullable: true
+  -
+    name: pending_quantity
+    type: decimal
+    nullable: true
+  -
+    name: quantity_unit
+    type: string
+    nullable: true
+  -
+    name: pending_amount
+    type: decimal
+    nullable: true
+  -
+    name: as_of
+    type: date
+  -
+    name: tally_company
+    type: string
+    nullable: true
+  -
+    name: tally_synced_at
+    type: datetime
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins: {}
+keywords: {}
+questions: {}

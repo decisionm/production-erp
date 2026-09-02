@@ -1,0 +1,32 @@
+table: grn_schedule_allocations
+module: procurement
+label: 'Grn Schedule Allocations'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: goods_receipt_note_line_id
+    type: integer
+    references: goods_receipt_note_lines.id
+  -
+    name: purchase_order_schedule_id
+    type: integer
+    references: purchase_order_schedules.id
+  -
+    name: quantity
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'grn_schedule_allocations.purchase_order_schedule_id = purchase_order_schedules.id'
+  - 'grn_schedule_allocations.goods_receipt_note_line_id = goods_receipt_note_lines.id'
+keywords: {}
+questions: {}

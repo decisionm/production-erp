@@ -1,0 +1,51 @@
+table: material_request_lines
+module: inventory
+label: 'Material Request Lines'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: material_request_id
+    type: integer
+    references: material_requests.id
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: quantity
+    type: decimal
+  -
+    name: uom
+    type: string
+    nullable: true
+  -
+    name: issued_quantity
+    type: decimal
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: required_quantity
+    type: decimal
+    nullable: true
+  -
+    name: available_in_production
+    type: decimal
+    nullable: true
+joins:
+  - 'material_request_lines.item_id = items.id'
+  - 'material_request_lines.material_request_id = material_requests.id'
+keywords: {}
+questions: {}

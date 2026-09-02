@@ -1,0 +1,33 @@
+table: resin_pool_balances
+module: production
+label: 'Resin Pool Balances'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: quantity_kg
+    type: decimal
+  -
+    name: avg_rate_per_kg
+    type: decimal
+  -
+    name: unpriced_kg
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'resin_pool_balances.item_id = items.id'
+keywords: {}
+questions: {}

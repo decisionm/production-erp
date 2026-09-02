@@ -1,0 +1,26 @@
+table: app_settings
+module: users
+label: 'App Settings'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: key
+    type: string
+  -
+    name: value
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins: {}
+keywords: {}
+questions: {}

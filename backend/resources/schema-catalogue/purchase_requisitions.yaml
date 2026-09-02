@@ -1,0 +1,66 @@
+table: purchase_requisitions
+module: procurement
+label: 'Purchase Requisitions'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: status
+    type: string
+  -
+    name: requested_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: needed_by_date
+    type: date
+    nullable: true
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: approved_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: approved_at
+    type: datetime
+    nullable: true
+  -
+    name: rejected_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: rejected_at
+    type: datetime
+    nullable: true
+  -
+    name: withdrawn_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: withdrawn_at
+    type: datetime
+    nullable: true
+joins:
+  - 'purchase_requisitions.withdrawn_by = users.id'
+  - 'purchase_requisitions.requested_by = users.id'
+  - 'purchase_requisitions.approved_by = users.id'
+  - 'purchase_requisitions.rejected_by = users.id'
+keywords: {}
+questions: {}

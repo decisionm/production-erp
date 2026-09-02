@@ -1,0 +1,32 @@
+table: salary_structure_lines
+module: payroll
+label: 'Salary Structure Lines'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: salary_structure_id
+    type: integer
+    references: salary_structures.id
+  -
+    name: salary_component_id
+    type: integer
+    references: salary_components.id
+  -
+    name: amount
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'salary_structure_lines.salary_component_id = salary_components.id'
+  - 'salary_structure_lines.salary_structure_id = salary_structures.id'
+keywords: {}
+questions: {}

@@ -1,0 +1,60 @@
+table: downtime_reasons
+module: production
+label: 'Downtime Reasons'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: code
+    type: string
+  -
+    name: category
+    type: string
+    nullable: true
+  -
+    name: description
+    type: string
+  -
+    name: planning_type
+    type: string
+  -
+    name: reduces_runtime
+    type: integer
+  -
+    name: requires_note
+    type: integer
+  -
+    name: selectable_at_start
+    type: integer
+  -
+    name: is_active
+    type: integer
+  -
+    name: confirmation_status
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: updated_by
+    type: integer
+    nullable: true
+    references: users.id
+joins:
+  - 'downtime_reasons.updated_by = users.id'
+  - 'downtime_reasons.created_by = users.id'
+keywords: {}
+questions: {}

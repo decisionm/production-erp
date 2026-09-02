@@ -1,0 +1,62 @@
+table: stock_reservations
+module: inventory
+label: 'Stock Reservations'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: warehouse_id
+    type: integer
+    references: warehouses.id
+  -
+    name: sales_order_line_id
+    type: integer
+    references: sales_order_lines.id
+  -
+    name: quantity
+    type: decimal
+  -
+    name: consumed_quantity
+    type: decimal
+  -
+    name: released_quantity
+    type: decimal
+  -
+    name: status
+    type: string
+  -
+    name: released_reason
+    type: string
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: released_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'stock_reservations.released_by = users.id'
+  - 'stock_reservations.created_by = users.id'
+  - 'stock_reservations.sales_order_line_id = sales_order_lines.id'
+  - 'stock_reservations.warehouse_id = warehouses.id'
+  - 'stock_reservations.item_id = items.id'
+keywords: {}
+questions: {}

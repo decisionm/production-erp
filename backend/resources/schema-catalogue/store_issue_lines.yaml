@@ -1,0 +1,71 @@
+table: store_issue_lines
+module: inventory
+label: 'Store Issue Lines'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: store_issue_id
+    type: integer
+    references: store_issues.id
+  -
+    name: material_request_line_id
+    type: integer
+    nullable: true
+  -
+    name: quantity_requested
+    type: decimal
+    nullable: true
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: from_warehouse_id
+    type: integer
+    references: warehouses.id
+  -
+    name: to_warehouse_id
+    type: integer
+    references: warehouses.id
+  -
+    name: quantity_issued
+    type: decimal
+  -
+    name: quantity_returned
+    type: decimal
+  -
+    name: uom
+    type: string
+    nullable: true
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: substitutes_item_id
+    type: integer
+    nullable: true
+    references: items.id
+  -
+    name: substitution_reason
+    type: string
+    nullable: true
+joins:
+  - 'store_issue_lines.substitutes_item_id = items.id'
+  - 'store_issue_lines.store_issue_id = store_issues.id'
+  - 'store_issue_lines.item_id = items.id'
+  - 'store_issue_lines.from_warehouse_id = warehouses.id'
+  - 'store_issue_lines.to_warehouse_id = warehouses.id'
+keywords: {}
+questions: {}

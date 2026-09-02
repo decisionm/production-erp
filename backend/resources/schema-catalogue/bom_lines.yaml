@@ -1,0 +1,32 @@
+table: bom_lines
+module: production
+label: 'Bom Lines'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: bom_id
+    type: integer
+    references: boms.id
+  -
+    name: component_item_id
+    type: integer
+    references: items.id
+  -
+    name: quantity_per
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'bom_lines.component_item_id = items.id'
+  - 'bom_lines.bom_id = boms.id'
+keywords: {}
+questions: {}

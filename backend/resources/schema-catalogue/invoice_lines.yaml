@@ -1,0 +1,40 @@
+table: invoice_lines
+module: sales
+label: 'Invoice Lines'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: invoice_id
+    type: integer
+    references: invoices.id
+  -
+    name: sales_order_line_id
+    type: integer
+    references: sales_order_lines.id
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: quantity
+    type: decimal
+  -
+    name: unit_price
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'invoice_lines.item_id = items.id'
+  - 'invoice_lines.sales_order_line_id = sales_order_lines.id'
+  - 'invoice_lines.invoice_id = invoices.id'
+keywords: {}
+questions: {}

@@ -1,0 +1,64 @@
+table: store_issue_bag_scans
+module: inventory
+label: 'Store Issue Bag Scans'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: store_issue_id
+    type: integer
+    references: store_issues.id
+  -
+    name: store_issue_line_id
+    type: integer
+    references: store_issue_lines.id
+  -
+    name: material_request_line_id
+    type: integer
+    nullable: true
+  -
+    name: material_bag_id
+    type: integer
+    references: material_bags.id
+  -
+    name: material_lot_id
+    type: integer
+    references: material_lots.id
+  -
+    name: quantity_kg
+    type: decimal
+  -
+    name: issued_by
+    type: integer
+    references: users.id
+  -
+    name: received_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: scanned_at
+    type: datetime
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'store_issue_bag_scans.received_by = users.id'
+  - 'store_issue_bag_scans.issued_by = users.id'
+  - 'store_issue_bag_scans.material_lot_id = material_lots.id'
+  - 'store_issue_bag_scans.material_bag_id = material_bags.id'
+  - 'store_issue_bag_scans.store_issue_line_id = store_issue_lines.id'
+  - 'store_issue_bag_scans.store_issue_id = store_issues.id'
+keywords: {}
+questions: {}

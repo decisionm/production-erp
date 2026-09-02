@@ -1,0 +1,38 @@
+table: leave_balances
+module: hrms
+label: 'Leave Balances'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: employee_id
+    type: integer
+    references: employees.id
+  -
+    name: leave_type_id
+    type: integer
+    references: leave_types.id
+  -
+    name: year
+    type: integer
+  -
+    name: allocated_days
+    type: decimal
+  -
+    name: used_days
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'leave_balances.leave_type_id = leave_types.id'
+  - 'leave_balances.employee_id = employees.id'
+keywords: {}
+questions: {}

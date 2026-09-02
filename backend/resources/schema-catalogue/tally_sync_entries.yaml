@@ -1,0 +1,63 @@
+table: tally_sync_entries
+module: tally-sync
+label: 'Tally Sync Entries'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: syncable_type
+    type: string
+  -
+    name: syncable_id
+    type: integer
+  -
+    name: tally_voucher_type
+    type: string
+  -
+    name: payload
+    type: string
+  -
+    name: status
+    type: string
+  -
+    name: attempts
+    type: integer
+  -
+    name: error_message
+    type: string
+    nullable: true
+  -
+    name: synced_at
+    type: datetime
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: delivered_at
+    type: datetime
+    nullable: true
+  -
+    name: last_merged_at
+    type: datetime
+    nullable: true
+  -
+    name: released_at
+    type: datetime
+    nullable: true
+  -
+    name: released_by
+    type: integer
+    nullable: true
+    references: users.id
+joins:
+  - 'tally_sync_entries.released_by = users.id'
+keywords: {}
+questions: {}

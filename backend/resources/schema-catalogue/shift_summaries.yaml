@@ -1,0 +1,51 @@
+table: shift_summaries
+module: production
+label: 'Shift Summaries'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: shift_id
+    type: integer
+    references: shifts.id
+  -
+    name: production_date
+    type: date
+  -
+    name: supervisor_id
+    type: integer
+    nullable: true
+    references: employees.id
+  -
+    name: target_production_kg
+    type: decimal
+    nullable: true
+  -
+    name: power_consumption_units
+    type: decimal
+    nullable: true
+  -
+    name: remarks
+    type: string
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'shift_summaries.created_by = users.id'
+  - 'shift_summaries.supervisor_id = employees.id'
+  - 'shift_summaries.shift_id = shifts.id'
+keywords: {}
+questions: {}

@@ -1,0 +1,103 @@
+table: tally_purchase_rates
+module: procurement
+label: 'Tally Purchase Rates'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: voucher_guid
+    type: string
+  -
+    name: line_index
+    type: integer
+  -
+    name: voucher_type
+    type: string
+  -
+    name: voucher_number
+    type: string
+    nullable: true
+  -
+    name: voucher_reference
+    type: string
+    nullable: true
+  -
+    name: voucher_date
+    type: date
+  -
+    name: party_ledger_name
+    type: string
+  -
+    name: party_gstin
+    type: string
+    nullable: true
+  -
+    name: stock_item_name
+    type: string
+  -
+    name: tally_stock_item_guid
+    type: string
+    nullable: true
+  -
+    name: rate_value
+    type: decimal
+  -
+    name: rate_unit
+    type: string
+    nullable: true
+  -
+    name: quantity
+    type: decimal
+    nullable: true
+  -
+    name: quantity_unit
+    type: string
+    nullable: true
+  -
+    name: amount
+    type: decimal
+    nullable: true
+  -
+    name: cgst_rate
+    type: decimal
+    nullable: true
+  -
+    name: sgst_rate
+    type: decimal
+    nullable: true
+  -
+    name: igst_rate
+    type: decimal
+    nullable: true
+  -
+    name: cess_rate
+    type: decimal
+    nullable: true
+  -
+    name: hsn_code
+    type: string
+    nullable: true
+  -
+    name: purchase_ledger_name
+    type: string
+    nullable: true
+  -
+    name: tally_company
+    type: string
+    nullable: true
+  -
+    name: tally_synced_at
+    type: datetime
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins: {}
+keywords: {}
+questions: {}

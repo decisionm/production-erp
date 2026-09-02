@@ -1,0 +1,48 @@
+table: material_bags
+module: inventory
+label: 'Material Bags'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: material_lot_id
+    type: integer
+    references: material_lots.id
+  -
+    name: barcode
+    type: string
+  -
+    name: original_kg
+    type: decimal
+  -
+    name: remaining_kg
+    type: decimal
+  -
+    name: status
+    type: string
+  -
+    name: current_warehouse_id
+    type: integer
+    nullable: true
+    references: warehouses.id
+  -
+    name: day_bin_work_center_id
+    type: integer
+    nullable: true
+    references: work_centers.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'material_bags.day_bin_work_center_id = work_centers.id'
+  - 'material_bags.current_warehouse_id = warehouses.id'
+  - 'material_bags.material_lot_id = material_lots.id'
+keywords: {}
+questions: {}

@@ -1,0 +1,69 @@
+table: tally_sync_snapshots
+module: tally-sync
+label: 'Tally Sync Snapshots'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: tally_sync_entry_id
+    type: integer
+    references: tally_sync_entries.id
+  -
+    name: attempt
+    type: integer
+  -
+    name: direction
+    type: string
+  -
+    name: xml_sha256
+    type: string
+  -
+    name: xml_bytes
+    type: integer
+    nullable: true
+  -
+    name: xml
+    type: string
+    nullable: true
+  -
+    name: tally_success
+    type: integer
+    nullable: true
+  -
+    name: tally_created
+    type: integer
+    nullable: true
+  -
+    name: tally_errors
+    type: integer
+    nullable: true
+  -
+    name: tally_message
+    type: string
+    nullable: true
+  -
+    name: tally_raw
+    type: string
+    nullable: true
+  -
+    name: agent_version
+    type: string
+    nullable: true
+  -
+    name: payload_hash
+    type: string
+    nullable: true
+  -
+    name: payload_matches
+    type: integer
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+joins:
+  - 'tally_sync_snapshots.tally_sync_entry_id = tally_sync_entries.id'
+keywords: {}
+questions: {}

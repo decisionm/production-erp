@@ -1,0 +1,61 @@
+table: tally_sales_invoices
+module: sales
+label: 'Tally Sales Invoices'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: tally_guid
+    type: string
+  -
+    name: voucher_number
+    type: string
+  -
+    name: voucher_date
+    type: date
+  -
+    name: party_ledger_name
+    type: string
+  -
+    name: customer_po_reference
+    type: string
+    nullable: true
+  -
+    name: amount
+    type: decimal
+    nullable: true
+  -
+    name: customer_id
+    type: integer
+    nullable: true
+    references: customers.id
+  -
+    name: sales_order_id
+    type: integer
+    nullable: true
+    references: sales_orders.id
+  -
+    name: match_state
+    type: string
+  -
+    name: match_detail
+    type: string
+    nullable: true
+  -
+    name: imported_at
+    type: datetime
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'tally_sales_invoices.sales_order_id = sales_orders.id'
+  - 'tally_sales_invoices.customer_id = customers.id'
+keywords: {}
+questions: {}

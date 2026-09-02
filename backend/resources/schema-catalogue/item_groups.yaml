@@ -1,0 +1,40 @@
+table: item_groups
+module: inventory
+label: 'Item Groups'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: tally_guid
+    type: string
+    nullable: true
+  -
+    name: name
+    type: string
+  -
+    name: tally_parent_name
+    type: string
+    nullable: true
+  -
+    name: parent_id
+    type: integer
+    nullable: true
+    references: item_groups.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+joins:
+  - 'item_groups.parent_id = item_groups.id'
+keywords: {}
+questions: {}

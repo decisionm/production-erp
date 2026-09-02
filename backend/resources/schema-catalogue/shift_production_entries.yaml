@@ -1,0 +1,331 @@
+table: shift_production_entries
+module: production
+label: 'Shift Production Entries'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: shift_id
+    type: integer
+    references: shifts.id
+  -
+    name: work_center_id
+    type: integer
+    references: work_centers.id
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: warehouse_id
+    type: integer
+    references: warehouses.id
+  -
+    name: production_date
+    type: date
+  -
+    name: quantity_produced
+    type: decimal
+    nullable: true
+  -
+    name: quantity_scrap
+    type: decimal
+  -
+    name: scrap_reason_id
+    type: integer
+    nullable: true
+    references: scrap_reasons.id
+  -
+    name: operator_id
+    type: integer
+    nullable: true
+    references: employees.id
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: batch_status
+    type: string
+  -
+    name: batch_number
+    type: string
+    nullable: true
+  -
+    name: quantity_produced_kg
+    type: decimal
+    nullable: true
+  -
+    name: quantity_rejection_kg
+    type: decimal
+    nullable: true
+  -
+    name: nos_per_tray
+    type: integer
+    nullable: true
+  -
+    name: no_of_trays
+    type: integer
+    nullable: true
+  -
+    name: nos_per_box
+    type: integer
+    nullable: true
+  -
+    name: no_of_box
+    type: integer
+    nullable: true
+  -
+    name: supervisor_signed_by
+    type: integer
+    nullable: true
+    references: employees.id
+  -
+    name: supervisor_signed_at
+    type: datetime
+    nullable: true
+  -
+    name: plant_manager_signed_at
+    type: datetime
+    nullable: true
+  -
+    name: status
+    type: string
+  -
+    name: rejection_reason
+    type: string
+    nullable: true
+  -
+    name: approved_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: approved_at
+    type: datetime
+    nullable: true
+  -
+    name: accountant_signed_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: accountant_signed_at
+    type: datetime
+    nullable: true
+  -
+    name: plant_manager_signed_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: helper_name
+    type: string
+    nullable: true
+  -
+    name: standard_cycle_time
+    type: decimal
+    nullable: true
+  -
+    name: actual_cycle_time
+    type: decimal
+    nullable: true
+  -
+    name: standard_cavities
+    type: integer
+    nullable: true
+  -
+    name: active_cavities
+    type: integer
+    nullable: true
+  -
+    name: running_hours
+    type: decimal
+    nullable: true
+  -
+    name: qc_rejection_kg
+    type: decimal
+    nullable: true
+  -
+    name: tally_sync_entry_id
+    type: integer
+    nullable: true
+    references: tally_sync_entries.id
+  -
+    name: no_of_pouches
+    type: integer
+    nullable: true
+  -
+    name: loose_pieces
+    type: integer
+    nullable: true
+  -
+    name: nos_per_pouch
+    type: integer
+    nullable: true
+  -
+    name: parent_entry_id
+    type: integer
+    nullable: true
+    references: shift_production_entries.id
+  -
+    name: production_configuration_id
+    type: integer
+    nullable: true
+    references: production_configurations.id
+  -
+    name: calculation_version
+    type: string
+    nullable: true
+  -
+    name: config_snapshot
+    type: string
+    nullable: true
+  -
+    name: cycle_time_source
+    type: string
+    nullable: true
+  -
+    name: cavities_source
+    type: string
+    nullable: true
+  -
+    name: override_reason
+    type: string
+    nullable: true
+  -
+    name: override_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: planned_downtime_minutes
+    type: decimal
+    nullable: true
+  -
+    name: scheduled_hours
+    type: decimal
+    nullable: true
+  -
+    name: target_boxes_override
+    type: integer
+    nullable: true
+  -
+    name: target_override_reason
+    type: string
+    nullable: true
+  -
+    name: target_override_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: production_standard_id
+    type: integer
+    nullable: true
+    references: production_standards.id
+  -
+    name: production_standard_packaging_id
+    type: integer
+    nullable: true
+    references: production_standard_packagings.id
+  -
+    name: packaging_mode
+    type: string
+    nullable: true
+  -
+    name: completed_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: gross_quantity_produced
+    type: decimal
+    nullable: true
+  -
+    name: quality_reviewed_nos
+    type: integer
+    nullable: true
+  -
+    name: quality_ok_nos
+    type: integer
+    nullable: true
+  -
+    name: quality_rejected_nos
+    type: integer
+    nullable: true
+  -
+    name: quality_checked_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: quality_checked_at
+    type: datetime
+    nullable: true
+  -
+    name: quality_note
+    type: string
+    nullable: true
+  -
+    name: quality_scrap_note
+    type: string
+    nullable: true
+  -
+    name: cancelled_at
+    type: datetime
+    nullable: true
+  -
+    name: cancelled_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: cancellation_reason
+    type: string
+    nullable: true
+  -
+    name: finished_item_id
+    type: integer
+    nullable: true
+    references: items.id
+joins:
+  - 'shift_production_entries.cancelled_by = users.id'
+  - 'shift_production_entries.production_standard_packaging_id = production_standard_packagings.id'
+  - 'shift_production_entries.production_standard_id = production_standards.id'
+  - 'shift_production_entries.override_by = users.id'
+  - 'shift_production_entries.production_configuration_id = production_configurations.id'
+  - 'shift_production_entries.tally_sync_entry_id = tally_sync_entries.id'
+  - 'shift_production_entries.approved_by = users.id'
+  - 'shift_production_entries.supervisor_signed_by = employees.id'
+  - 'shift_production_entries.created_by = users.id'
+  - 'shift_production_entries.operator_id = employees.id'
+  - 'shift_production_entries.scrap_reason_id = scrap_reasons.id'
+  - 'shift_production_entries.warehouse_id = warehouses.id'
+  - 'shift_production_entries.item_id = items.id'
+  - 'shift_production_entries.work_center_id = work_centers.id'
+  - 'shift_production_entries.shift_id = shifts.id'
+  - 'shift_production_entries.accountant_signed_by = users.id'
+  - 'shift_production_entries.plant_manager_signed_by = users.id'
+  - 'shift_production_entries.parent_entry_id = shift_production_entries.id'
+  - 'shift_production_entries.target_override_by = users.id'
+  - 'shift_production_entries.completed_by = users.id'
+  - 'shift_production_entries.quality_checked_by = users.id'
+  - 'shift_production_entries.finished_item_id = items.id'
+keywords: {}
+questions: {}

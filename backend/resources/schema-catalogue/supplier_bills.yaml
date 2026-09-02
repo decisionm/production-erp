@@ -1,0 +1,93 @@
+table: supplier_bills
+module: procurement
+label: 'Supplier Bills'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: vendor_id
+    type: integer
+    references: vendors.id
+  -
+    name: purchase_order_id
+    type: integer
+    nullable: true
+    references: purchase_orders.id
+  -
+    name: bill_number
+    type: string
+  -
+    name: bill_date
+    type: date
+  -
+    name: status
+    type: string
+  -
+    name: purchase_ledger_name
+    type: string
+    nullable: true
+  -
+    name: subtotal
+    type: decimal
+  -
+    name: cgst
+    type: decimal
+  -
+    name: sgst
+    type: decimal
+  -
+    name: igst
+    type: decimal
+  -
+    name: rounding
+    type: decimal
+  -
+    name: total
+    type: decimal
+  -
+    name: attachment_path
+    type: string
+    nullable: true
+  -
+    name: attachment_name
+    type: string
+    nullable: true
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: cancelled_reason
+    type: string
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: recorded_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: recorded_at
+    type: datetime
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'supplier_bills.recorded_by = users.id'
+  - 'supplier_bills.created_by = users.id'
+  - 'supplier_bills.purchase_order_id = purchase_orders.id'
+  - 'supplier_bills.vendor_id = vendors.id'
+keywords: {}
+questions: {}

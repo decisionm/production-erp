@@ -1,0 +1,54 @@
+table: tally_stock_snapshots
+module: inventory
+label: 'Tally Stock Snapshots'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: company
+    type: string
+  -
+    name: as_of
+    type: date
+  -
+    name: lines
+    type: string
+  -
+    name: totals
+    type: string
+  -
+    name: status
+    type: string
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: applied_at
+    type: datetime
+    nullable: true
+  -
+    name: applied_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: applied_line_count
+    type: integer
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'tally_stock_snapshots.applied_by = users.id'
+  - 'tally_stock_snapshots.created_by = users.id'
+keywords: {}
+questions: {}

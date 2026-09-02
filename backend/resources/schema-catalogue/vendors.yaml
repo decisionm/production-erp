@@ -1,0 +1,72 @@
+table: vendors
+module: procurement
+label: Vendors
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: code
+    type: string
+  -
+    name: name
+    type: string
+  -
+    name: email
+    type: string
+    nullable: true
+  -
+    name: phone
+    type: string
+    nullable: true
+  -
+    name: address
+    type: string
+    nullable: true
+  -
+    name: is_active
+    type: integer
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+  -
+    name: gstin
+    type: string
+    nullable: true
+  -
+    name: state_code
+    type: string
+    nullable: true
+  -
+    name: tally_ledger_name
+    type: string
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: updated_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: tally_ledger_guid
+    type: string
+    nullable: true
+joins:
+  - 'vendors.updated_by = users.id'
+  - 'vendors.created_by = users.id'
+keywords: {}
+questions: {}

@@ -1,0 +1,62 @@
+table: incoming_inspections
+module: quality
+label: 'Incoming Inspections'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: goods_receipt_note_line_id
+    type: integer
+    references: goods_receipt_note_lines.id
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: inspected_quantity
+    type: decimal
+  -
+    name: accepted_quantity
+    type: decimal
+  -
+    name: rejected_quantity
+    type: decimal
+  -
+    name: result
+    type: string
+  -
+    name: inspection_date
+    type: date
+  -
+    name: inspected_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: rejections_out_reference
+    type: string
+    nullable: true
+  -
+    name: bag_disposition_note
+    type: string
+    nullable: true
+joins:
+  - 'incoming_inspections.inspected_by = users.id'
+  - 'incoming_inspections.item_id = items.id'
+  - 'incoming_inspections.goods_receipt_note_line_id = goods_receipt_note_lines.id'
+keywords: {}
+questions: {}

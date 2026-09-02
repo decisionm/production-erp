@@ -1,0 +1,56 @@
+table: packing_material_mappings
+module: production
+label: 'Packing Material Mappings'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: spec_kind
+    type: string
+  -
+    name: spec_value
+    type: string
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: grams_per_piece
+    type: decimal
+    nullable: true
+  -
+    name: metres_per_box
+    type: decimal
+    nullable: true
+  -
+    name: note
+    type: string
+    nullable: true
+  -
+    name: set_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: set_at
+    type: datetime
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+joins:
+  - 'packing_material_mappings.set_by = users.id'
+  - 'packing_material_mappings.item_id = items.id'
+keywords: {}
+questions: {}

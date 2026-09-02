@@ -1,0 +1,63 @@
+table: machine_downtime_logs
+module: production
+label: 'Machine Downtime Logs'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: work_center_id
+    type: integer
+    references: work_centers.id
+  -
+    name: shift_id
+    type: integer
+    references: shifts.id
+  -
+    name: production_date
+    type: date
+  -
+    name: nature_of_problem
+    type: string
+  -
+    name: remedy
+    type: string
+    nullable: true
+  -
+    name: parts_changed
+    type: string
+    nullable: true
+  -
+    name: from_time
+    type: datetime
+  -
+    name: to_time
+    type: datetime
+    nullable: true
+  -
+    name: total_minutes
+    type: decimal
+    nullable: true
+  -
+    name: status
+    type: string
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'machine_downtime_logs.created_by = users.id'
+  - 'machine_downtime_logs.shift_id = shifts.id'
+  - 'machine_downtime_logs.work_center_id = work_centers.id'
+keywords: {}
+questions: {}

@@ -1,0 +1,79 @@
+table: employees
+module: hrms
+label: Employees
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: employee_code
+    type: string
+  -
+    name: name
+    type: string
+  -
+    name: email
+    type: string
+    nullable: true
+  -
+    name: phone
+    type: string
+    nullable: true
+  -
+    name: date_of_birth
+    type: date
+    nullable: true
+  -
+    name: date_of_joining
+    type: date
+  -
+    name: designation
+    type: string
+    nullable: true
+  -
+    name: department
+    type: string
+    nullable: true
+  -
+    name: status
+    type: string
+  -
+    name: manager_id
+    type: integer
+    nullable: true
+    references: employees.id
+  -
+    name: user_id
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: updated_by
+    type: integer
+    nullable: true
+    references: users.id
+joins:
+  - 'employees.updated_by = users.id'
+  - 'employees.user_id = users.id'
+  - 'employees.manager_id = employees.id'
+  - 'employees.created_by = users.id'
+keywords: {}
+questions: {}

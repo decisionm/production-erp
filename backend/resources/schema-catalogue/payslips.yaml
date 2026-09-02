@@ -1,0 +1,38 @@
+table: payslips
+module: payroll
+label: Payslips
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: payroll_run_id
+    type: integer
+    references: payroll_runs.id
+  -
+    name: employee_id
+    type: integer
+    references: employees.id
+  -
+    name: gross_earnings
+    type: decimal
+  -
+    name: total_deductions
+    type: decimal
+  -
+    name: net_pay
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'payslips.employee_id = employees.id'
+  - 'payslips.payroll_run_id = payroll_runs.id'
+keywords: {}
+questions: {}

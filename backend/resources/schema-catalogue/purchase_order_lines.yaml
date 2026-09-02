@@ -1,0 +1,42 @@
+table: purchase_order_lines
+module: procurement
+label: 'Purchase Order Lines'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: purchase_order_id
+    type: integer
+    references: purchase_orders.id
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: quantity
+    type: decimal
+  -
+    name: unit_price
+    type: decimal
+  -
+    name: quantity_received
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: unclassified_reason
+    type: string
+    nullable: true
+joins:
+  - 'purchase_order_lines.item_id = items.id'
+  - 'purchase_order_lines.purchase_order_id = purchase_orders.id'
+keywords: {}
+questions: {}

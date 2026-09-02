@@ -1,0 +1,42 @@
+table: power_interruption_logs
+module: production
+label: 'Power Interruption Logs'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: shift_id
+    type: integer
+    references: shifts.id
+  -
+    name: production_date
+    type: date
+  -
+    name: from_time
+    type: datetime
+  -
+    name: to_time
+    type: datetime
+  -
+    name: idle_hours
+    type: decimal
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'power_interruption_logs.created_by = users.id'
+  - 'power_interruption_logs.shift_id = shifts.id'
+keywords: {}
+questions: {}

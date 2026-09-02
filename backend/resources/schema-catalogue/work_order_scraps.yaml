@@ -1,0 +1,39 @@
+table: work_order_scraps
+module: production
+label: 'Work Order Scraps'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: work_order_id
+    type: integer
+    references: work_orders.id
+  -
+    name: scrap_reason_id
+    type: integer
+    references: scrap_reasons.id
+  -
+    name: quantity
+    type: decimal
+  -
+    name: cost_impact
+    type: decimal
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'work_order_scraps.scrap_reason_id = scrap_reasons.id'
+  - 'work_order_scraps.work_order_id = work_orders.id'
+keywords: {}
+questions: {}

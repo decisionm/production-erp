@@ -1,0 +1,42 @@
+table: attendances
+module: hrms
+label: Attendances
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: employee_id
+    type: integer
+    references: employees.id
+  -
+    name: date
+    type: date
+  -
+    name: status
+    type: string
+  -
+    name: check_in
+    type: datetime
+    nullable: true
+  -
+    name: check_out
+    type: datetime
+    nullable: true
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'attendances.employee_id = employees.id'
+keywords: {}
+questions: {}

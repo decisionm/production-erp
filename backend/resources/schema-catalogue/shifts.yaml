@@ -1,0 +1,47 @@
+table: shifts
+module: production
+label: Shifts
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: name
+    type: string
+  -
+    name: start_time
+    type: time
+  -
+    name: end_time
+    type: time
+  -
+    name: is_active
+    type: integer
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: updated_by
+    type: integer
+    nullable: true
+    references: users.id
+joins:
+  - 'shifts.updated_by = users.id'
+  - 'shifts.created_by = users.id'
+keywords: {}
+questions: {}

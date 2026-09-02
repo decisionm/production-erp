@@ -1,0 +1,42 @@
+table: material_cost_versions
+module: inventory
+label: 'Material Cost Versions'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: material_lot_id
+    type: integer
+    references: material_lots.id
+  -
+    name: rate_per_kg
+    type: decimal
+  -
+    name: kind
+    type: string
+  -
+    name: note
+    type: string
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: supersedes_id
+    type: integer
+    nullable: true
+    references: material_cost_versions.id
+joins:
+  - 'material_cost_versions.supersedes_id = material_cost_versions.id'
+  - 'material_cost_versions.created_by = users.id'
+  - 'material_cost_versions.material_lot_id = material_lots.id'
+keywords: {}
+questions: {}

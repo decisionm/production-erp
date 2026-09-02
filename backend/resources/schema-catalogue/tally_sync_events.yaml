@@ -1,0 +1,46 @@
+table: tally_sync_events
+module: tally-sync
+label: 'Tally Sync Events'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: tally_sync_entry_id
+    type: integer
+    nullable: true
+    references: tally_sync_entries.id
+  -
+    name: event
+    type: string
+  -
+    name: direction
+    type: string
+  -
+    name: occurred_at
+    type: datetime
+  -
+    name: actor_type
+    type: string
+    nullable: true
+  -
+    name: actor_id
+    type: integer
+    nullable: true
+  -
+    name: actor_label
+    type: string
+    nullable: true
+  -
+    name: details
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+joins:
+  - 'tally_sync_events.tally_sync_entry_id = tally_sync_entries.id'
+keywords: {}
+questions: {}

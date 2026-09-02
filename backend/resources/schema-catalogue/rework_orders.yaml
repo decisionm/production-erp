@@ -1,0 +1,73 @@
+table: rework_orders
+module: production
+label: 'Rework Orders'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: source_work_order_id
+    type: integer
+    nullable: true
+    references: work_orders.id
+  -
+    name: bom_id
+    type: integer
+    nullable: true
+    references: boms.id
+  -
+    name: warehouse_id
+    type: integer
+    references: warehouses.id
+  -
+    name: quantity_input
+    type: decimal
+  -
+    name: quantity_recovered
+    type: decimal
+  -
+    name: material_cost
+    type: decimal
+  -
+    name: labor_cost
+    type: decimal
+  -
+    name: total_cost
+    type: decimal
+  -
+    name: status
+    type: string
+  -
+    name: released_at
+    type: datetime
+    nullable: true
+  -
+    name: completed_at
+    type: datetime
+    nullable: true
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'rework_orders.created_by = users.id'
+  - 'rework_orders.warehouse_id = warehouses.id'
+  - 'rework_orders.bom_id = boms.id'
+  - 'rework_orders.source_work_order_id = work_orders.id'
+  - 'rework_orders.item_id = items.id'
+keywords: {}
+questions: {}

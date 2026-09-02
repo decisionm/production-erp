@@ -1,0 +1,46 @@
+table: goods_receipt_note_lines
+module: procurement
+label: 'Goods Receipt Note Lines'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: goods_receipt_note_id
+    type: integer
+    references: goods_receipt_notes.id
+  -
+    name: purchase_order_line_id
+    type: integer
+    references: purchase_order_lines.id
+  -
+    name: item_id
+    type: integer
+    references: items.id
+  -
+    name: quantity
+    type: decimal
+  -
+    name: unit_cost
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+  -
+    name: stock_movement_id
+    type: integer
+    nullable: true
+    references: stock_movements.id
+joins:
+  - 'goods_receipt_note_lines.stock_movement_id = stock_movements.id'
+  - 'goods_receipt_note_lines.goods_receipt_note_id = goods_receipt_notes.id'
+  - 'goods_receipt_note_lines.purchase_order_line_id = purchase_order_lines.id'
+  - 'goods_receipt_note_lines.item_id = items.id'
+keywords: {}
+questions: {}

@@ -1,0 +1,72 @@
+table: maintenance_work_orders
+module: production
+label: 'Maintenance Work Orders'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: asset_id
+    type: integer
+    references: assets.id
+  -
+    name: maintenance_schedule_id
+    type: integer
+    nullable: true
+    references: maintenance_schedules.id
+  -
+    name: type
+    type: string
+  -
+    name: status
+    type: string
+  -
+    name: description
+    type: string
+    nullable: true
+  -
+    name: reported_date
+    type: date
+  -
+    name: started_at
+    type: datetime
+    nullable: true
+  -
+    name: completed_at
+    type: datetime
+    nullable: true
+  -
+    name: assigned_to
+    type: integer
+    nullable: true
+    references: employees.id
+  -
+    name: labor_cost
+    type: decimal
+  -
+    name: parts_cost
+    type: decimal
+  -
+    name: total_cost
+    type: decimal
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'maintenance_work_orders.created_by = users.id'
+  - 'maintenance_work_orders.assigned_to = employees.id'
+  - 'maintenance_work_orders.maintenance_schedule_id = maintenance_schedules.id'
+  - 'maintenance_work_orders.asset_id = assets.id'
+keywords: {}
+questions: {}

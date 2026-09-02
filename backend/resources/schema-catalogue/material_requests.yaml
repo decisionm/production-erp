@@ -1,0 +1,66 @@
+table: material_requests
+module: inventory
+label: 'Material Requests'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: status
+    type: string
+  -
+    name: requested_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: requested_at
+    type: datetime
+    nullable: true
+  -
+    name: shift_id
+    type: integer
+    nullable: true
+    references: shifts.id
+  -
+    name: work_center_id
+    type: integer
+    nullable: true
+    references: work_centers.id
+  -
+    name: notes
+    type: string
+    nullable: true
+  -
+    name: submitted_at
+    type: datetime
+    nullable: true
+  -
+    name: cancelled_by
+    type: integer
+    nullable: true
+    references: users.id
+  -
+    name: cancelled_at
+    type: datetime
+    nullable: true
+  -
+    name: cancelled_reason
+    type: string
+    nullable: true
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'material_requests.cancelled_by = users.id'
+  - 'material_requests.work_center_id = work_centers.id'
+  - 'material_requests.shift_id = shifts.id'
+  - 'material_requests.requested_by = users.id'
+keywords: {}
+questions: {}

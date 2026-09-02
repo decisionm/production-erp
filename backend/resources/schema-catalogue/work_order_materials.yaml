@@ -1,0 +1,35 @@
+table: work_order_materials
+module: production
+label: 'Work Order Materials'
+purpose: ''
+columns:
+  -
+    name: id
+    type: integer
+  -
+    name: work_order_id
+    type: integer
+    references: work_orders.id
+  -
+    name: component_item_id
+    type: integer
+    references: items.id
+  -
+    name: quantity_required
+    type: decimal
+  -
+    name: quantity_issued
+    type: decimal
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+joins:
+  - 'work_order_materials.component_item_id = items.id'
+  - 'work_order_materials.work_order_id = work_orders.id'
+keywords: {}
+questions: {}
