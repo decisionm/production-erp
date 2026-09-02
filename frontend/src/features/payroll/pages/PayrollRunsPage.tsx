@@ -7,7 +7,9 @@ import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { createPayrollRun, listPayrollRuns, markPayrollRunPaid, processPayrollRun } from '@/features/payroll/api';
 import {
+    RUNS_DEFAULT_SORT,
     RUNS_LIST_SPEC,
+    RUNS_SORT_FIELDS,
     RUN_STATUS_CHOICES,
     periodLabel,
     runsQueryKey,
@@ -17,6 +19,7 @@ import type { PayrollRun, PayrollRunListFilters, PayrollRunStatus } from '@/feat
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { narrowingKeys } from '@/lib/listParams';
 import { TABLE_STICKY, noMatchLine, pageRangeLine, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { useListParams } from '@/lib/useListParams';
 
 const currentYear = new Date().getFullYear();
@@ -184,16 +187,43 @@ export default function PayrollRunsPage() {
                 loading={isLoading}
                 dataSource={data?.data ?? []}
                 locale={{ emptyText: <ListEmpty state={runsQuery} entity="payroll runs" empty={emptyText} /> }}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queried.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, RUNS_SORT_FIELDS, RUNS_DEFAULT_SORT) });
+                }}
                 pagination={serverPagination(data?.meta, setPage, 'payroll runs')}
                 columns={[
-                    { title: 'Period', render: (_, row) => <strong>{periodLabel(row)}</strong> },
+                    {
+                        // Year and month read as one, the way the cell prints them.
+                        title: 'Period',
+                        key: 'period',
+                        sorter: true,
+                        sortOrder: columnSortOrder('period', params.sort, RUNS_DEFAULT_SORT),
+                        render: (_, row) => <strong>{periodLabel(row)}</strong>,
+                    },
                     {
                         title: 'Status',
                         dataIndex: 'status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, RUNS_DEFAULT_SORT),
                         render: (status: PayrollRunStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
-                    { title: 'Processed At', render: (_, row) => row.processed_at ?? '—' },
-                    { title: 'Paid At', render: (_, row) => row.paid_at ?? '—' },
+                    {
+                        title: 'Processed At',
+                        key: 'processed_at',
+                        sorter: true,
+                        sortOrder: columnSortOrder('processed_at', params.sort, RUNS_DEFAULT_SORT),
+                        render: (_, row) => row.processed_at ?? '—',
+                    },
+                    {
+                        title: 'Paid At',
+                        key: 'paid_at',
+                        sorter: true,
+                        sortOrder: columnSortOrder('paid_at', params.sort, RUNS_DEFAULT_SORT),
+                        render: (_, row) => row.paid_at ?? '—',
+                    },
                     {
                         title: 'Actions',
                         render: (_, row) => (

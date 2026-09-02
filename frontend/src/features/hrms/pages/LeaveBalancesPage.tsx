@@ -1,12 +1,17 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Form, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { allocateLeaveBalance, listAllEmployees, listAllLeaveTypes, listLeaveBalances } from '@/features/hrms/api';
-import type { LeaveBalance } from '@/features/hrms/types';
+import { LEAVE_BALANCE_DEFAULT_SORT, LEAVE_BALANCE_LIST_SPEC, LEAVE_BALANCE_SORT_FIELDS } from '@/features/hrms/list';
+import type { LeaveBalance, LeaveBalanceListParams } from '@/features/hrms/types';
+import { compactParams } from '@/lib/listParams';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const currentYear = new Date().getFullYear();
 
@@ -18,11 +23,26 @@ const allocateSchema = z.object({
 });
 type AllocateFormValues = z.infer<typeof allocateSchema>;
 
+/**
+ * THE LEAVE BALANCE LIST. Sort, page and page size live in the URL
+ * (useListParams) and the SERVER orders and pages (ListLeaveBalancesRequest);
+ * the pager is wired to the server's meta — this table drew the server's
+ * first 20 with the pager off, so the 21st balance existed and nothing on
+ * screen said so.
+ */
 export default function LeaveBalancesPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['hrms', 'leave-balances'], queryFn: listLeaveBalances });
+    const { params, setParams, setPage } = useListParams<LeaveBalanceListParams>(LEAVE_BALANCE_LIST_SPEC);
+    const listParams = useMemo(() => compactParams(params), [params]);
+
+    const { data, isFetching } = useQuery({
+        // Still under the ['hrms', 'leave-balances'] prefix every mutation invalidates.
+        queryKey: ['hrms', 'leave-balances', 'list', listParams],
+        queryFn: () => listLeaveBalances(listParams),
+        placeholderData: (previous) => previous,
+    });
     const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
     const { data: leaveTypes } = useQuery({ queryKey: ['hrms', 'leave-types', 'all'], queryFn: listAllLeaveTypes });
 
@@ -59,17 +79,43 @@ export default function LeaveBalancesPage() {
             </Space>
 
             <Table<LeaveBalance>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
-                loading={isLoading}
+                loading={isFetching}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queried.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, LEAVE_BALANCE_SORT_FIELDS, LEAVE_BALANCE_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'leave balances')}
                 columns={[
+                    // Names through relations, not columns of this table: no server sort.
                     { title: 'Employee', render: (_, row) => row.employee?.name },
                     { title: 'Leave Type', render: (_, row) => row.leave_type.name },
-                    { title: 'Year', dataIndex: 'year' },
-                    { title: 'Allocated', dataIndex: 'allocated_days' },
-                    { title: 'Used', dataIndex: 'used_days' },
+                    {
+                        title: 'Year',
+                        dataIndex: 'year',
+                        key: 'year',
+                        sorter: true,
+                        sortOrder: columnSortOrder('year', params.sort, LEAVE_BALANCE_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Allocated',
+                        dataIndex: 'allocated_days',
+                        key: 'allocated_days',
+                        sorter: true,
+                        sortOrder: columnSortOrder('allocated_days', params.sort, LEAVE_BALANCE_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Used',
+                        dataIndex: 'used_days',
+                        key: 'used_days',
+                        sorter: true,
+                        sortOrder: columnSortOrder('used_days', params.sort, LEAVE_BALANCE_DEFAULT_SORT),
+                    },
+                    // Computed in the resource (allocated − used), not stored: no server sort.
                     { title: 'Remaining', dataIndex: 'remaining_days' },
                 ]}
             />

@@ -1,11 +1,26 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { createSalaryComponent, listSalaryComponents } from '@/features/payroll/api';
-import type { SalaryCalculationType, SalaryComponent, SalaryComponentKind } from '@/features/payroll/types';
+import {
+    COMPONENTS_DEFAULT_SORT,
+    COMPONENTS_LIST_SPEC,
+    COMPONENTS_SORT_FIELDS,
+    componentsQueryKey,
+    componentsServerFilters,
+} from '@/features/payroll/lists';
+import type {
+    SalaryCalculationType,
+    SalaryComponent,
+    SalaryComponentKind,
+    SalaryComponentListFilters,
+} from '@/features/payroll/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const componentSchema = z
     .object({
@@ -32,11 +47,25 @@ const calculationTypeOptions: { value: SalaryCalculationType; label: string }[] 
     { value: 'percentage_of_basic', label: 'Percentage of Basic' },
 ];
 
+/**
+ * THE SALARY COMPONENT MASTER'S LIST. Sort, page and page size live in the
+ * URL (useListParams) and the SERVER orders and pages
+ * (ListSalaryComponentsRequest); the pager is wired to the server's meta —
+ * this table drew the server's first 20 with the pager off, so a 21st
+ * component existed and nothing on screen said so.
+ */
 export default function SalaryComponentsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['payroll', 'salary-components'], queryFn: listSalaryComponents });
+    const { params, setParams, setPage } = useListParams<SalaryComponentListFilters>(COMPONENTS_LIST_SPEC);
+    const filters = useMemo(() => componentsServerFilters(params), [params]);
+
+    const { data, isFetching } = useQuery({
+        queryKey: componentsQueryKey(filters),
+        queryFn: () => listSalaryComponents(filters),
+        placeholderData: (previous) => previous,
+    });
 
     const { control, handleSubmit, reset, watch, formState: { errors } } = useForm<ComponentFormValues>({
         resolver: zodResolver(componentSchema),
@@ -64,17 +93,38 @@ export default function SalaryComponentsPage() {
             </Space>
 
             <Table<SalaryComponent>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
-                loading={isLoading}
+                loading={isFetching}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queried.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, COMPONENTS_SORT_FIELDS, COMPONENTS_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'components')}
                 columns={[
-                    { title: 'Code', dataIndex: 'code' },
-                    { title: 'Name', dataIndex: 'name' },
+                    {
+                        title: 'Code',
+                        dataIndex: 'code',
+                        key: 'code',
+                        sorter: true,
+                        sortOrder: columnSortOrder('code', params.sort, COMPONENTS_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, COMPONENTS_DEFAULT_SORT),
+                    },
                     {
                         title: 'Type',
                         dataIndex: 'type',
+                        key: 'type',
+                        sorter: true,
+                        sortOrder: columnSortOrder('type', params.sort, COMPONENTS_DEFAULT_SORT),
                         render: (type: SalaryComponentKind) => <Tag color={typeColor[type]}>{type}</Tag>,
                     },
                     {
@@ -87,6 +137,9 @@ export default function SalaryComponentsPage() {
                     {
                         title: 'Active',
                         dataIndex: 'is_active',
+                        key: 'is_active',
+                        sorter: true,
+                        sortOrder: columnSortOrder('is_active', params.sort, COMPONENTS_DEFAULT_SORT),
                         render: (active: boolean) => <Switch checked={active} disabled size="small" />,
                     },
                 ]}

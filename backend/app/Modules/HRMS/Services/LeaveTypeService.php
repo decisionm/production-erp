@@ -2,16 +2,19 @@
 
 namespace App\Modules\HRMS\Services;
 
+use App\Modules\HRMS\Http\Requests\ListLeaveTypesRequest;
 use App\Modules\HRMS\Models\LeaveType;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 class LeaveTypeService
 {
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /** Ordered by `sort` (ListSort; validated by ListLeaveTypesRequest), by name as it always was when absent. */
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return LeaveType::query()
-            ->orderBy('name')
-            ->paginate($perPage);
+        return ListSort::apply(LeaveType::query(), $sort, ListLeaveTypesRequest::SORTABLE, 'name')
+            ->paginate($perPage)
+            ->withQueryString();
     }
 
     public function create(array $data): LeaveType

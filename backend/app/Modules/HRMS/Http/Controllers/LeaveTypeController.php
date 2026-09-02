@@ -3,12 +3,12 @@
 namespace App\Modules\HRMS\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\HRMS\Http\Requests\ListLeaveTypesRequest;
 use App\Modules\HRMS\Http\Requests\StoreLeaveTypeRequest;
 use App\Modules\HRMS\Http\Requests\UpdateLeaveTypeRequest;
 use App\Modules\HRMS\Http\Resources\LeaveTypeResource;
 use App\Modules\HRMS\Models\LeaveType;
 use App\Modules\HRMS\Services\LeaveTypeService;
-use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class LeaveTypeController extends Controller
@@ -20,11 +20,13 @@ class LeaveTypeController extends Controller
      * whole master: its dropdown offers ACTIVE rows only now, and
      * filtering the first 20 would hide part of a list that was already
      * truncated (the item/vendor picker defect, 12-Aug). The default is
-     * unchanged for every other caller.
+     * unchanged for every other caller. `sort` is ListLeaveTypesRequest's.
      */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(ListLeaveTypesRequest $request): AnonymousResourceCollection
     {
-        return LeaveTypeResource::collection($this->leaveTypes->paginate($this->perPage($request)));
+        return LeaveTypeResource::collection(
+            $this->leaveTypes->paginate($this->perPage($request, max: ListLeaveTypesRequest::PER_PAGE_MAX), $request->validated('sort')),
+        );
     }
 
     public function store(StoreLeaveTypeRequest $request): LeaveTypeResource

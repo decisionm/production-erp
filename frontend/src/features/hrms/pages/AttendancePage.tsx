@@ -6,11 +6,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { listAttendance, listAllEmployees, markAttendance } from '@/features/hrms/api';
-import { ATTENDANCE_LIST_SPEC, noMatchLine, pageRangeLine } from '@/features/hrms/list';
+import { ATTENDANCE_DEFAULT_SORT, ATTENDANCE_LIST_SPEC, ATTENDANCE_SORT_FIELDS, noMatchLine, pageRangeLine } from '@/features/hrms/list';
 import type { Attendance, AttendanceListParams, AttendanceStatus } from '@/features/hrms/types';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { compactParams, narrowingKeys } from '@/lib/listParams';
 import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { useListParams } from '@/lib/useListParams';
 
 const attendanceSchema = z.object({
@@ -161,14 +162,29 @@ export default function AttendancePage() {
                 rowKey="id"
                 loading={query.isFetching}
                 dataSource={query.data?.data}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queried.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, ATTENDANCE_SORT_FIELDS, ATTENDANCE_DEFAULT_SORT) });
+                }}
                 pagination={serverPagination(query.data?.meta, setPage, 'attendance records')}
                 locale={{ emptyText: <ListEmpty state={query} entity="attendance records" empty={emptyText} /> }}
                 columns={[
+                    // A name through the relation, not a column of this table: no server sort.
                     { title: 'Employee', render: (_, row) => row.employee?.name },
-                    { title: 'Date', dataIndex: 'date' },
+                    {
+                        title: 'Date',
+                        dataIndex: 'date',
+                        key: 'date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('date', params.sort, ATTENDANCE_DEFAULT_SORT),
+                    },
                     {
                         title: 'Status',
                         dataIndex: 'status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, ATTENDANCE_DEFAULT_SORT),
                         render: (status: AttendanceStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
                     { title: 'Notes', dataIndex: 'notes' },

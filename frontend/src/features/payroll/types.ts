@@ -73,6 +73,8 @@ export interface SkippedEmployee {
  */
 export interface PayrollRunListFilters extends ListParams {
     status?: PayrollRunStatus;
+    /** ListSort spelling: `period`, `-status`, `paid_at`; absent is newest period first. */
+    sort?: string;
 }
 
 /**
@@ -83,4 +85,16 @@ export interface PayrollRunListFilters extends ListParams {
 export interface PayslipListFilters extends ListParams {
     payroll_run_id?: number;
     employee_id?: number;
+    sort?: string;
+}
+
+/** GET /payroll/salary-components — ListSalaryComponentsRequest: sort and paging. */
+export interface SalaryComponentListFilters extends ListParams {
+    sort?: string;
+}
+
+/** GET /payroll/salary-structures — ListSalaryStructuresRequest: the employee, sort and paging. */
+export interface SalaryStructureListFilters extends ListParams {
+    employee_id?: number;
+    sort?: string;
 }

@@ -12,35 +12,68 @@ import type {
 } from './types';
 
 /**
- * THE THREE HRMS LISTS' SHAPE ON THE URL — what each page's useListParams
+ * THE FIVE HRMS LISTS' SHAPE ON THE URL — what each page's useListParams
  * reads and writes — plus the two lines every one of them says.
  *
  * Each spec is a module-level constant on purpose (useListParams memoises
  * on it). Anything not named here is dropped on read, so a stray key never
  * reaches the server through the list; a status the master does not know
  * is dropped too, so a stale link cannot 422 the page on load.
+ *
+ * `sort` (03-Sep-2026) is the server's own spelling — a bare column for
+ * ascending, `-column` for descending, absent for the list's default — and
+ * only a column the matching List*Request sorts on is let through, so a
+ * mistyped link falls back to the default order rather than a 422. Each
+ * DEFAULT_SORT is what the service orders by when nothing is asked, so the
+ * header arrow shows the order the page actually loaded in.
  */
 
 export const EMPLOYEE_STATUSES: readonly EmployeeStatus[] = ['active', 'inactive', 'terminated'];
 export const LEAVE_REQUEST_STATUSES: readonly LeaveRequestStatus[] = ['pending', 'approved', 'rejected'];
 export const ATTENDANCE_STATUSES: readonly AttendanceStatus[] = ['present', 'absent', 'half_day', 'on_leave'];
 
+/** Bare and "-" prefixed: the two spellings the URL's `sort` may take per column. */
+function sortOptions(fields: readonly string[]): string[] {
+    return fields.flatMap((field) => [field, `-${field}`]);
+}
+
+/* ------------------------------- employees ------------------------------- */
+
+/** ListEmployeesRequest::SORTABLE — every one a column the table shows. */
+export const EMPLOYEE_SORT_FIELDS: readonly string[] = ['employee_code', 'name', 'designation', 'department', 'date_of_joining', 'status'];
+/** EmployeeService orders by name when nothing is asked. */
+export const EMPLOYEE_DEFAULT_SORT = 'name';
+
 export const EMPLOYEE_LIST_SPEC: ListParamsSpec = {
-    strings: ['status'],
-    allowed: { status: EMPLOYEE_STATUSES },
+    strings: ['status', 'sort'],
+    allowed: { status: EMPLOYEE_STATUSES, sort: sortOptions(EMPLOYEE_SORT_FIELDS) },
 };
 
+/* ----------------------------- leave requests ---------------------------- */
+
+/** ListLeaveRequestsRequest::SORTABLE — the request's own dates, days and status. */
+export const LEAVE_REQUEST_SORT_FIELDS: readonly string[] = ['start_date', 'end_date', 'days', 'status'];
+/** LeaveRequestService: newest first. */
+export const LEAVE_REQUEST_DEFAULT_SORT = '-id';
+
 export const LEAVE_REQUEST_LIST_SPEC: ListParamsSpec = {
-    strings: ['status'],
+    strings: ['status', 'sort'],
     numbers: ['employee_id'],
-    allowed: { status: LEAVE_REQUEST_STATUSES },
+    allowed: { status: LEAVE_REQUEST_STATUSES, sort: sortOptions(LEAVE_REQUEST_SORT_FIELDS) },
 };
+
+/* -------------------------------- attendance ----------------------------- */
+
+/** ListAttendanceRequest::SORTABLE. */
+export const ATTENDANCE_SORT_FIELDS: readonly string[] = ['date', 'status'];
+/** AttendanceService: newest date first. */
+export const ATTENDANCE_DEFAULT_SORT = '-date';
 
 /** `from` / `to` ride as typed; the server refuses a non-date or a reversed range. */
 export const ATTENDANCE_LIST_SPEC: ListParamsSpec = {
-    strings: ['status', 'from', 'to'],
+    strings: ['status', 'from', 'to', 'sort'],
     numbers: ['employee_id'],
-    allowed: { status: ATTENDANCE_STATUSES },
+    allowed: { status: ATTENDANCE_STATUSES, sort: sortOptions(ATTENDANCE_SORT_FIELDS) },
 };
 
 // ---- the punch-report import (03-Sep design, Track 2) --------------------
@@ -116,4 +149,26 @@ export function applyLabel(openCount: number): string {
     return openCount === 0 ? 'Apply' : `Apply (${openCount} open)`;
 }
 
+/* ------------------------------- leave types ----------------------------- */
 
+/** ListLeaveTypesRequest::SORTABLE. */
+export const LEAVE_TYPE_SORT_FIELDS: readonly string[] = ['code', 'name', 'default_annual_days', 'is_active'];
+/** LeaveTypeService orders by name when nothing is asked. */
+export const LEAVE_TYPE_DEFAULT_SORT = 'name';
+
+export const LEAVE_TYPE_LIST_SPEC: ListParamsSpec = {
+    strings: ['sort'],
+    allowed: { sort: sortOptions(LEAVE_TYPE_SORT_FIELDS) },
+};
+
+/* ------------------------------ leave balances --------------------------- */
+
+/** ListLeaveBalancesRequest::SORTABLE — the stored figures; remaining is computed and not sortable. */
+export const LEAVE_BALANCE_SORT_FIELDS: readonly string[] = ['year', 'allocated_days', 'used_days'];
+/** LeaveBalanceService: newest year first. */
+export const LEAVE_BALANCE_DEFAULT_SORT = '-year';
+
+export const LEAVE_BALANCE_LIST_SPEC: ListParamsSpec = {
+    strings: ['sort'],
+    allowed: { sort: sortOptions(LEAVE_BALANCE_SORT_FIELDS) },
+};

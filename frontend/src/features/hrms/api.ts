@@ -13,9 +13,11 @@ import type {
     Employee,
     EmployeeListParams,
     LeaveBalance,
+    LeaveBalanceListParams,
     LeaveRequest,
     LeaveRequestListParams,
     LeaveType,
+    LeaveTypeListParams,
 } from './types';
 
 /**
@@ -58,8 +60,9 @@ export async function updateEmployee(id: number, payload: UpdateEmployeePayload)
     return data.data;
 }
 
-export async function listLeaveTypes(): Promise<Paginated<LeaveType>> {
-    const { data } = await api.get<Paginated<LeaveType>>('/hrms/leave-types');
+/** One page of leave types, sorted and paged by the server (ListLeaveTypesRequest). */
+export async function listLeaveTypes(params: LeaveTypeListParams = {}): Promise<Paginated<LeaveType>> {
+    const { data } = await api.get<Paginated<LeaveType>>('/hrms/leave-types', { params: compactParams(params) });
     return data;
 }
 
@@ -91,8 +94,9 @@ export async function updateLeaveType(id: number, payload: UpdateLeaveTypePayloa
     return data.data;
 }
 
-export async function listLeaveBalances(): Promise<Paginated<LeaveBalance>> {
-    const { data } = await api.get<Paginated<LeaveBalance>>('/hrms/leave-balances');
+/** One page of leave balances, sorted and paged by the server (ListLeaveBalancesRequest). */
+export async function listLeaveBalances(params: LeaveBalanceListParams = {}): Promise<Paginated<LeaveBalance>> {
+    const { data } = await api.get<Paginated<LeaveBalance>>('/hrms/leave-balances', { params: compactParams(params) });
     return data;
 }
 
