@@ -66,5 +66,26 @@ class PermissionSeeder extends Seeder
         foreach (['Plant Manager'] as $roleName) {
             Role::findOrCreate($roleName, 'web')->givePermissionTo($addedLine);
         }
+
+        // PROCUREMENT WRITE FOR ACCOUNTS (DEC-20260903-001): Accounts holds
+        // full procurement write so that Accounts may approve a purchase
+        // requisition. Approval is gated on the procurement write permission,
+        // and the procurement module has ONE write permission covering
+        // requisitions and their approval, purchase orders, goods receipts
+        // and vendors; there is no narrower approve-only grant. The owner was
+        // told this trade-off (Accounts can now also raise requisitions,
+        // purchase orders and record receipts, same as Store) and chose full
+        // procurement for Accounts.
+        //
+        // givePermissionTo, NOT syncPermissions: this role carries permissions
+        // configured through the Roles UI on the live instance, and this
+        // seeder re-runs on every deploy — it must only ever ADD these
+        // permissions, never rewrite what an administrator granted.
+        $procurementPerms = [
+            $permissions->firstWhere('name', 'procurement.view'),
+            $permissions->firstWhere('name', 'procurement.manage'),
+        ];
+
+        Role::findOrCreate('Accounts', 'web')->givePermissionTo($procurementPerms);
     }
 }
