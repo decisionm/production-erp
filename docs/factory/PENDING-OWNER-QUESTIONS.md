@@ -1433,7 +1433,7 @@ any lot/bag trace for a counted material, and any correct handling of the film-v
 distinction.
 *Open since 2026-08-18.*
 
-## Q59 · Which item categories may each document use? — PARTLY RESOLVED
+## Q59 · Which item categories may each document use? — RESOLVED
 
 **(a) and (d)-for-purchases resolved 2026-09-02 by DEC-20260902-023:** the
 requisition and PO pickers show Raw Material and Packing Material by default;
@@ -1443,8 +1443,10 @@ reason from an authorised person; finished goods never appear; every such
 purchase follows the full PR, PO, GRN, incoming Quality and stock workflow.
 **(b) resolved 2026-09-02 by DEC-20260902-027:** the production-input flag
 stays the only rule for store requests and issues; category is informational,
-a flag-category conflict warns, and flag changes are audited. Still open:
-(c) sales orders. The original entry follows.
+a flag-category conflict warns, and flag changes are audited. **(c) resolved
+2026-09-02 by DEC-20260902-035:** a sales order may contain active Finished
+Good items only, enforced on the server from the confirmed item-master
+category. The original entry follows.
 
 PR #8 added the nullable `items.category` column and four values — Raw Material,
 Packing Material, Finished Good and Other — plus policy helpers intended for a

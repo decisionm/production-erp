@@ -108,13 +108,13 @@ It should deep-link to the exact filtered rows behind every count.
 | Chapter | Current result | Detailed document |
 |---|---|---|
 | Dashboard and Procurement | Verified on 02-Sep-2026; several workflow gaps found | [01-DASHBOARD-AND-PROCUREMENT.md](01-DASHBOARD-AND-PROCUREMENT.md) |
-| Quality, Inventory and Production | Capture resumed 02-Sep-2026; four decisions recorded (DEC-20260902-002 to -005: Store scans once at issue; bin material never returned; PET resin is the only bin material; Production/WIP is the day bin, no separate page); Q94 opened and resolved; ground-truth research note filed under `research/`; finished-goods Quality checklist still to capture | [02-QUALITY-INVENTORY-PRODUCTION.md](02-QUALITY-INVENTORY-PRODUCTION.md) |
+| Quality, Inventory and Production | Complete 02-Sep-2026: 34 decisions recorded (DEC-20260902-002 to -035) covering the Store scan, the day bin, returns, both Quality checklists, handling units, the approval chain's gates, packaging, factory rules, variance, held stock and the production queue; Q45, Q59, Q62, Q64, Q78, Q87, Q90, Q93, Q94 closed; ground-truth research note under `research/` | [02-QUALITY-INVENTORY-PRODUCTION.md](02-QUALITY-INVENTORY-PRODUCTION.md) |
 | Sales and Dispatch | Active decisions found; full page verification pending | To be created |
 | Reports and Tally | Direction captured; report-by-report reconciliation pending | To be created |
 
-## Owner input still continuing
+## Owner input
 
-The 02-Sep-2026 explanation ended while describing the finished-goods Quality
-checklist and Product Configuration standards. That section must be continued before
-the Production Quality chapter is treated as complete.
+The 02-Sep-2026 walkthrough resumed at the finished-goods Quality checklist and
+ran to the end of Chapter 2. Chapter 1's open points were closed the same day
+(DEC-20260902-023, -025, -026, -034); Q48 and Q68 stay with Accounts.
 

@@ -506,8 +506,15 @@ record's source.
 - **GAP:** the planning page prints its basis in the payload; the build puts
   the short ceiling label and the figures on the screen.
 
+- **VERIFIED as a decision:** DEC-20260902-035, Q59(c). A sales order may
+  contain active Finished Good items only; the server refuses any other
+  category from the confirmed item-master category; historical orders stay
+  readable. Q59 closed in full.
+- **GAP:** the sales-order picker and server do not refuse on category yet.
+
 ## Status
 
-Chapter 2 is complete. Every owner question raised in it is recorded
-(DEC-20260902-002 to -033) or expressly deferred to Accounts (Q48, Q68).
-Still open elsewhere: Q59(c) sales-order categories, Q64 purchase without a PO.
+Chapter 2 is complete. Every owner question raised in it, and every leftover
+from Chapter 1, is recorded (DEC-20260902-002 to -035) or expressly deferred
+to Accounts (Q48, Q68). Section 1 of this chapter is superseded in part by
+§3: Q94 was opened and closed the same day.
