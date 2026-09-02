@@ -367,6 +367,28 @@ class RunMaterialSuggestionService
     // ---------------------------------------------------------------- resin --
 
     /**
+     * IS THIS MATERIAL ONE THE RESIN TIER WOULD CONSIDER — the same pool
+     * resolveResinItem() draws from (a kg-family unit, active, not a
+     * colourant, not the product itself), asked one item at a time by the
+     * completion path so its "the Store never issued this resin" warning
+     * (DEC-20260903-003) fires on the resin lines and never on the
+     * masterbatch or the packing (DEC-20260902-004: only PET resin is a bin
+     * material).
+     */
+    public function isResinCandidate(Item $item, ?int $productId = null): bool
+    {
+        if (! $item->is_active || ! $item->hasKgUom()) {
+            return false;
+        }
+
+        if ($productId !== null && (int) $item->id === $productId) {
+            return false;
+        }
+
+        return ! $this->colourantItemIds()->contains((int) $item->id);
+    }
+
+    /**
      * @return array{item: ?Item, source: string, tied: list<string>}
      */
     private function resolveResinItem(Item $product): array

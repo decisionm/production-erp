@@ -2830,9 +2830,10 @@ and the Master Batch Amber negative is examined and corrected with it; (c) by
 DEC-20260903-002 — the 23-Jul demo rows on the Production/WIP row are removed
 by exact record through the sanctioned reset path; (d) by DEC-20260903-003 — a
 batch whose resin the Store has not issued closes and is shown as a warning at
-approval, never refused. Owed builds: the correction movements and statement
-(-001), the by-id removal migration (-002), the approval warning (-003).** The
-original question follows.
+approval, never refused. Builds: the approval warning (-003) ships with the
+pre-fill fix in PR #87 (metrics.unissued_materials, amber on the approval
+desk); the correction movements and statement (-001) and the by-id removal
+(-002) are owed.** The original question follows.
 
 What the read-only spot check of the live database found (03-Sep-2026 03:41 IST,
 893 movements, 289 balances, 20-Jul to 02-Sep; report:

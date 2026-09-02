@@ -779,6 +779,24 @@ class StoreIssueService
     }
 
     /**
+     * HAS THE STORE EVER HANDED ANYTHING INTO PRODUCTION/WIP — is the
+     * store-issue flow in use at this factory at all?
+     *
+     * Asked by the completion path before it warns that a resin was never
+     * issued (DEC-20260903-003): a factory that has never raised a Store
+     * Issue has no handover to have missed, and its consumption is answered
+     * exactly as before the flow existed. Cancelled issues do not count:
+     * their material went back.
+     */
+    public function storeIssueFlowInUse(int $wipWarehouseId): bool
+    {
+        return StoreIssueLine::query()
+            ->where('to_warehouse_id', $wipWarehouseId)
+            ->whereHas('storeIssue', fn ($query) => $query->where('status', '!=', StoreIssueStatus::Cancelled->value))
+            ->exists();
+    }
+
+    /**
      * Open handover lines into Production/WIP: an issue still issued or
      * partly returned, with kilograms it has not had back.
      *
