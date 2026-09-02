@@ -33,7 +33,10 @@ class GoodsReceiptsExport extends ProcurementExportKind
 
     public function filterRules(): array
     {
-        return $this->listRules(new ListGoodsReceiptsRequest);
+        // `id` is the register's one-receipt deep link (?grn=7), not an
+        // export control: a file of exactly one receipt is the receipt
+        // screen, so the form must not offer it. Dropped with the paging keys.
+        return $this->listRules(new ListGoodsReceiptsRequest, ['page', 'per_page', 'id']);
     }
 
     public function columns(?Authenticatable $reader): array
