@@ -56,7 +56,7 @@ flowchart LR
         productionWip --> startBatch
         startBatch --> recordRun["Output, consumption, exceptions and downtime"]
         recordRun --> completeBatch["Complete batch: variance shown"]
-        completeBatch --> finishedStock["Finished goods in the Store"]
+        completeBatch --> finishedStock["Finished goods in the Store: Quality-pending until the batch check"]
         completeBatch --> productionQuality["Quality: checklist beside the OK/rejected count"]
         productionQuality --> pmApproval["Plant Manager approval (not the checker)"]
         pmApproval --> accountsApproval["Accounts approval (not the PM; postable voucher)"]
@@ -68,7 +68,7 @@ flowchart LR
         stockAvailable -->|"No"| productionRequest
         finishedStock --> salesHold
         salesHold --> dispatchQuality["Internal Quality approval"]
-        dispatchQuality --> storeDispatch["Store dispatches"]
+        dispatchQuality --> storeDispatch["Store dispatches by carton scan (typed only for legacy stock)"]
         storeDispatch --> deliveryComplete["Delivery recorded and ERP stock reduced"]
     end
 
@@ -76,7 +76,7 @@ flowchart LR
         purchaseOrder -.-> tallyPurchaseOrder["Tally Purchase Order"]
         accountsApproval -.-> tallyStockJournal["Tally Stock Journal, one per shift"]
         deliveryComplete --> tallySalesInvoice["Tally creates Sales Invoice"]
-        tallySalesInvoice --> importSalesInvoice["ERP imports and matches invoice"]
+        tallySalesInvoice --> importSalesInvoice["Accounts imports; ERP matches confirmed orders; unmatched resolved by Accounts"]
         tallyStockJournal --> reconciliation["Reports and reconciliation"]
         importSalesInvoice --> reconciliation
     end
@@ -119,7 +119,7 @@ It should deep-link to the exact filtered rows behind every count.
 |---|---|---|
 | Dashboard and Procurement | Verified on 02-Sep-2026; several workflow gaps found | [01-DASHBOARD-AND-PROCUREMENT.md](01-DASHBOARD-AND-PROCUREMENT.md) |
 | Quality, Inventory and Production | Complete 02-Sep-2026: 39 decisions recorded (DEC-20260902-002 to -040, after an Opus review whose five questions were answered the same day) covering the Store scan, the day bin, returns, both Quality checklists, handling units, the approval chain's gates, packaging, factory rules, variance, held stock and the production queue; Q45, Q59, Q62, Q64, Q78, Q87, Q90, Q93, Q94 closed; ground-truth research note under `research/` | [02-QUALITY-INVENTORY-PRODUCTION.md](02-QUALITY-INVENTORY-PRODUCTION.md) |
-| Sales and Dispatch | Active decisions found; full page verification pending | To be created |
+| Sales and Dispatch | Complete 02-Sep-2026: walkthrough confirmed the flow in force; 12 decisions recorded (DEC-20260902-041 to -052); Q37, Q67, Q73 closed; ground-truth note under `research/` | [03-SALES-AND-DISPATCH.md](03-SALES-AND-DISPATCH.md) |
 | Reports and Tally | Direction captured; report-by-report reconciliation pending | To be created |
 
 ## Owner input

@@ -93,10 +93,58 @@ own statement of the flow:
 - **GAP:** no Quality-pending state exists for finished goods; completion
   receives straight into holdable stock; the build adds the state, the
   server refusals on hold, approval and delivery, and the dashboard figures.
-- **OPEN (collected below as one list, per the owner):**
-  2. "Promised date": the schema and form carry `expected_date`, whose meaning
-     Q67 says was never recorded. Is it the date promised to the customer?
-  3. Sales Order amendment after a hold exists: quantity, date, cancellation.
-  4. Customer master: who creates customers, the Tally ledger import, FC-06.
-  5. An imported Tally invoice that matches no order: who resolves it, and how.
-  6. Dispatch by carton scan versus typed quantity, given live has no cartons.
+## 2. The consolidated answers (02-Sep-2026, 23:05 IST)
+
+The owner asked for every remaining Sales question in one list and answered
+all thirteen in their own words. Recorded as DEC-20260902-043 to -052.
+
+| # | Rule | Record |
+|---|---|---|
+| 1 | Expected date IS the promised date; renamed; no second date | -043 |
+| 2 | Floor reads product, quantity, promised date, job reference, packing instructions; customer/PO only for a customer-specific label; never price, supplier, rate, unrelated stock | -044 |
+| 3, 4 | Sales may move the date or reduce an undispatched line with a reason; reduction never below dispatched, releases excess holds, cancels only unstarted requests; increase is a new line; after any dispatch only close-short; every cancellation records person, date, reason | -045 |
+| 5, 6 | A Tally invoice matches only a confirmed order; Accounts imports and resolves unmatched invoices, links or marks "No ERP order", never creates an order; Sales sees the match status | -046 |
+| 7 | Carton scan is the final dispatch method; typed only for identified legacy stock with an authorised person and reason; no automatic product switch; count legacy stock before rollout | -047 |
+| 8 | Store records why it cannot fulfil; sends only the shortfall; else back to Sales; nothing auto-raised | -048 |
+| 9 | Dispatch append-only; a wrong dispatch is reversed by an audited reversal document; a customer return is a separate workflow through Quality | -049 |
+| 10 | Tally ledger import is the customer source; a Sales-made customer is Pending until Accounts maps a ledger; GSTIN mandatory only for GST-registered; dry run first | -050 |
+| 11 | A Sales role: sales read/write plus scoped stock-availability and production-status views; no broad inventory, production or finance | -051 |
+| 12, 13 | CRM, enquiries, quotations out of scope and hidden; carton tare and resin grade deferred to the label build | -052 |
+
+Approved as engineering fixes, no record needed: a dispatch always leaves the
+finished-goods location its hold sits in; the dashboard's two identical sales
+counts become one.
+
+## 3. What the build must do for this chapter
+
+Every item below is a GAP against a record now in force.
+
+1. Rename expected date to Promised date everywhere (-043); floor job view
+   limited to the five fields (-044).
+2. Sales order amend: date change, reduction with hold release and unstarted
+   request cancellation, increase as new line, close-short after dispatch,
+   mandatory reason and actor on every cancellation (-045).
+3. Tally invoice import as an Accounts action on a screen, an unmatched list
+   with link / No-ERP-order actions, confirmed-only matching, match status
+   shown to Sales and written on the order (-046, DEC-20260831-012).
+4. Dispatch: scan required for carton-tracked stock; typed path gated to
+   identified legacy stock with person and reason; legacy stock counted on
+   live first (-047). Dispatch always from the hold's finished-goods location.
+5. Store "cannot fulfil" reason, shortfall-only send, return-to-Sales (-048).
+6. Dispatch-reversal document (-049).
+7. Customer Pending state until Accounts maps a Tally ledger; GSTIN rule;
+   live customer import dry run then write (-050).
+8. Sales role definition command (-051).
+9. Quality-pending finished goods state with server refusals on hold,
+   approval and delivery; live count first (-042).
+10. The production queue by promised date with sticky manual position and
+    moved flag (DEC-20260902-031); finished-goods-only picker and server
+    refusal (DEC-20260902-035).
+11. Stale text: the Tally mirror statement on the Sales pages; superseded ids
+    in code comments; one dashboard sales count.
+
+## Status
+
+Chapter 3 is complete. Q37, Q67, Q73 closed; Q44 partly; Q61 and Q72 carry
+their RESOLVED markers. Deferred to Accounts: Q30(b), Q36, Q41. Deferred to
+the label build: Q23, Q24.
