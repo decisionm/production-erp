@@ -188,7 +188,7 @@ function FactoryRulesTable() {
                         key: 'applied',
                         width: 120,
                         render: (_, row) => {
-                            const label = ruleAppliedLabel(row.applied);
+                            const label = ruleAppliedLabel(row.applied, row.key);
                             const tag = <Tag color={label.tone === 'success' ? 'success' : undefined}>{label.text}</Tag>;
 
                             return row.applied ? (
