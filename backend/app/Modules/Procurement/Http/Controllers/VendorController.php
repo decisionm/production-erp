@@ -34,14 +34,24 @@ class VendorController extends Controller
     /**
      * The vendor list. `q` narrows it by name or code — 628 vendors arrived
      * from the Tally ledger import in one run, and a list that size without a
-     * search is thirteen screens and no way in.
+     * search is thirteen screens and no way in. `classification[]` narrows to
+     * vendors holding at least one of the given values (DEC-20260902-026);
+     * `unclassified=1` widens that to also include vendors with none, or —
+     * with no `classification[]` — narrows to only those.
      */
     public function index(Request $request): AnonymousResourceCollection
     {
         $search = $request->query('q');
+        $classifications = $request->query('classification');
+        $classifications = is_array($classifications) ? array_values(array_filter($classifications, 'is_string')) : null;
 
         return VendorResource::collection(
-            $this->vendors->paginate($this->perPage($request), is_string($search) ? $search : null),
+            $this->vendors->paginate(
+                $this->perPage($request),
+                is_string($search) ? $search : null,
+                $classifications,
+                $request->boolean('unclassified'),
+            ),
         );
     }
 
@@ -51,17 +61,17 @@ class VendorController extends Controller
      */
     public function show(Request $request, Vendor $vendor): VendorResource
     {
-        return VendorResource::make($this->withAbilities($vendor, $this->vendors, $request));
+        return VendorResource::make($this->withAbilities($vendor->load('classifications'), $this->vendors, $request));
     }
 
     public function store(StoreVendorRequest $request): VendorResource
     {
-        return VendorResource::make($this->vendors->create($request->validated()));
+        return VendorResource::make($this->vendors->create($request->validated())->load('classifications'));
     }
 
     public function update(UpdateVendorRequest $request, Vendor $vendor): VendorResource
     {
-        return VendorResource::make($this->vendors->update($vendor, $request->validated()));
+        return VendorResource::make($this->vendors->update($vendor, $request->validated())->load('classifications'));
     }
 
     /**

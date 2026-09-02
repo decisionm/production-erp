@@ -129,6 +129,36 @@ class VendorLifecycleTest extends ProductDefinitionLifecycleTestCase
         $this->assertNotNull($vendor->fresh(), 'the vendor survives a refused delete');
     }
 
+    /**
+     * DEC-20260902-026: vendor_classifications.vendor_id CASCADEs, so this
+     * class (not the database) is the only guard — a classified vendor is
+     * not provably unused, and a hard delete must refuse it just like a
+     * purchase order does. Removing the classification is what turns "not
+     * provably unused" back into "provably unused".
+     */
+    public function test_a_classified_vendor_is_refused_with_counts_then_deletable_once_unclassified(): void
+    {
+        $owner = $this->ownerUser(...self::MODULE);
+        $vendor = $this->vendor('V-CLASS');
+        $vendor->classifications()->create(['classification' => 'resin']);
+
+        $response = $this->actingAs($owner)->deleteJson("/api/v1/procurement/vendors/{$vendor->id}");
+
+        $response->assertStatus(422);
+        $this->assertSame(
+            ['vendor_classifications'],
+            collect($response->json('blocking'))->pluck('code')->all(),
+        );
+        $this->assertSame(1, $response->json('blocking.0.count'));
+        $this->assertNotNull($vendor->fresh(), 'the vendor survives a refused delete');
+
+        $vendor->classifications()->delete();
+
+        $this->actingAs($owner)
+            ->deleteJson("/api/v1/procurement/vendors/{$vendor->id}")
+            ->assertStatus(204);
+    }
+
     public function test_an_unused_vendor_is_really_deleted_and_the_code_is_freed(): void
     {
         $owner = $this->ownerUser(...self::MODULE);

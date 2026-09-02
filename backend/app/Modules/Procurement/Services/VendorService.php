@@ -34,13 +34,28 @@ class VendorService
      * would search 50 rows out of 628 and answer "no such vendor" for one that
      * plainly exists — the defect four pickers in this repo were just fixed
      * for. A blank or whitespace term is NO search, not a search for nothing.
+     *
+     * `$classifications` narrows to vendors holding at least one of the given
+     * classifications (DEC-20260902-026) — a filter, never a block, so an
+     * unclassified vendor never disappears from the plain list. `$unclassified`
+     * widens that same filter to also include vendors with none at all, or
+     * — with no classifications passed — narrows to only those.
      */
-    public function paginate(int $perPage = 20, ?string $search = null): LengthAwarePaginator
+    public function paginate(int $perPage = 20, ?string $search = null, ?array $classifications = null, bool $unclassified = false): LengthAwarePaginator
     {
         $term = $search !== null ? trim($search) : '';
 
         return Vendor::query()
+            ->with('classifications')
             ->when($term !== '', fn ($vendors) => $this->query->whereVendorMatches($vendors, $term))
+            ->when($classifications !== null && $classifications !== [] && ! $unclassified,
+                fn ($vendors) => $vendors->whereHas('classifications', fn ($c) => $c->whereIn('classification', $classifications)))
+            ->when($classifications !== null && $classifications !== [] && $unclassified,
+                fn ($vendors) => $vendors->where(fn ($w) => $w
+                    ->whereHas('classifications', fn ($c) => $c->whereIn('classification', $classifications))
+                    ->orWhereDoesntHave('classifications')))
+            ->when(($classifications === null || $classifications === []) && $unclassified,
+                fn ($vendors) => $vendors->whereDoesntHave('classifications'))
             ->orderBy('name')
             ->paginate($perPage);
     }
@@ -90,7 +105,9 @@ class VendorService
         $code = isset($data['code']) ? trim((string) $data['code']) : '';
 
         if ($code !== '') {
-            return Vendor::create(['is_active' => true, ...$data, 'code' => $code]);
+            $vendor = Vendor::create(['is_active' => true, ...$data, 'code' => $code]);
+
+            return $this->syncClassifications($vendor, $data);
         }
 
         // Two people saving the form in the same instant would read the same
@@ -100,13 +117,33 @@ class VendorService
         // counter row — does not port to the sqlite the tests run on.
         for ($attempt = 1; ; $attempt++) {
             try {
-                return Vendor::create(['is_active' => true, ...$data, 'code' => $this->mintCode()]);
+                $vendor = Vendor::create(['is_active' => true, ...$data, 'code' => $this->mintCode()]);
+
+                return $this->syncClassifications($vendor, $data);
             } catch (QueryException $collision) {
                 if ($attempt >= self::MINT_ATTEMPTS || ! $this->isDuplicateCode($collision)) {
                     throw $collision;
                 }
             }
         }
+    }
+
+    /**
+     * Replace a vendor's classifications wholesale with what was submitted —
+     * DEC-20260902-026: set by a person, never derived from a Tally ledger
+     * group. Absent from `$data` entirely (`sometimes` on the request rule),
+     * an existing edit that doesn't touch classifications leaves them alone.
+     */
+    private function syncClassifications(Vendor $vendor, array $data): Vendor
+    {
+        if (array_key_exists('classifications', $data)) {
+            $vendor->classifications()->delete();
+            foreach (array_unique($data['classifications']) as $value) {
+                $vendor->classifications()->create(['classification' => $value]);
+            }
+        }
+
+        return $vendor;
     }
 
     /**
@@ -169,7 +206,7 @@ class VendorService
     {
         $vendor->update($data);
 
-        return $vendor;
+        return $this->syncClassifications($vendor, $data);
     }
 
     protected function configurationLabel(): string
@@ -199,6 +236,12 @@ class VendorService
      * keyed on it — so archiving a vendor mutates nothing in Tally
      * (DEC-20260817-002 rule 4).
      *
+     * vendor_classifications.vendor_id CASCADEs (2026_09_03_100200,
+     * DEC-20260902-026) — the schema backstop (DependencyReport::cascadeGaps)
+     * refuses any hard delete this check does not cover, so a classified
+     * vendor is not provably unused: remove its classifications, or
+     * deactivate instead.
+     *
      * @return list<DependencyCheck>
      */
     protected function dependencyChecks(): array
@@ -210,6 +253,9 @@ class VendorService
                 ->label('subcontract order'),
             DependencyCheck::table('supplier_bills', 'vendor_id')
                 ->label('supplier bill'),
+            DependencyCheck::table('vendor_classifications', 'vendor_id')
+                ->label('classification')
+                ->cascadeSide(),
         ];
     }
 
