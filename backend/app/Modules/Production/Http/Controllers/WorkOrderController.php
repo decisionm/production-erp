@@ -4,6 +4,7 @@ namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Production\Http\Requests\CompleteWorkOrderRequest;
+use App\Modules\Production\Http\Requests\ListWorkOrdersRequest;
 use App\Modules\Production\Http\Requests\StoreWorkOrderRequest;
 use App\Modules\Production\Http\Resources\WorkOrderResource;
 use App\Modules\Production\Models\WorkOrder;
@@ -14,9 +15,9 @@ class WorkOrderController extends Controller
 {
     public function __construct(private readonly WorkOrderService $workOrders) {}
 
-    public function index(): AnonymousResourceCollection
+    public function index(ListWorkOrdersRequest $request): AnonymousResourceCollection
     {
-        return WorkOrderResource::collection($this->workOrders->paginate());
+        return WorkOrderResource::collection($this->workOrders->paginate($request->perPage(), $request->sort()));
     }
 
     public function store(StoreWorkOrderRequest $request): WorkOrderResource

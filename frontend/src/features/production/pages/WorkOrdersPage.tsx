@@ -1,14 +1,25 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
 import { completeWorkOrder, createWorkOrder, listAllScrapReasons, listWorkOrders, releaseWorkOrder } from '@/features/production/api';
 import type { WorkOrder, WorkOrderStatus } from '@/features/production/types';
+import {
+    WORK_ORDER_DEFAULT_SORT,
+    WORK_ORDER_LIST_SPEC,
+    WORK_ORDER_SORT_FIELDS,
+    type WorkOrderListParams,
+    workOrderServerFilters,
+    workOrdersQueryKey,
+} from '@/features/production/workOrdersList';
 import { itemLabel } from '@/lib/itemLabel';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const createSchema = z.object({
     item_id: z.number({ error: 'Item is required' }),
@@ -43,7 +54,14 @@ export default function WorkOrdersPage() {
     const [detailRow, setDetailRow] = useState<WorkOrder | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['production', 'work-orders'], queryFn: listWorkOrders });
+    // THE REGISTER'S VIEW IS ITS URL (useListParams): sort, page, page size.
+    const { params, setParams, setPage } = useListParams<WorkOrderListParams>(WORK_ORDER_LIST_SPEC);
+    const filters = useMemo(() => workOrderServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: workOrdersQueryKey(filters),
+        queryFn: () => listWorkOrders(filters),
+        placeholderData: (previous) => previous,
+    });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
     const { data: scrapReasons } = useQuery({ queryKey: ['production', 'scrap-reasons', 'all'], queryFn: listAllScrapReasons });
@@ -117,21 +135,49 @@ export default function WorkOrdersPage() {
             </Space>
 
             <Table<WorkOrder>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queries the
+                // whole paginated register rather than the loaded page.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, WORK_ORDER_SORT_FIELDS, WORK_ORDER_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'work orders')}
                 columns={[
                     { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Warehouse', render: (_, row) => row.warehouse.code },
-                    { title: 'Scheduled', dataIndex: 'scheduled_date' },
-                    { title: 'Planned', dataIndex: 'quantity_planned' },
-                    { title: 'Completed', dataIndex: 'quantity_completed' },
+                    {
+                        title: 'Scheduled',
+                        dataIndex: 'scheduled_date',
+                        key: 'scheduled_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('scheduled_date', params.sort, WORK_ORDER_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Planned',
+                        dataIndex: 'quantity_planned',
+                        key: 'quantity_planned',
+                        sorter: true,
+                        sortOrder: columnSortOrder('quantity_planned', params.sort, WORK_ORDER_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Completed',
+                        dataIndex: 'quantity_completed',
+                        key: 'quantity_completed',
+                        sorter: true,
+                        sortOrder: columnSortOrder('quantity_completed', params.sort, WORK_ORDER_DEFAULT_SORT),
+                    },
                     { title: 'Material Cost', dataIndex: 'material_cost' },
                     {
                         title: 'Status',
                         dataIndex: 'status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, WORK_ORDER_DEFAULT_SORT),
                         render: (status: WorkOrderStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
                     {

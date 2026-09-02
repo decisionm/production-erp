@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Descriptions, Drawer, Form, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
@@ -13,8 +13,19 @@ import {
     receiveSubcontractOrder,
     sendSubcontractOrderMaterials,
 } from '@/features/production/api';
+import {
+    SUBCONTRACT_ORDER_DEFAULT_SORT,
+    SUBCONTRACT_ORDER_LIST_SPEC,
+    SUBCONTRACT_ORDER_SORT_FIELDS,
+    type SubcontractOrderListParams,
+    subcontractOrderServerFilters,
+    subcontractOrdersQueryKey,
+} from '@/features/production/subcontractOrdersList';
 import type { SubcontractOrder, SubcontractOrderStatus } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const createSchema = z.object({
     vendor_id: z.number({ error: 'Vendor is required' }),
@@ -42,7 +53,14 @@ export default function SubcontractOrdersPage() {
     const [detailOrder, setDetailOrder] = useState<SubcontractOrder | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['production', 'subcontract-orders'], queryFn: listSubcontractOrders });
+    // THE REGISTER'S VIEW IS ITS URL (useListParams): sort, page, page size.
+    const { params, setParams, setPage } = useListParams<SubcontractOrderListParams>(SUBCONTRACT_ORDER_LIST_SPEC);
+    const filters = useMemo(() => subcontractOrderServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: subcontractOrdersQueryKey(filters),
+        queryFn: () => listSubcontractOrders(filters),
+        placeholderData: (previous) => previous,
+    });
     const { data: vendors } = useQuery({ queryKey: ['procurement', 'vendors', 'all'], queryFn: listAllVendors });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
@@ -112,22 +130,46 @@ export default function SubcontractOrdersPage() {
             </Typography.Paragraph>
 
             <Table<SubcontractOrder>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queries the
+                // whole paginated register rather than the loaded page.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({
+                        sort: sortParamFromSorter(sorter, SUBCONTRACT_ORDER_SORT_FIELDS, SUBCONTRACT_ORDER_DEFAULT_SORT),
+                    });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'subcontract orders')}
                 columns={[
                     { title: 'Vendor', render: (_, row) => row.vendor.name },
                     { title: 'Item', render: (_, row) => itemLabel(row.item) },
-                    { title: 'Planned', dataIndex: 'quantity_planned' },
-                    { title: 'Received', dataIndex: 'quantity_received' },
+                    {
+                        title: 'Planned',
+                        dataIndex: 'quantity_planned',
+                        key: 'quantity_planned',
+                        sorter: true,
+                        sortOrder: columnSortOrder('quantity_planned', params.sort, SUBCONTRACT_ORDER_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Received',
+                        dataIndex: 'quantity_received',
+                        key: 'quantity_received',
+                        sorter: true,
+                        sortOrder: columnSortOrder('quantity_received', params.sort, SUBCONTRACT_ORDER_DEFAULT_SORT),
+                    },
                     { title: 'Materials Cost', dataIndex: 'materials_cost' },
                     { title: 'Service Cost', dataIndex: 'service_cost' },
                     { title: 'Total Cost', dataIndex: 'total_cost' },
                     {
                         title: 'Status',
                         dataIndex: 'status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, SUBCONTRACT_ORDER_DEFAULT_SORT),
                         render: (status: SubcontractOrderStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
                     {

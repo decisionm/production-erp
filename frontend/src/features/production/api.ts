@@ -1,6 +1,14 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
+import type { BomListFilters } from './bomsList';
 import { CORRECTION_READ_PER_PAGE, type EntryWalk, walkEntryPages } from './correctionReads';
+import type { MoldListFilters } from './moldsList';
+import type { ReworkOrderListFilters } from './reworkOrdersList';
+import type { RoutingListFilters } from './routingsList';
+import type { ScrapReasonListFilters } from './scrapReasonsList';
+import type { ShiftListFilters } from './shiftsList';
+import type { SubcontractOrderListFilters } from './subcontractOrdersList';
+import type { WorkOrderListFilters } from './workOrdersList';
 import type {
     ConfigurationReview,
     ProductionQueueRead,
@@ -181,9 +189,10 @@ export async function updateWorkCenter(
     return data.data;
 }
 
-export async function listBoms(itemId?: number): Promise<Paginated<Bom>> {
+/** ONE page of the BOM register, narrowed, sorted and paged on the SERVER (ListBomsRequest). */
+export async function listBoms(filters: BomListFilters = {}): Promise<Paginated<Bom>> {
     const { data } = await api.get<Paginated<Bom>>('/production/boms', {
-        params: itemId ? { item_id: itemId } : undefined,
+        params: Object.keys(filters).length > 0 ? filters : undefined,
     });
     return data;
 }
@@ -201,9 +210,10 @@ export async function createBom(payload: CreateBomPayload): Promise<Bom> {
     return data.data;
 }
 
-export async function listRoutings(itemId?: number): Promise<Paginated<Routing>> {
+/** ONE page of the routing register, narrowed, sorted and paged on the SERVER (ListRoutingsRequest). */
+export async function listRoutings(filters: RoutingListFilters = {}): Promise<Paginated<Routing>> {
     const { data } = await api.get<Paginated<Routing>>('/production/routings', {
-        params: itemId ? { item_id: itemId } : undefined,
+        params: Object.keys(filters).length > 0 ? filters : undefined,
     });
     return data;
 }
@@ -220,8 +230,11 @@ export async function createRouting(payload: CreateRoutingPayload): Promise<Rout
     return data.data;
 }
 
-export async function listWorkOrders(): Promise<Paginated<WorkOrder>> {
-    const { data } = await api.get<Paginated<WorkOrder>>('/production/work-orders');
+/** ONE page of the work-order register, sorted and paged on the SERVER (ListWorkOrdersRequest). */
+export async function listWorkOrders(filters: WorkOrderListFilters = {}): Promise<Paginated<WorkOrder>> {
+    const { data } = await api.get<Paginated<WorkOrder>>('/production/work-orders', {
+        params: Object.keys(filters).length > 0 ? filters : undefined,
+    });
     return data;
 }
 
@@ -278,8 +291,11 @@ export async function getCapacityLoadReport(startDate: string, endDate: string):
     return data.data;
 }
 
-export async function listSubcontractOrders(): Promise<Paginated<SubcontractOrder>> {
-    const { data } = await api.get<Paginated<SubcontractOrder>>('/production/subcontract-orders');
+/** ONE page of the subcontract register, sorted and paged on the SERVER (ListSubcontractOrdersRequest). */
+export async function listSubcontractOrders(filters: SubcontractOrderListFilters = {}): Promise<Paginated<SubcontractOrder>> {
+    const { data } = await api.get<Paginated<SubcontractOrder>>('/production/subcontract-orders', {
+        params: Object.keys(filters).length > 0 ? filters : undefined,
+    });
     return data;
 }
 
@@ -309,8 +325,11 @@ export async function receiveSubcontractOrder(
     return data.data;
 }
 
-export async function listScrapReasons(): Promise<Paginated<ScrapReason>> {
-    const { data } = await api.get<Paginated<ScrapReason>>('/production/scrap-reasons');
+/** ONE page of the scrap-reason master, sorted and paged on the SERVER (ListScrapReasonsRequest). */
+export async function listScrapReasons(filters: ScrapReasonListFilters = {}): Promise<Paginated<ScrapReason>> {
+    const { data } = await api.get<Paginated<ScrapReason>>('/production/scrap-reasons', {
+        params: Object.keys(filters).length > 0 ? filters : undefined,
+    });
     return data;
 }
 
@@ -350,9 +369,16 @@ export async function updateScrapReason(id: number, payload: Partial<CreateScrap
  * query key (e.g. ['production','shifts','active']) so the two shapes
  * never share a cache entry.
  */
-export async function listShifts(active?: boolean): Promise<Paginated<Shift>> {
+/**
+ * @param active true = running shifts only (what every picker passes),
+ *   false = retired only, undefined = both.
+ * @param filters the master page's sort / page (ListShiftsRequest); pickers
+ *   send none and get the first page in clock order, as before.
+ */
+export async function listShifts(active?: boolean, filters: ShiftListFilters = {}): Promise<Paginated<Shift>> {
+    const params = { ...(active === undefined ? {} : { active: active ? 1 : 0 }), ...filters };
     const { data } = await api.get<Paginated<Shift>>('/production/shifts', {
-        params: active === undefined ? undefined : { active: active ? 1 : 0 },
+        params: Object.keys(params).length > 0 ? params : undefined,
     });
     return data;
 }
@@ -583,6 +609,8 @@ export interface ProductStandardsWorkspaceParams {
     matched_only?: 1;
     page?: number;
     per_page?: number;
+    /** Column-header sort: `source_product_name` / `status`, bare or "-" prefixed; absent = the workspace's own order. */
+    sort?: string;
 }
 
 /**
@@ -1220,8 +1248,11 @@ export async function getCecReport(productionDate: string, shiftId?: number): Pr
     return data.data;
 }
 
-export async function listReworkOrders(): Promise<Paginated<ReworkOrder>> {
-    const { data } = await api.get<Paginated<ReworkOrder>>('/production/rework-orders');
+/** ONE page of the rework register, sorted and paged on the SERVER (ListReworkOrdersRequest). */
+export async function listReworkOrders(filters: ReworkOrderListFilters = {}): Promise<Paginated<ReworkOrder>> {
+    const { data } = await api.get<Paginated<ReworkOrder>>('/production/rework-orders', {
+        params: Object.keys(filters).length > 0 ? filters : undefined,
+    });
     return data;
 }
 
@@ -1308,8 +1339,11 @@ export async function closeMoldChangeLog(id: number, toTime?: string): Promise<M
     return data.data;
 }
 
-export async function listMolds(): Promise<Paginated<Mold>> {
-    const { data } = await api.get<Paginated<Mold>>('/production/molds');
+/** ONE page of the mould master, sorted and paged on the SERVER (ListMoldsRequest). */
+export async function listMolds(filters: MoldListFilters = {}): Promise<Paginated<Mold>> {
+    const { data } = await api.get<Paginated<Mold>>('/production/molds', {
+        params: Object.keys(filters).length > 0 ? filters : undefined,
+    });
     return data;
 }
 
@@ -1393,6 +1427,8 @@ export interface ListMaterialLotsParams {
     received_from?: string;
     received_to?: string;
     order?: 'newest' | 'oldest';
+    /** ListMaterialLotsRequest::SORTABLE in the ListSort spelling; when present it wins over `order`. */
+    sort?: string;
 }
 
 export async function listMaterialLots(params?: ListMaterialLotsParams): Promise<Paginated<MaterialLot>> {

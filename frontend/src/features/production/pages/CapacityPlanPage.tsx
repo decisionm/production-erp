@@ -4,6 +4,8 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { useState } from 'react';
 import { getCapacityLoadReport } from '@/features/production/api';
 import type { CapacityDayLoad, CapacityWorkCenterLoad } from '@/features/production/types';
+import { columnSorter } from '@/lib/clientSort';
+import { TABLE_STICKY } from '@/lib/tableProps';
 
 const { RangePicker } = DatePicker;
 
@@ -41,13 +43,24 @@ export default function CapacityPlanPage() {
 
             <Table<CapacityWorkCenterLoad>
                 rowKey="work_center_id"
+                sticky={TABLE_STICKY}
                 loading={isLoading}
                 dataSource={data}
                 pagination={false}
                 scroll={{ x: 'max-content' }}
                 columns={[
-                    { title: 'Work Center', fixed: 'left', render: (_, row) => `${row.work_center_code} — ${row.work_center_name}` },
-                    { title: 'Capacity (hrs/day)', render: (_, row) => row.capacity_hours_per_day ?? 'Not set' },
+                    {
+                        title: 'Work Center',
+                        fixed: 'left',
+                        // The whole report is in the browser; sorted on the label the cell shows.
+                        sorter: columnSorter((row: CapacityWorkCenterLoad) => `${row.work_center_code} — ${row.work_center_name}`, 'text'),
+                        render: (_, row) => `${row.work_center_code} — ${row.work_center_name}`,
+                    },
+                    {
+                        title: 'Capacity (hrs/day)',
+                        sorter: columnSorter((row: CapacityWorkCenterLoad) => row.capacity_hours_per_day, 'number'),
+                        render: (_, row) => row.capacity_hours_per_day ?? 'Not set',
+                    },
                     ...dates.map((date, index) => ({
                         title: date,
                         key: date,

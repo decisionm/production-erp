@@ -12,7 +12,28 @@ import {
 import { productionDateFor } from '@/features/production/shiftClock';
 import type { MachineDowntimeLog, MoldChangeLog, ShiftProductionEntry, WorkCenter } from '@/features/production/types';
 import { listTallySyncEntries } from '@/features/tally-sync/api';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 import { itemLabel } from '@/lib/itemLabel';
+import { TABLE_STICKY } from '@/lib/tableProps';
+
+/** One machine's line on the monitor — derived here, never fetched. */
+interface MonitorRow {
+    key: number;
+    machine: WorkCenter;
+    entry: ShiftProductionEntry | null;
+    downLog: MachineDowntimeLog | null;
+    moldLog: MoldChangeLog | null;
+    state: 'down' | 'mould' | 'running' | 'idle';
+    carryover: boolean;
+}
+
+/** The word the State tag shows, so the filter menu offers the same words. */
+const STATE_WORD: Record<MonitorRow['state'], string> = {
+    down: 'Down',
+    mould: 'Mould change',
+    running: 'Running',
+    idle: 'Idle',
+};
 
 /**
  * What the floor looks like right now, on one screen.
@@ -134,7 +155,7 @@ export default function LiveMonitorPage() {
     // earlier shift or date — the case that needs a handover, not a new start.
     const today = productionDateFor(undefined);
 
-    const rows = machines.map((machine) => {
+    const rows: MonitorRow[] = machines.map((machine) => {
         const entry = runningByMachine.get(machine.id) ?? null;
         const downLog = downByMachine.get(machine.id) ?? null;
         const moldLog = moldChangeByMachine.get(machine.id) ?? null;
@@ -149,6 +170,11 @@ export default function LiveMonitorPage() {
             carryover: entry !== null && (entry.parent_entry_id != null || entry.production_date !== today),
         };
     });
+
+    // The whole floor is on this one screen, so the columns sort and filter
+    // here, on the values the cells show.
+    const stateWord = (r: MonitorRow) => STATE_WORD[r.state];
+    const shiftName = (r: MonitorRow) => r.entry?.shift.name ?? null;
 
     return (
         <>
@@ -208,19 +234,23 @@ export default function LiveMonitorPage() {
             </Row>
 
             <Typography.Title level={5}>Every machine</Typography.Title>
-            <Table
+            <Table<MonitorRow>
                 rowKey="key"
                 size="small"
+                sticky={TABLE_STICKY}
                 pagination={false}
                 scroll={{ x: 'max-content' }}
                 dataSource={rows}
                 columns={[
                     {
                         title: 'Machine',
+                        sorter: columnSorter((r: MonitorRow) => r.machine.name, 'text'),
                         render: (_, r) => <Typography.Text strong>{r.machine.name}</Typography.Text>,
                     },
                     {
                         title: 'State',
+                        filters: filterOptions(rows, stateWord),
+                        onFilter: onFilterBy(stateWord),
                         render: (_, r) => {
                             if (r.state === 'down') return <Tag color="error">Down — {r.downLog?.nature_of_problem}</Tag>;
                             if (r.state === 'mould') return <Tag color="warning">Mould change</Tag>;
@@ -230,18 +260,23 @@ export default function LiveMonitorPage() {
                     },
                     {
                         title: 'Product',
+                        sorter: columnSorter((r: MonitorRow) => (r.entry ? itemLabel(r.entry.item) : null), 'text'),
                         render: (_, r) => (r.entry ? itemLabel(r.entry.item) : '—'),
                     },
                     {
                         title: 'Batch',
+                        sorter: columnSorter((r: MonitorRow) => r.entry?.batch_number, 'text'),
                         render: (_, r) => r.entry?.batch_number ?? '—',
                     },
                     {
                         title: 'Shift',
+                        filters: filterOptions(rows, shiftName),
+                        onFilter: onFilterBy(shiftName),
                         render: (_, r) => r.entry?.shift.name ?? '—',
                     },
                     {
                         title: 'Started',
+                        sorter: columnSorter((r: MonitorRow) => r.entry?.created_at, 'date'),
                         render: (_, r) => (r.entry ? fmtTime(r.entry.created_at) : '—'),
                     },
                     {
@@ -257,10 +292,12 @@ export default function LiveMonitorPage() {
                     },
                     {
                         title: 'Cavities',
+                        sorter: columnSorter((r: MonitorRow) => r.entry?.active_cavities ?? r.entry?.standard_cavities, 'number'),
                         render: (_, r) => r.entry?.active_cavities ?? r.entry?.standard_cavities ?? '—',
                     },
                     {
                         title: 'Produced so far',
+                        sorter: columnSorter((r: MonitorRow) => r.entry?.quantity_produced, 'number'),
                         render: (_, r) => fmtQty(r.entry?.quantity_produced),
                     },
                 ]}

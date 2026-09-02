@@ -1,12 +1,23 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Form, Input, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { createMold, listMolds, updateMold } from '@/features/production/api';
+import {
+    MOLD_DEFAULT_SORT,
+    MOLD_LIST_SPEC,
+    MOLD_SORT_FIELDS,
+    type MoldListParams,
+    moldServerFilters,
+    moldsQueryKey,
+} from '@/features/production/moldsList';
 import type { Mold, MoldStatus } from '@/features/production/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const moldSchema = z.object({
     code: z.string().min(1, 'Code is required').max(64),
@@ -55,7 +66,15 @@ export default function MoldsPage({ embedded = false }: { embedded?: boolean }) 
     const [editingMold, setEditingMold] = useState<Mold | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['production', 'molds'], queryFn: listMolds });
+    // THE MASTER'S VIEW IS ITS URL (useListParams): sort, page, page size —
+    // beside the workspace's own `?tab=`, which the hook leaves untouched.
+    const { params, setParams, setPage } = useListParams<MoldListParams>(MOLD_LIST_SPEC);
+    const filters = useMemo(() => moldServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: moldsQueryKey(filters),
+        queryFn: () => listMolds(filters),
+        placeholderData: (previous) => previous,
+    });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['production', 'molds'] });
 
@@ -107,18 +126,47 @@ export default function MoldsPage({ embedded = false }: { embedded?: boolean }) 
             </Typography.Paragraph>
 
             <Table<Mold>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queries the
+                // whole paginated master rather than the loaded page.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, MOLD_SORT_FIELDS, MOLD_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'moulds')}
                 columns={[
-                    { title: 'Code', dataIndex: 'code' },
-                    { title: 'Name', dataIndex: 'name' },
-                    { title: 'Cavities', dataIndex: 'cavity_count', render: (v: number | null) => v ?? '—' },
+                    {
+                        title: 'Code',
+                        dataIndex: 'code',
+                        key: 'code',
+                        sorter: true,
+                        sortOrder: columnSortOrder('code', params.sort, MOLD_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, MOLD_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Cavities',
+                        dataIndex: 'cavity_count',
+                        key: 'cavity_count',
+                        sorter: true,
+                        sortOrder: columnSortOrder('cavity_count', params.sort, MOLD_DEFAULT_SORT),
+                        render: (v: number | null) => v ?? '—',
+                    },
                     {
                         title: 'Status',
                         dataIndex: 'status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, MOLD_DEFAULT_SORT),
                         // Active / Retired in the product's two words, and
                         // "Under repair" in the factory's own — the middle case
                         // the mechanism keeps reachable in both directions.

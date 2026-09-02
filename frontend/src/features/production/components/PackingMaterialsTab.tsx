@@ -16,6 +16,7 @@ import {
 } from 'antd';
 import { useState } from 'react';
 import { hasManageAccess } from '@/features/auth/permissions';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 import { showApiError } from '@/lib/showApiError';
 import { useAuthStore } from '@/features/auth/store';
 import {
@@ -193,25 +194,36 @@ export default function PackingMaterialsTab() {
                   : `${row.metres_per_box} m / box`
               : '—';
 
+    // The whole mapping table is on screen, so the columns sort and filter
+    // here, on the values the cells show.
+    const kindWord = (row: PackingMaterialMappingRow) => KIND_LABEL[row.spec_kind];
+    const doseValue = (row: PackingMaterialMappingRow) =>
+        row.spec_kind === 'pouch_film' ? row.grams_per_piece : row.spec_kind === 'tape' ? row.metres_per_box : null;
+
     const columns = [
         {
             title: 'Kind',
             width: 110,
+            filters: filterOptions(sorted, kindWord),
+            onFilter: onFilterBy(kindWord),
             render: (_: unknown, row: PackingMaterialMappingRow) => <Tag>{KIND_LABEL[row.spec_kind]}</Tag>,
         },
         {
             title: 'Workbook spec',
             dataIndex: 'spec_value',
             width: 180,
+            sorter: columnSorter((row: PackingMaterialMappingRow) => row.spec_value, 'text'),
             render: (value: string) => <Typography.Text code>{value}</Typography.Text>,
         },
         {
             title: 'Tally item it means',
+            sorter: columnSorter((row: PackingMaterialMappingRow) => row.item.name, 'text'),
             render: (_: unknown, row: PackingMaterialMappingRow) => row.item.name,
         },
         {
             title: 'Dose',
             width: 140,
+            sorter: columnSorter(doseValue, 'number'),
             render: (_: unknown, row: PackingMaterialMappingRow) =>
                 doseText(row) ?? (
                     // A film with no per-piece weight (or tape with no metres)

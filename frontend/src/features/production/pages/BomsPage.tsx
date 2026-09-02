@@ -8,6 +8,14 @@ import { z } from 'zod';
 import { listAllItems } from '@/features/inventory/api';
 import { createBom, listBoms } from '@/features/production/api';
 import {
+    BOM_DEFAULT_SORT,
+    BOM_LIST_SPEC,
+    BOM_SORT_FIELDS,
+    type BomListParams,
+    bomServerFilters,
+    bomsQueryKey,
+} from '@/features/production/bomsList';
+import {
     buildStartBatchReturnUrl,
     hasStartBatchResume,
     parseStartBatchResume,
@@ -15,6 +23,10 @@ import {
 } from '@/features/production/startBatchResume';
 import type { Bom } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
+import { writeListParams } from '@/lib/listParams';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const lineSchema = z.object({
     component_item_id: z.number({ error: 'Component is required' }),
@@ -57,7 +69,15 @@ export default function BomsPage() {
         };
     }, [resumeQuery]);
 
-    const { data, isLoading } = useQuery({ queryKey: ['production', 'boms'], queryFn: () => listBoms() });
+    // THE REGISTER'S VIEW IS ITS URL (useListParams): sort, page and page
+    // size ride beside the Start Batch resume keys, which stay untouched.
+    const { params, setParams, setPage } = useListParams<BomListParams>(BOM_LIST_SPEC);
+    const filters = useMemo(() => bomServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: bomsQueryKey(filters),
+        queryFn: () => listBoms(filters),
+        placeholderData: (previous) => previous,
+    });
     // Every item, not the default first page of 20. A BOM picker that reaches
     // 20 of the factory's ~650 products cannot build a recipe for the other
     // 630, and the prefill below would silently find nothing and open a blank
@@ -86,7 +106,8 @@ export default function BomsPage() {
         resetNewBomForm();
         setResumeDraft(null);
         setResumeContextError(null);
-        setSearchParams({}, { replace: true });
+        // Drops the resume keys and keeps the list's own (sort, page).
+        setSearchParams(writeListParams(params, BOM_LIST_SPEC), { replace: true });
         setModalOpen(true);
     };
 
@@ -232,19 +253,42 @@ export default function BomsPage() {
             )}
 
             <Table<Bom>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries; the register is paginated, so sorting the
+                // loaded page would misorder the whole result set.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, BOM_SORT_FIELDS, BOM_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'BOMs')}
                 columns={[
                     { title: 'Item', render: (_, row) => itemLabel(row.item) },
-                    { title: 'Name', dataIndex: 'name' },
-                    { title: 'Version', dataIndex: 'version' },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, BOM_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Version',
+                        dataIndex: 'version',
+                        key: 'version',
+                        sorter: true,
+                        sortOrder: columnSortOrder('version', params.sort, BOM_DEFAULT_SORT),
+                    },
                     { title: 'Components', render: (_, row) => row.lines.map((l) => l.component.sku).join(', ') },
                     {
                         title: 'Active',
                         dataIndex: 'is_active',
+                        key: 'is_active',
+                        sorter: true,
+                        sortOrder: columnSortOrder('is_active', params.sort, BOM_DEFAULT_SORT),
                         render: (active: boolean) => <Tag color={active ? 'green' : 'default'}>{active ? 'active' : 'inactive'}</Tag>,
                     },
                     {
