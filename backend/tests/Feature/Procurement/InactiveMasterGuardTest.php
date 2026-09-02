@@ -44,10 +44,18 @@ use Tests\TestCase;
  * `test_amend_now_refuses_a_new_unclassified_line_without_a_reason` pin the
  * refusal; `test_amend_keeps_an_existing_unclassified_line_unchanged_without_a_reason`
  * pins the one deliberate carve-out — a line already on the order,
- * resubmitted with the same item, quantity and unit_price, is grandfathered
- * rather than forced through a rule that postdates it. See
- * `AmendPurchaseOrderRequest::withValidator()` for exactly how "unchanged" is
- * decided.
+ * resubmitted with the same item, quantity, unit_price AND reason, is
+ * grandfathered rather than forced through a rule that postdates it. The
+ * reason is part of that match on purpose:
+ * `test_amend_refuses_a_line_whose_stored_reason_is_stripped_on_resubmit`
+ * pins that dropping the reason while everything else stays the same is a
+ * CHANGE, not history — otherwise amend could silently null a recorded
+ * reason. See `AmendPurchaseOrderRequest::withValidator()` for exactly how
+ * "unchanged" is decided.
+ *
+ * A WORK-IN-PROGRESS ITEM IS REFUSED THE SAME SHAPE AS A FINISHED GOOD, with
+ * its own message ("A produced item is not purchased.") — pinned in full by
+ * `PurchaseLineEligibilityTest`, not duplicated here.
  *
  * Fixture values are synthetic (FC-06). Nothing here posts to Tally or moves
  * stock beyond the one goods receipt a test needs.
@@ -239,9 +247,10 @@ class InactiveMasterGuardTest extends TestCase
         // A DRAFT WRITTEN BEFORE THIS RULE EXISTED (simulated by writing the
         // line directly, bypassing StorePurchaseOrderRequest's own
         // reason-required check). Re-submitting it UNCHANGED — same item,
-        // quantity, unit_price — during an otherwise-ordinary amend must not
-        // suddenly demand a reason nobody was ever asked for when the line
-        // was written. That is the carve-out the class docblock describes.
+        // quantity, unit_price, AND reason (here, no reason on either side)
+        // — during an otherwise-ordinary amend must not suddenly demand a
+        // reason nobody was ever asked for when the line was written. That
+        // is the carve-out the class docblock describes.
         $order = PurchaseOrder::create([
             'vendor_id' => $this->vendor->id,
             'status' => PurchaseOrderStatus::Draft,
@@ -254,6 +263,42 @@ class InactiveMasterGuardTest extends TestCase
 
         $this->assertSame([$unclassified->id], $order->fresh()->lines->pluck('item_id')->all());
         $this->assertNull($order->fresh()->lines()->firstOrFail()->unclassified_reason);
+    }
+
+    public function test_amend_refuses_a_line_whose_stored_reason_is_stripped_on_resubmit(): void
+    {
+        // A client resubmitting "the same" line could easily just replay
+        // the last payload it typed and forget the reason rode along with
+        // it. Same item, same quantity, same price — but the reason is
+        // gone. That is a CHANGE, not history (unclassified_reason is part
+        // of the unchanged-match key precisely for this), so the eligibility
+        // check runs and refuses it before PurchaseOrderService::amend() can
+        // silently persist a null over what was recorded.
+        $unclassified = Item::create(['sku' => 'ITEM_STRIP', 'name' => 'Item Strip', 'uom' => 'Kgs']);
+
+        $orderId = $this->postJson('/api/v1/procurement/purchase-orders', [
+            'vendor_id' => $this->vendor->id,
+            'order_date' => '2026-08-10',
+            'lines' => [
+                ['item_id' => $this->rawMaterial->id, 'quantity' => '100', 'unit_price' => '1.00'],
+                ['item_id' => $unclassified->id, 'quantity' => '10', 'unit_price' => '1.00', 'unclassified_reason' => 'Trial sample, not yet classified'],
+            ],
+        ])->assertCreated()->json('data.id');
+        $order = PurchaseOrder::findOrFail($orderId);
+
+        // A genuine change to the OTHER line, and the unclassified line
+        // resent identically except its reason is missing.
+        $this->amend($order, [
+            ['item_id' => $this->rawMaterial->id, 'quantity' => '200', 'unit_price' => '1.00'],
+            ['item_id' => $unclassified->id, 'quantity' => '10', 'unit_price' => '1.00'],
+        ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('lines.1.unclassified_reason');
+
+        // Refused wholesale before the service ever ran: neither line moved.
+        $order->refresh();
+        $this->assertSame('100.0000', (string) $order->lines()->where('item_id', $this->rawMaterial->id)->firstOrFail()->quantity);
+        $this->assertSame('Trial sample, not yet classified', $order->lines()->where('item_id', $unclassified->id)->firstOrFail()->unclassified_reason);
     }
 
     public function test_amend_now_refuses_a_new_finished_good_line(): void

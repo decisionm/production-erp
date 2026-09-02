@@ -70,11 +70,18 @@ class AmendPurchaseOrderRequest extends FormRequest
      * every read, so resubmitting it unchanged is still a live refusal, not
      * history.
      *
-     * "Unchanged" is matched by content (item_id, quantity, unit_price) — no
-     * client-visible line id survives an amend to match by — against the
-     * order's lines as they stand BEFORE this amend replaces them, each
-     * existing line consumed at most once so two identical incoming lines
-     * cannot both claim the same historical line as their excuse.
+     * "Unchanged" is matched by content (item_id, quantity, unit_price AND
+     * unclassified_reason) — no client-visible line id survives an amend to
+     * match by — against the order's lines as they stand BEFORE this amend
+     * replaces them, each existing line consumed at most once so two
+     * identical incoming lines cannot both claim the same historical line as
+     * their excuse. The reason is part of the match deliberately: a line
+     * resubmitted with the same item/quantity/price but a STRIPPED reason is
+     * not history repeating, it is someone clearing the one fact that made
+     * the line legal, and PurchaseOrderService::amend() would otherwise
+     * silently persist that as a null reason on an item still unclassified.
+     * A stripped (or changed) reason therefore counts as CHANGED, so the
+     * eligibility check runs and refuses it.
      *
      * Skipped entirely for a Tally mirror: PurchaseOrderService::amend()
      * refuses one outright (isTallyMirror), so there is nothing here to
@@ -107,21 +114,25 @@ class AmendPurchaseOrderRequest extends FormRequest
     }
 
     /**
-     * Which $lines indexes name the SAME item, quantity and unit_price as a
-     * line the order already carries — content equality, decimal-safe
-     * (bccomp, scale 4: the cast columns' scale), each existing line
-     * eligible to grandfather at most one incoming line.
+     * Which $lines indexes name the SAME item, quantity, unit_price AND
+     * unclassified_reason as a line the order already carries — content
+     * equality, decimal-safe (bccomp, scale 4: the cast columns' scale) for
+     * the numbers and trim-to-null for the reason (an empty string and a
+     * blank-only string both mean "no reason", matching
+     * PurchaseLineEligibility's own reading of the field), each existing
+     * line eligible to grandfather at most one incoming line.
      *
      * @param  array<int, array<string, mixed>>  $lines
      * @return array<int, true> incoming index => true, for indexes judged unchanged
      */
     private function unchangedLineIndexes(PurchaseOrder $order, array $lines): array
     {
-        $pool = $order->lines()->get(['item_id', 'quantity', 'unit_price'])
+        $pool = $order->lines()->get(['item_id', 'quantity', 'unit_price', 'unclassified_reason'])
             ->map(fn ($line) => [
                 'item_id' => (int) $line->item_id,
                 'quantity' => (string) $line->quantity,
                 'unit_price' => (string) $line->unit_price,
+                'unclassified_reason' => self::normalizeReason($line->unclassified_reason),
             ])
             ->all();
 
@@ -131,6 +142,7 @@ class AmendPurchaseOrderRequest extends FormRequest
             $itemId = isset($line['item_id']) ? (int) $line['item_id'] : null;
             $quantity = $line['quantity'] ?? null;
             $unitPrice = $line['unit_price'] ?? null;
+            $reason = self::normalizeReason($line['unclassified_reason'] ?? null);
 
             if ($itemId === null || ! is_numeric($quantity) || ! is_numeric($unitPrice)) {
                 continue;
@@ -140,6 +152,7 @@ class AmendPurchaseOrderRequest extends FormRequest
                 if ($existing['item_id'] === $itemId
                     && bccomp($existing['quantity'], (string) $quantity, 4) === 0
                     && bccomp($existing['unit_price'], (string) $unitPrice, 4) === 0
+                    && $existing['unclassified_reason'] === $reason
                 ) {
                     $unchanged[$index] = true;
                     unset($pool[$poolIndex]);
@@ -149,5 +162,13 @@ class AmendPurchaseOrderRequest extends FormRequest
         }
 
         return $unchanged;
+    }
+
+    /** Trim-to-null: an absent, empty, or blank-only reason is "no reason" — the same reading PurchaseLineEligibility::validate() gives the field. */
+    private static function normalizeReason(mixed $value): ?string
+    {
+        $trimmed = trim((string) ($value ?? ''));
+
+        return $trimmed === '' ? null : $trimmed;
     }
 }
