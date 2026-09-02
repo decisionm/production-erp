@@ -3,10 +3,11 @@
 namespace App\Modules\Sales\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
+use App\Modules\Sales\Exceptions\OverInvoiceException;
 use App\Modules\Sales\Models\Enums\InvoiceStatus;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\Invoice;
-use App\Modules\Sales\Models\SalesOrder;
+use App\Modules\Sales\Models\InvoiceLine;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -129,7 +130,11 @@ class InvoiceService
     public function create(array $data, ?int $createdBy): Invoice
     {
         return DB::transaction(function () use ($data, $createdBy) {
-            $order = SalesOrder::with('lines')->findOrFail($data['sales_order_id']);
+            // Under the SAME row locks the delivery path takes, because the
+            // cap below is a sum across every invoice raised against the
+            // line, and two invoices raised together must not both pass it.
+            $order = DeliveryService::orderLockQuery((int) $data['sales_order_id'])->firstOrFail();
+            $order->setRelation('lines', DeliveryService::lineLockQuery((int) $order->id)->get());
 
             // A cancelled order is closed to billing (Phase 3.5): nothing
             // left against it and nothing may be invoiced against it. The
@@ -151,11 +156,48 @@ class InvoiceService
                 'created_by' => $createdBy,
             ]);
 
+            // WHAT IS ALREADY BILLED against each of this order's lines,
+            // every invoice counted: no invoice status cancels one, so a
+            // draft, an issued and a paid document all hold their quantity.
+            // Read once before the loop and carried forward in memory, so
+            // two lines of THIS document against one order line add up too.
+            $billed = InvoiceLine::query()
+                ->whereIn('sales_order_line_id', $order->lines->pluck('id'))
+                ->groupBy('sales_order_line_id')
+                ->selectRaw('sales_order_line_id, SUM(quantity) as quantity')
+                ->pluck('quantity', 'sales_order_line_id');
+
             foreach ($data['lines'] as $lineData) {
                 // Form request validation ties sales_order_line_id to this
                 // sales_order_id, so a miss here means a genuine bug, not
                 // a normal user error — let it fail loudly.
                 $soLine = $order->lines->firstWhere('id', $lineData['sales_order_line_id']);
+
+                // NEVER MORE THAN THE CUSTOMER ORDERED. The live spot check
+                // (03-Sep-2026) found this document fed straight from the
+                // order with no cap, no counter and no uniqueness, so one
+                // line could be billed any number of times at any quantity.
+                // The cap is the ORDERED quantity, deliberately not the
+                // delivered one: whether the ERP keeps its own invoice at
+                // all, and whether a proforma may precede dispatch, is the
+                // owner's (Q96, DEC-20260831-012), and capping at delivered
+                // here would answer that from the code. Refused the way
+                // over-delivery is: a 422 naming the line, what remains and
+                // what was asked, inside this transaction, so no header
+                // survives a refused line.
+                $already = bcadd((string) ($billed[$soLine->id] ?? '0'), '0', 4);
+                $remaining = bcsub((string) $soLine->quantity, $already, 4);
+                $requested = bcadd((string) $lineData['quantity'], '0', 4);
+
+                if (bccomp($requested, $remaining, 4) > 0) {
+                    throw OverInvoiceException::forLine(
+                        $soLine->id,
+                        bccomp($remaining, '0', 4) === 1 ? $remaining : '0.0000',
+                        $requested,
+                    );
+                }
+
+                $billed[$soLine->id] = bcadd($already, $requested, 4);
 
                 $invoice->lines()->create([
                     'sales_order_line_id' => $soLine->id,
