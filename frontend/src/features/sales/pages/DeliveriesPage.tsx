@@ -9,7 +9,7 @@ import { listAllWarehouses } from '@/features/inventory/api';
 import { lookupCarton } from '@/features/production/api';
 import type { FinishedCarton } from '@/features/production/types';
 import { createDelivery, listDeliveries, listSalesOrders } from '@/features/sales/api';
-import { hasActiveFilters } from '@/features/sales/filters';
+import { hasActiveFilters, SALES_DEFAULT_SORT, SALES_SORT_FIELDS } from '@/features/sales/filters';
 import SalesDocumentDrawer, { TallyLinkCell } from '@/features/sales/SalesDocumentDrawer';
 import { hasManageAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
@@ -17,6 +17,8 @@ import SalesFilterBar from '@/features/sales/SalesFilterBar';
 import type { Delivery } from '@/features/sales/types';
 import { useSalesListParams } from '@/features/sales/useSalesListParams';
 import { listEmptyText } from '@/features/sales/drawer';
+import { TABLE_STICKY } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 
 const deliverySchema = z.object({
     sales_order_id: z.number({ error: 'Sales order is required' }),
@@ -187,7 +189,15 @@ export default function DeliveriesPage() {
 
             <Table<Delivery>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 rowKey="id"
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries; the list is paginated, so sorting the loaded
+                // page would misorder the whole result set.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setFilters((prev) => ({ ...prev, sort: sortParamFromSorter(sorter, SALES_SORT_FIELDS.delivery, SALES_DEFAULT_SORT) }));
+                }}
                 loading={isLoading}
                 dataSource={data?.data}
                 locale={{
@@ -207,7 +217,13 @@ export default function DeliveriesPage() {
                         : false
                 }
                 columns={[
-                    { title: 'Number', render: (_, row) => <strong>{row.document_number ?? `DN-${row.id}`}</strong> },
+                    {
+                        title: 'Number',
+                        key: 'id',
+                        sorter: true,
+                        sortOrder: columnSortOrder('id', filters.sort, SALES_DEFAULT_SORT),
+                        render: (_, row) => <strong>{row.document_number ?? `DN-${row.id}`}</strong>,
+                    },
                     {
                         title: 'SO',
                         render: (_, row) => (
@@ -223,7 +239,13 @@ export default function DeliveriesPage() {
                     },
                     { title: 'Customer', render: (_, row) => row.customer?.name ?? '—' },
                     { title: 'Warehouse', render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}` },
-                    { title: 'Delivered', dataIndex: 'delivered_date' },
+                    {
+                        title: 'Delivered',
+                        key: 'delivered_date',
+                        dataIndex: 'delivered_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('delivered_date', filters.sort, SALES_DEFAULT_SORT),
+                    },
                     { title: 'Reference', dataIndex: 'reference' },
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {

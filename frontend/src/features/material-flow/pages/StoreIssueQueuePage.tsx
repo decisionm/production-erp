@@ -7,6 +7,7 @@ import { itemLabel } from '@/lib/itemLabel';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { MAX_PER_PAGE, narrowingKeys } from '@/lib/listParams';
 import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { useListParams } from '@/lib/useListParams';
 import {
     apiRefusalMessage,
@@ -22,6 +23,8 @@ import PersonSelect from '../components/PersonSelect';
 import RequestLinesTable from '../components/RequestLinesTable';
 import ReturnToStoreModal from '../components/ReturnToStoreModal';
 import {
+    MATERIAL_REQUEST_DEFAULT_SORT,
+    MATERIAL_REQUEST_SORT_FIELDS,
     QUEUE_LIST_SPEC,
     type QueueListParams,
     noMatchLine,
@@ -392,14 +395,30 @@ export default function StoreIssueQueuePage({ embedded = false }: { embedded?: b
                 rowKey="id"
                 sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries; the list is paginated, so sorting the loaded
+                // page would misorder the whole result set.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, MATERIAL_REQUEST_SORT_FIELDS, MATERIAL_REQUEST_DEFAULT_SORT) });
+                }}
                 loading={queueQuery.isFetching}
                 dataSource={queueQuery.data?.data}
                 pagination={serverPagination(queueQuery.data?.meta, setPage, 'requests')}
                 locale={{ emptyText: <ListEmpty state={queueQuery} entity="the store's queue" empty={emptyText} /> }}
                 columns={[
-                    { title: 'Request', dataIndex: 'request_number' },
+                    {
+                        title: 'Request',
+                        key: 'id',
+                        dataIndex: 'request_number',
+                        sorter: true,
+                        sortOrder: columnSortOrder('id', params.sort, MATERIAL_REQUEST_DEFAULT_SORT),
+                    },
                     {
                         title: 'Status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, MATERIAL_REQUEST_DEFAULT_SORT),
                         render: (_, row) => (
                             <Tooltip title={REQUEST_STATUS_HELP[row.status]}>
                                 <Tag color={REQUEST_STATUS_TONE[row.status]}>{REQUEST_STATUS_LABEL[row.status]}</Tag>
@@ -407,7 +426,13 @@ export default function StoreIssueQueuePage({ embedded = false }: { embedded?: b
                         ),
                     },
                     { title: 'Raised by', render: (_, row) => row.requested_by_name ?? '—' },
-                    { title: 'Raised at', render: (_, row) => row.requested_at ?? '—' },
+                    {
+                        title: 'Raised at',
+                        key: 'requested_at',
+                        sorter: true,
+                        sortOrder: columnSortOrder('requested_at', params.sort, MATERIAL_REQUEST_DEFAULT_SORT),
+                        render: (_, row) => row.requested_at ?? '—',
+                    },
                     { title: 'Shift', render: (_, row) => row.shift_name ?? '—' },
                     {
                         title: 'Machine / area',
