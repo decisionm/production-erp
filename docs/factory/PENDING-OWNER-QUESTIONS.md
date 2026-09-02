@@ -2109,7 +2109,9 @@ a bag.
 ## Q78 · Is there a store-acceptance step for finished goods, and may the Storekeeper approve dispatch? — PARTLY RESOLVED
 
 The Storekeeper role now exists as a definition
-(`roles:define-storekeeper`, dry-run first). Two of the capabilities asked
+(`roles:define-store`, dry-run first — the role was renamed **Store** and
+widened to full procurement on the owner's word, 02-Sep-2026; the command
+renames a live "Storekeeper" in place). Two of the capabilities asked
 for could not be granted, because neither is a thing the system currently
 does:
 

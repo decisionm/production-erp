@@ -1,8 +1,9 @@
-name: Define the Storekeeper role
+name: Define the Store role
 
-# Creates the Storekeeper role on the live instance and fixes its permission
-# set. Dry by default: without write=true it prints exactly what it would add
-# and remove and changes nothing.
+# Creates the Store role on the live instance, fixes its permission set, and
+# optionally gives it to ONE named login. Dry by default: without write=true
+# it prints exactly what it would add, remove, rename and assign, and changes
+# nothing.
 #
 # WHY THIS IS A WORKFLOW AND NOT A SEEDER. PermissionSeeder runs on every
 # deploy, and its own note says it must only ever ADD its one permission and
@@ -12,9 +13,17 @@ name: Define the Storekeeper role
 # first, written only after a person has read the dry run. Shipping it as a
 # seeder would make an authorization change a side effect of deploying code.
 #
-# IT ASSIGNS NOBODY. Which people keep the store is a fact about the factory
-# that the repository cannot know, and a role granted to the wrong login is an
-# authorization incident. Run this, then add the users on the Roles screen.
+# THE ROLE WAS "Storekeeper" UNTIL 02-Sep-2026. If the live instance already
+# holds a "Storekeeper" role and no "Store" role, the command renames it in
+# place and its holders keep it — the dry run says so in as many words.
+#
+# ASSIGNMENT IS EXPLICIT OR NOT AT ALL. Which people keep the store is a fact
+# about the factory that the repository cannot know, and a role granted to
+# the wrong login is an authorization incident. Leave `assign` blank and
+# nobody is assigned; fill it with the exact email (or exact name) of ONE
+# existing, active login and the dry run prints who that resolves to before
+# the write. Zero matches, several matches and an inactive login are refused.
+# A login is never created here — that is the Users screen's job.
 #
 # READ `roles:show` FIRST. Roles are created at runtime and never seeded, so
 # the only way to know what a live role holds today is to read it off the live
@@ -35,9 +44,13 @@ on:
         description: 'Actually write. Leave false for a dry run that changes nothing.'
         type: boolean
         default: false
+      assign:
+        description: 'Exact email (or exact name) of ONE existing login to give the Store role to. Leave blank to assign nobody.'
+        type: string
+        default: ''
 
 concurrency:
-  group: define-storekeeper-role
+  group: define-store-role
   cancel-in-progress: false
 
 jobs:
@@ -73,38 +86,62 @@ jobs:
       - name: Report what is about to run
         env:
           WRITE_RAW: ${{ inputs.write }}
+          ASSIGN_RAW: ${{ inputs.assign }}
         run: |
           if [ "$WRITE_RAW" = "true" ]; then
-            echo "::warning::WRITING the Storekeeper role and its permissions on the live instance. No user is assigned either way."
+            if [ -n "$ASSIGN_RAW" ]; then
+              echo "::warning::WRITING the Store role and its permissions on the live instance, and assigning it to the login '$ASSIGN_RAW'."
+            else
+              echo "::warning::WRITING the Store role and its permissions on the live instance. No user is assigned."
+            fi
           else
             echo "Dry run — nothing will be written."
           fi
 
+      # The assign value is passed to artisan as a single-quoted argument with
+      # any single quote inside it escaped, so an email is data on the remote
+      # shell too. A leading dash would be read by artisan as another option
+      # rather than a value, and is refused here rather than on the server.
       - name: Run it
         env:
           WRITE_RAW: ${{ inputs.write }}
+          ASSIGN_RAW: ${{ inputs.assign }}
         run: |
           set -o pipefail
 
           FLAGS=""
           [ "$WRITE_RAW" = "true" ] && FLAGS="--write"
 
+          ASSIGN_ARG=""
+          if [ -n "$ASSIGN_RAW" ]; then
+            case "$ASSIGN_RAW" in
+              -*)
+                echo "::error::assign must be an email or a name, not something starting with a dash. Got: '$ASSIGN_RAW'"
+                exit 1
+                ;;
+            esac
+            ESCAPED=$(printf '%s' "$ASSIGN_RAW" | sed "s/'/'\\\\''/g")
+            ASSIGN_ARG="--assign='$ESCAPED'"
+          fi
+
           ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
             "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
-            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan roles:define-storekeeper $FLAGS" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan roles:define-store $FLAGS $ASSIGN_ARG" \
             2>&1 | tee output.txt
 
       - name: Summarise
         if: always()
         env:
           WRITE_RAW: ${{ inputs.write }}
+          ASSIGN_RAW: ${{ inputs.assign }}
         run: |
           {
-            echo '### Define the Storekeeper role'
+            echo '### Define the Store role'
             echo ''
             echo "write: \`$WRITE_RAW\`"
+            echo "assign: \`${ASSIGN_RAW:-(nobody)}\`"
             echo ''
-            echo 'No user is assigned by this workflow. Add the people on the Roles screen afterwards.'
+            echo 'Only the login named in `assign` is ever given the role. Add or remove others on the Roles screen.'
             echo ''
             echo '```'
             tail -c 60000 output.txt 2>/dev/null || echo '(no output captured)'
