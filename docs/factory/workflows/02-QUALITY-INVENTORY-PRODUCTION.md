@@ -401,8 +401,20 @@ record's source.
   on a real choice, and the snapshot already exist; the build confirms the
   single-option auto-select and that the ask happens at Start Batch.
 
+## 11. Start Batch: an override needs a reason
+
+### Result
+
+- **VERIFIED as a decision:** DEC-20260902-021. Of the ten workbook Factory
+  Rules, one is enforced: a reason whenever the supervisor overrides the
+  configured cycle time or cavities at Start Batch. Limits still refuse; a
+  reason never bypasses one. Reason, original value, selected value and person
+  go to the snapshot and audit. The other nine stay reference values, Not in
+  use. Q93 closed.
+- **GAP:** the override reason is recorded when given but not demanded; the
+  build makes it required and adds the reader beside the colour map.
+
 ## Sections still to capture
 
-- Batch lifecycle: the remaining open points (Q93 factory rules, variance
-  bands).
+- Batch lifecycle: consumption variance bands (the last chapter-2 question).
 - Store and held stock.

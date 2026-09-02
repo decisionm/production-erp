@@ -2677,7 +2677,14 @@ FC-02 (scrap is produced stock, booked inward) — 114/116 book scrap inward
 with no production behind it, which is the one case FC-02's evidence does not
 cover.
 
-## Q93 · Should the ten workbook "Factory Rules" be enforced by the software, and which ones?
+## Q93 · Should the ten workbook "Factory Rules" be enforced by the software, and which ones? — RESOLVED
+
+**Resolved 2026-09-02 by DEC-20260902-021:** one row only — a reason is
+required whenever the supervisor overrides the configured cycle time or
+cavities at Start Batch, within the machine and configuration limits, which a
+reason never bypasses; reason, original value, selected value and person go
+to the snapshot and audit. The other nine stay reference values, Not in use.
+The variance thresholds are a separate decision. The original entry follows.
 
 The Factory Rules tab of Production Configuration lists ten rows loaded from
 the workbook's System Config sheet on 29-Jul: the global cycle-time minimum
