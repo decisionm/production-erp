@@ -29,3 +29,26 @@ export function vendorPickerOptions(vendors: readonly Vendor[] | undefined | nul
     }
     return out;
 }
+
+/**
+ * I3 / DEC-20260902-026: "existing vendors remain UNCLASSIFIED until a
+ * person reviews them" — so on day one the three-class default matches
+ * NOTHING, and the PO vendor picker opens on Ant's bare "No data" until a
+ * buyer discovers "Show all vendors". Classification controls the default
+ * view only; it must never make the picker unusable. When the default view
+ * is empty but active vendors exist, fall back to every active vendor and
+ * report `showAll: true` so the caller can tick the checkbox — the state
+ * stays VISIBLE rather than silently substituting a different filter.
+ */
+export function vendorPickerOptionsWithFallback(
+    vendors: readonly Vendor[] | undefined | null,
+    showAll: boolean,
+): { options: { value: number; label: string }[]; showAll: boolean } {
+    const options = vendorPickerOptions(vendors, showAll);
+    if (options.length > 0 || showAll) return { options, showAll };
+
+    const fallback = vendorPickerOptions(vendors, true);
+    if (fallback.length === 0) return { options, showAll };
+
+    return { options: fallback, showAll: true };
+}
