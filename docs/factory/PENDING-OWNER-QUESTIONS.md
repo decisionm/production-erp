@@ -2681,7 +2681,15 @@ FactorySettingsTest pins) and the refusal it drives.
 *Open since 2026-09-02.* Number assigned on this branch; re-number at merge if
 another branch has claimed Q93.
 
-## Q94 · After the Store scans at issue, what is the ERP's day-bin balance, and does the floor record the tip-in?
+## Q94 · After the Store scans at issue, what is the ERP's day-bin balance, and does the floor record the tip-in? — RESOLVED
+
+**Resolved 2026-09-02: (c) by DEC-20260902-004 — only PET resin is a bin
+material, masterbatch is loaded at the machine and is not, and the bin-material
+flag is set per item by an authorised person with the Tally stock group only
+proposing it; (a) and (b) by DEC-20260902-005 — Production/WIP is the day bin
+for PET resin only, the Store's scan at issue feeds the resin pool, the floor
+records nothing at the tip-in, and there is no separate day-bin page, balance
+or daily action.** The original question follows.
 
 DEC-20260902-002 makes the Store's scan at the Store Issue the ONLY scan: the
 floor no longer scans the bag at the day-bin load. That decision expressly

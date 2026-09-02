@@ -74,10 +74,44 @@ excluded): "B, only what goes in the day bin".
 - **GAP:** the return screen today accepts any returnable Store Issue line
   (`production-returns/returnable`, research note §1b). It must refuse a
   bin-material line with a plain message.
-- **OPEN:** Q94(c) — how the ERP knows which items are bin materials once the
-  floor no longer scans at the bin. No item flag records it today, and whether
-  masterbatch goes into the bin is stated nowhere. The refusal cannot be built
-  until this is answered.
+- **RESOLVED the same day:** Q94(c) by DEC-20260902-004 — see §3. The refusal
+  can now be built once the per-item bin-material flag exists.
+
+## 3. The day bin: PET resin only, and Production/WIP is the bin
+
+### Owner input (02-Sep-2026)
+
+Verbatim: "only pet resin and masterbatch go in the day bin, are we still going to
+maintain a seperage page for day bin"; corrected in the next message: "masterbacth
+willbe loaded to the machine level not in the day bin". The two drafts and a Codex
+review the owner forwarded were then restated by the owner as their own
+instruction, with the boundaries now carried by DEC-20260902-004 and
+DEC-20260902-005.
+
+### Result
+
+- **VERIFIED as a decision:** DEC-20260902-004. Only PET resin goes into the
+  common day bin. Masterbatch is loaded or dosed at the machine and is not a bin
+  material. Once masterbatch is in the machine's production system it cannot be
+  returned; only unused masterbatch still identifiable in its container can come
+  back at the end of the day. Masterbatch consumption stays recorded against the
+  batch. The bin-material flag is set per item by an authorised person; the Tally
+  stock group may only propose it. An item nobody has flagged is not a bin
+  material.
+- **VERIFIED as a decision:** DEC-20260902-005. Production/WIP is the day bin
+  for PET resin only. The Store's scan at issue is the one event that moves the
+  resin into Production/WIP and feeds the resin pool. The floor records nothing
+  at the tip-in. The bin balance is the Production/WIP balance of PET resin, a
+  drifting estimate. No separate day-bin page, balance or daily action.
+  Historical day-bin rows stay untouched.
+- **GAP (code):** there is no per-item bin-material flag; the day-bin page and
+  its warehouse setting still exist; the Store Issue scan does not feed the resin
+  pool; the floor's scan at load is still the live path. The build that follows
+  these two decisions is: add the flag, move the resin-pool fold to the Store
+  Issue scan, retire the day-bin page and setting, surface the bin figure on the
+  Store ↔ Production page, and make the return screen refuse a flagged item.
+- **GAP (code):** the day-bin load today accepts any weighed bag, masterbatch
+  included; after the build only a flagged item may be treated as bin material.
 
 ## Sections still to capture
 

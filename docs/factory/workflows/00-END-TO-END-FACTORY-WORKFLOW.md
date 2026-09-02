@@ -108,7 +108,7 @@ It should deep-link to the exact filtered rows behind every count.
 | Chapter | Current result | Detailed document |
 |---|---|---|
 | Dashboard and Procurement | Verified on 02-Sep-2026; several workflow gaps found | [01-DASHBOARD-AND-PROCUREMENT.md](01-DASHBOARD-AND-PROCUREMENT.md) |
-| Quality, Inventory and Production | Capture resumed 02-Sep-2026; Store-scan-at-issue rule recorded as DEC-20260902-002; Q94 opened; code verification pending | [02-QUALITY-INVENTORY-PRODUCTION.md](02-QUALITY-INVENTORY-PRODUCTION.md) |
+| Quality, Inventory and Production | Capture resumed 02-Sep-2026; four decisions recorded (DEC-20260902-002 to -005: Store scans once at issue; bin material never returned; PET resin is the only bin material; Production/WIP is the day bin, no separate page); Q94 opened and resolved; ground-truth research note filed under `research/`; finished-goods Quality checklist still to capture | [02-QUALITY-INVENTORY-PRODUCTION.md](02-QUALITY-INVENTORY-PRODUCTION.md) |
 | Sales and Dispatch | Active decisions found; full page verification pending | To be created |
 | Reports and Tally | Direction captured; report-by-report reconciliation pending | To be created |
 
