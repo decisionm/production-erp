@@ -5,20 +5,24 @@ namespace App\Modules\Maintenance\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Maintenance\Http\Requests\AddMaintenanceWorkOrderPartRequest;
 use App\Modules\Maintenance\Http\Requests\CompleteMaintenanceWorkOrderRequest;
+use App\Modules\Maintenance\Http\Requests\ListMaintenanceWorkOrdersRequest;
 use App\Modules\Maintenance\Http\Requests\StoreMaintenanceWorkOrderRequest;
 use App\Modules\Maintenance\Http\Resources\MaintenanceWorkOrderResource;
 use App\Modules\Maintenance\Models\MaintenanceWorkOrder;
 use App\Modules\Maintenance\Services\MaintenanceWorkOrderService;
-use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class MaintenanceWorkOrderController extends Controller
 {
     public function __construct(private readonly MaintenanceWorkOrderService $workOrders) {}
 
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(ListMaintenanceWorkOrdersRequest $request): AnonymousResourceCollection
     {
-        return MaintenanceWorkOrderResource::collection($this->workOrders->paginate($request->integer('asset_id') ?: null));
+        return MaintenanceWorkOrderResource::collection($this->workOrders->paginate(
+            ((int) ($request->validated('asset_id') ?? 0)) ?: null,
+            $this->perPage($request, 20, 100),
+            $request->validated('sort'),
+        ));
     }
 
     public function store(StoreMaintenanceWorkOrderRequest $request): MaintenanceWorkOrderResource
