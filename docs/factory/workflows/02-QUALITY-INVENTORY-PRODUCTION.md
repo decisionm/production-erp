@@ -179,12 +179,19 @@ separately, one at a time.
 - **GAP:** none of the four evidence fields exists; the screen today takes only
   the count and a note. The build adds the fields beside the count on the same
   screen and changes no stock effect.
+- **VERIFIED as a decision:** DEC-20260902-007, the weight check. Quality enters
+  the sample count and the total measured sample weight; the ERP divides to get
+  the average per piece and compares it with the frozen standard weight using
+  the tolerance configured for that product. No default tolerance. Until it is
+  configured, both figures show and no verdict is given. Out of tolerance is a
+  warning and evidence only; it never moves stock, books scrap or blocks the
+  chain. The tolerance figure per product is master data a person enters.
+- **GAP:** no tolerance column exists on the product standard, and no screen
+  compares a sample weight against the frozen unit weight.
 - **OPEN (asked one at a time, in this order):**
-  1. Weight: the measured sample weight against the frozen standard weight. Is
-     there a tolerance, and who states it? Not to be invented.
-  2. Visual observations: a maintained list, or free text?
-  3. Sample count: entered by the checker each time, or a fixed rule per product?
-  4. May a checker who also holds Plant Manager approve their own check? The
+  1. Visual observations: a maintained list, or free text?
+  2. Sample count: entered by the checker each time, or a fixed rule per product?
+  3. May a checker who also holds Plant Manager approve their own check? The
      code leaves this as a comment, with no question id.
 
 ## Sections still to capture
