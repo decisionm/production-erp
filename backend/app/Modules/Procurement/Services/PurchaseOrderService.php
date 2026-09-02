@@ -654,6 +654,7 @@ class PurchaseOrderService
             'quantity' => (string) $line->quantity,
             'unit_price' => (string) $line->unit_price,
             'quantity_received' => (string) $line->quantity_received,
+            'unclassified_reason' => $line->unclassified_reason,
             'schedules' => $line->schedules->map(fn ($schedule) => [
                 'due_date' => $schedule->due_date?->toDateString(),
                 'quantity' => (string) $schedule->quantity,

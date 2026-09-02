@@ -7,6 +7,7 @@ use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Procurement\Events\GoodsReceiptNoteReceived;
+use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
 use App\Modules\Procurement\Models\PurchaseOrder;
 use App\Modules\Procurement\Models\Vendor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -28,21 +29,25 @@ use Tests\TestCase;
  * THE ARCHIVED-ITEM RULE IS UNCHANGED: an ARCHIVED item may not be put on a
  * new line, on create or on amend, whatever its category.
  *
- * THE CATEGORY RULE IS NEW AND SCOPED TO CREATE. DEC-20260902-023 settled the
- * open half of Q59 this file used to pin: an ERP-entered document (a
- * requisition, or a purchase order whose `source` is not `tally`) now
- * refuses a finished good outright and demands a reason for an unclassified
- * item — `App\Modules\Procurement\Support\PurchaseLineEligibility`, pinned in
- * full by `PurchaseLineEligibilityTest` rather than duplicated case-by-case
- * here. `test_create_now_refuses_a_finished_good` and
+ * THE CATEGORY RULE IS NEW. DEC-20260902-023 settled the open half of Q59
+ * this file used to pin: an ERP-entered document (a requisition, or a
+ * purchase order whose `source` is not `tally`) now refuses a finished good
+ * outright and demands a reason for an unclassified item —
+ * `App\Modules\Procurement\Support\PurchaseLineEligibility`, pinned in full
+ * by `PurchaseLineEligibilityTest` rather than duplicated case-by-case here.
+ * `test_create_now_refuses_a_finished_good` and
  * `test_an_unclassified_item_is_still_purchasable_with_a_reason` below are
  * this file's share of that reconciliation.
  *
- * THE RULE DOES NOT YET REACH AMEND. `test_amend_accepts_a_finished_good`
- * and `test_amend_accepts_an_unclassified_item` still pin today's answer —
- * amend was not part of DEC-20260902-023's change, and closing that gap is
- * an owner call to make deliberately, not a "cleanup" an agent applies by
- * extending this file's assertions on its own judgment.
+ * IT REACHES AMEND TOO, SCOPED TO A NEW OR CHANGED LINE.
+ * `test_amend_now_refuses_a_new_finished_good_line` and
+ * `test_amend_now_refuses_a_new_unclassified_line_without_a_reason` pin the
+ * refusal; `test_amend_keeps_an_existing_unclassified_line_unchanged_without_a_reason`
+ * pins the one deliberate carve-out — a line already on the order,
+ * resubmitted with the same item, quantity and unit_price, is grandfathered
+ * rather than forced through a rule that postdates it. See
+ * `AmendPurchaseOrderRequest::withValidator()` for exactly how "unchanged" is
+ * decided.
  *
  * Fixture values are synthetic (FC-06). Nothing here posts to Tally or moves
  * stock beyond the one goods receipt a test needs.
@@ -201,26 +206,60 @@ class InactiveMasterGuardTest extends TestCase
             ->assertJsonValidationErrors('lines.0.item_id');
     }
 
-    public function test_amend_accepts_an_unclassified_item(): void
+    public function test_amend_now_refuses_a_new_unclassified_line_without_a_reason(): void
     {
-        // DEC-20260902-023 did not reach amend (class docblock) — no reason
-        // is demanded here, unlike the create path PurchaseLineEligibilityTest
-        // pins.
+        // DEC-20260902-023 reaches amend for a NEW line — this item was
+        // never on the order before, so it is a fresh choice, not history.
         $order = $this->draftOrder();
         $unclassified = Item::create(['sku' => 'ITEM_NEW', 'name' => 'Item New', 'uom' => 'Kgs']);
         $this->assertNull($unclassified->fresh()->category);
 
+        $this->amend($order, [$this->lineFor($unclassified)])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('lines.0.unclassified_reason');
+
+        // The refused amend touched nothing.
+        $this->assertSame([$this->rawMaterial->id], $order->fresh()->lines->pluck('item_id')->all());
+    }
+
+    public function test_amend_accepts_a_new_unclassified_line_with_a_reason(): void
+    {
+        $order = $this->draftOrder();
+        $unclassified = Item::create(['sku' => 'ITEM_NEW2', 'name' => 'Item New 2', 'uom' => 'Kgs']);
+
+        $this->amend($order, [$this->lineFor($unclassified, 'Trial sample, not yet classified')])
+            ->assertOk();
+
+        $this->assertSame([$unclassified->id], $order->fresh()->lines->pluck('item_id')->all());
+        $this->assertSame('Trial sample, not yet classified', $order->fresh()->lines()->firstOrFail()->unclassified_reason);
+    }
+
+    public function test_amend_keeps_an_existing_unclassified_line_unchanged_without_a_reason(): void
+    {
+        // A DRAFT WRITTEN BEFORE THIS RULE EXISTED (simulated by writing the
+        // line directly, bypassing StorePurchaseOrderRequest's own
+        // reason-required check). Re-submitting it UNCHANGED — same item,
+        // quantity, unit_price — during an otherwise-ordinary amend must not
+        // suddenly demand a reason nobody was ever asked for when the line
+        // was written. That is the carve-out the class docblock describes.
+        $order = PurchaseOrder::create([
+            'vendor_id' => $this->vendor->id,
+            'status' => PurchaseOrderStatus::Draft,
+            'order_date' => '2026-08-10',
+        ]);
+        $unclassified = Item::create(['sku' => 'ITEM_HISTORIC', 'name' => 'Item Historic', 'uom' => 'Kgs']);
+        $order->lines()->create(['item_id' => $unclassified->id, 'quantity' => '10', 'unit_price' => '1.00', 'quantity_received' => 0]);
+
         $this->amend($order, [$this->lineFor($unclassified)])->assertOk();
 
         $this->assertSame([$unclassified->id], $order->fresh()->lines->pluck('item_id')->all());
+        $this->assertNull($order->fresh()->lines()->firstOrFail()->unclassified_reason);
     }
 
-    public function test_amend_accepts_a_finished_good(): void
+    public function test_amend_now_refuses_a_new_finished_good_line(): void
     {
-        // Create now refuses a finished good (DEC-20260902-023); amend's
-        // scope was not part of that change. This pins the remaining gap
-        // deliberately — see the class docblock — so closing it later is a
-        // decision made on purpose, not drift.
+        // Create refuses a finished good (DEC-20260902-023); amend now does
+        // too, for a NEW line — this item was never on the order before.
         $order = $this->draftOrder();
         $bottle = Item::create([
             'sku' => 'BTL-PET-500',
@@ -229,9 +268,11 @@ class InactiveMasterGuardTest extends TestCase
             'category' => ItemCategory::FinishedGood,
         ]);
 
-        $this->amend($order, [$this->lineFor($bottle)])->assertOk();
+        $this->amend($order, [$this->lineFor($bottle)])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('lines.0.item_id');
 
-        $this->assertSame([$bottle->id], $order->fresh()->lines->pluck('item_id')->all());
+        $this->assertSame([$this->rawMaterial->id], $order->fresh()->lines->pluck('item_id')->all());
     }
 
     public function test_amend_is_refused_on_a_tally_mirror_whatever_the_line_names(): void
@@ -287,7 +328,9 @@ class InactiveMasterGuardTest extends TestCase
             ->assertJsonValidationErrors(['lines.0.item_id' => 'is archived']);
 
         // Re-pointing it at a live item goes through.
-        $live = Item::create(['sku' => 'ITEM_LIVE', 'name' => 'Item Live', 'uom' => 'Kgs']);
+        // Classified, not testing DEC-20260902-023 here: an unclassified
+        // re-point would need its own reason and muddy what this test pins.
+        $live = Item::create(['sku' => 'ITEM_LIVE', 'name' => 'Item Live', 'uom' => 'Kgs', 'category' => ItemCategory::RawMaterial]);
         $this->amend($order, [$this->lineFor($live)])->assertOk();
 
         $this->assertSame([$live->id], $order->fresh()->lines->pluck('item_id')->all());
