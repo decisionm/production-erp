@@ -97,7 +97,7 @@ class VendorController extends Controller
             fn () => $this->vendors->archive($vendor, $request->reason()),
         );
 
-        return VendorResource::make($this->withAbilities($archived, $this->vendors, $request));
+        return VendorResource::make($this->withAbilities($archived->load('classifications'), $this->vendors, $request));
     }
 
     /** Put an archived vendor back in service. */
@@ -107,6 +107,6 @@ class VendorController extends Controller
             fn () => $this->vendors->activate($vendor, $request->reason()),
         );
 
-        return VendorResource::make($this->withAbilities($activated, $this->vendors, $request));
+        return VendorResource::make($this->withAbilities($activated->load('classifications'), $this->vendors, $request));
     }
 }
