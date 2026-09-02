@@ -8735,11 +8735,23 @@ export default function ShiftProductionEntryPage() {
                         // with a 422 the supervisor cannot answer.
                         const isUnplanned = isUnplannedMaterial(selectedItemId);
                         // DEC-20260902-019: the category of an added line,
-                        // shown as a warning — never a block. Unclassified
-                        // and Other are the two cases worth a supervisor's
-                        // second look; raw/packing material stay silent.
+                        // shown as a warning — never a block. addedLineWarning
+                        // names the real ItemCategory case: Unclassified,
+                        // Other, Spare or tooling, Work in progress, or
+                        // Consumable get a tag; raw material, packing
+                        // material and finished good (never offered here —
+                        // the server refuses it) stay silent.
                         // No item chosen yet is not "unclassified" — it's
                         // nothing to warn about, so the lookup is skipped.
+                        //
+                        // Deliberate asymmetry with the dropdown's optionRender
+                        // below: the dropdown tags off-plan options only
+                        // (is_expected === false), because a planned material
+                        // sorted to the top of that same list must not carry a
+                        // tag. This row tags whatever category the SELECTED
+                        // item has, planned or not — every row in this block
+                        // is itself an added line by construction, so there is
+                        // no "planned, don't warn" case to protect here.
                         const addedLineTag = selectedItemId
                             ? addedLineWarning(consumableOptions.find((option) => option.value === selectedItemId)?.category)
                             : null;
