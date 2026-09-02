@@ -24,7 +24,7 @@ import {
     statusTag,
     tallyStateLine,
 } from '@/features/procurement/purchaseOrders';
-import { purchasePickerItems } from '@/features/procurement/purchasePicker';
+import { isUnclassified } from '@/features/procurement/purchasePicker';
 import type { PurchaseOrder } from '@/features/procurement/types';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { usePurchaseOrderListParams } from '@/features/procurement/usePurchaseOrderListParams';
@@ -100,9 +100,14 @@ export default function PurchaseOrdersPage() {
     // an item — see its docblock. The FILTER bar builds its own options and
     // is deliberately left alone: past orders must stay findable.
     const [showAdditional, setShowAdditional] = useState(false);
+    // Independent of `showAdditional`: which item a line's reason input
+    // gates on is a fact about that item's own category, not about what a
+    // NEW selection happens to be offering right now (review finding — a
+    // pre-existing unclassified line lost its warning the moment the
+    // checkbox defaulted to off on Amend).
     const unclassifiedItemIds = useMemo(
-        () => new Set(purchasePickerItems(items?.data, showAdditional).filter((p) => p.warning).map((p) => p.id)),
-        [items, showAdditional],
+        () => new Set((items?.data ?? []).filter((item) => isUnclassified(item)).map((item) => item.id)),
+        [items],
     );
     const itemOptions = useMemo(
         () => purchaseOrderItemOptions(items?.data, showAdditional, amendedItemIds(amendOrder?.lines)),

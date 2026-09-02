@@ -1,7 +1,7 @@
 import { type PickerOption, retiredOptionLabel } from '@/components/configuration/pickerOptions';
 import { statusColor as tallyStatusColor, statusLabel as tallyStatusLabel } from '@/features/tally-sync/drawer';
 import type { Item } from '@/features/inventory/types';
-import { purchasePickerItems } from '@/features/procurement/purchasePicker';
+import { isUnclassified, purchasePickerItems, UNCLASSIFIED_WARNING } from '@/features/procurement/purchasePicker';
 import type { TallyLink } from '@/features/sales/types';
 import { itemLabel } from '@/lib/itemLabel';
 import { fromScaled, toScaled, trimQuantity } from '@/lib/scaledDecimal';
@@ -1120,27 +1120,53 @@ export function purchasableItemOptions(
  * already names it (`keepIds`) — an item already on a draft is never
  * silently dropped, finished good or not.
  *
- * `purchasableItemOptions` builds its label from `itemLabel` alone and
- * knows nothing of `purchasePickerItems`'s `warning`, so the
- * "· Unclassified — reason required" suffix is joined back on afterward,
- * by id. A kept archived item's "(Retired)" label is left exactly as
- * `purchasableItemOptions` built it.
+ * TWO THINGS THAT SURVIVE VIA `keepIds` ALONE NEED CORRECTING, NOT JUST
+ * KEEPING (found in review):
+ *
+ * 1. An ACTIVE kept item `purchasePickerItems` would not offer — a
+ *    finished good, an Other/unclassified item with the checkbox off —
+ *    lands in `purchasableItemOptions`'s "offered" bucket (it checks only
+ *    `is_active`), so without correction it renders as a normal, choosable
+ *    option: indistinguishable from a real new choice on every OTHER line
+ *    sharing this same options array. It gets the archived-kept branch's
+ *    own treatment instead — `disabled: true` — the moment it survives the
+ *    filter ONLY because `keepIds` names it, not because it is offered.
+ *
+ * 2. `isUnclassified` cannot be read off `purchasePickerItems`'s output for
+ *    the warning suffix, because that output is ALREADY category/
+ *    `showAdditional`-filtered — a kept unclassified item with the
+ *    checkbox off would never reach it to be flagged, silently hiding the
+ *    reason requirement on a pre-existing line. The flag is read off the
+ *    RAW item instead, for every id this function can possibly emit,
+ *    offered or kept alike.
+ *
+ * A kept archived item's "(Retired)" label is left exactly as
+ * `purchasableItemOptions` built it; the two corrections above compose
+ * with it rather than replace it.
  */
 export function purchaseOrderItemOptions(
     items: readonly Item[] | undefined | null,
     showAdditional: boolean,
     keepIds: readonly number[] = [],
 ): PickerOption[] {
-    const pickerItems = purchasePickerItems(items, showAdditional);
-    const offeredIds = new Set(pickerItems.map((p) => p.id));
-    const warningById = new Map(pickerItems.filter((p) => p.warning).map((p) => [p.id, p.warning as string]));
+    const offeredIds = new Set(purchasePickerItems(items, showAdditional).map((p) => p.id));
+    const unclassifiedIds = new Set((items ?? []).filter((item) => isUnclassified(item)).map((item) => item.id));
     const keep = new Set(keepIds);
 
     return purchasableItemOptions(items, keepIds)
         .filter((option) => offeredIds.has(option.value) || keep.has(option.value))
-        .map((option) =>
-            warningById.has(option.value) ? { ...option, label: `${option.label} · ${warningById.get(option.value)}` } : option,
-        );
+        .map((option) => {
+            const withWarning = unclassifiedIds.has(option.value)
+                ? { ...option, label: `${option.label} · ${UNCLASSIFIED_WARNING}` }
+                : option;
+            // Present ONLY because the amended order already names it, not
+            // because purchasePickerItems is offering it for a NEW choice
+            // on some other line — shown, not choosable, same as the
+            // archived-kept branch purchasableItemOptions already marks.
+            const keptOnly = keep.has(option.value) && !offeredIds.has(option.value);
+
+            return keptOnly ? { ...withWarning, disabled: true } : withWarning;
+        });
 }
 
 /** The first argument that is a non-empty string, else null. */
