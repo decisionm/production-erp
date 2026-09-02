@@ -216,6 +216,7 @@ export default function CreatePurchaseOrderModal({
                     showAdditional={showAdditional}
                     onShowAdditionalChange={onShowAdditionalChange}
                     unclassifiedItemIds={unclassifiedItemIds}
+                    clearUnclassifiedReason={(index) => setValue(`lines.${index}.unclassified_reason`, undefined)}
                 />
             </Form>
         </Modal>

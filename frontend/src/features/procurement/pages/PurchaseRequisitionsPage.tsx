@@ -137,7 +137,7 @@ export default function PurchaseRequisitionsPage() {
         label: warning ? `${itemLabel(item)} · ${warning}` : itemLabel(item),
     }));
 
-    const { control, handleSubmit, reset, formState: { errors } } = useForm<RequisitionFormValues>({
+    const { control, handleSubmit, reset, setValue, formState: { errors } } = useForm<RequisitionFormValues>({
         resolver: zodResolver(requisitionSchema),
         defaultValues: { lines: [{ item_id: undefined as unknown as number, quantity: undefined as unknown as number, notes: '' }] },
     });
@@ -436,6 +436,16 @@ export default function PurchaseRequisitionsPage() {
                                 render={({ field }) => (
                                     <Select
                                         {...field}
+                                        onChange={(value) => {
+                                            field.onChange(value);
+                                            // A reason typed for the PREVIOUS item is
+                                            // stale the moment the item changes — RHF
+                                            // keeps an unmounted field's value by
+                                            // default, so without this a switch away
+                                            // from an unclassified item would still
+                                            // submit the old reason for the new one.
+                                            setValue(`lines.${index}.unclassified_reason`, undefined);
+                                        }}
                                         options={itemOptions}
                                         showSearch
                                         optionFilterProp="label"

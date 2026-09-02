@@ -143,6 +143,15 @@ interface PurchaseOrderLinesFieldsProps<T extends LinesFormValues> {
     onShowAdditionalChange?: (value: boolean) => void;
     /** The item ids `itemOptions` is offering unclassified — gates the reason input per line. */
     unclassifiedItemIds?: ReadonlySet<number>;
+    /**
+     * Clear a line's `unclassified_reason` when its item changes. RHF keeps
+     * an unmounted field's value by default, so switching a line away from
+     * an unclassified item would otherwise still submit the old reason
+     * against the newly chosen one. Same reason this needs the host's
+     * `setValue` as `setUnitPrice` does — these fields hold no form
+     * instance of their own.
+     */
+    clearUnclassifiedReason?: (lineIndex: number) => void;
 }
 
 /**
@@ -161,6 +170,7 @@ export default function PurchaseOrderLinesFields<T extends LinesFormValues>({
     showAdditional,
     onShowAdditionalChange,
     unclassifiedItemIds,
+    clearUnclassifiedReason,
 }: PurchaseOrderLinesFieldsProps<T>) {
     // The host form has more fields than `lines`; these fields only ever
     // address `lines.*`, so the narrower control type is the honest one.
@@ -200,6 +210,10 @@ export default function PurchaseOrderLinesFields<T extends LinesFormValues>({
                             render={({ field }) => (
                                 <Select
                                     {...field}
+                                    onChange={(value) => {
+                                        field.onChange(value);
+                                        clearUnclassifiedReason?.(index);
+                                    }}
                                     options={itemOptions}
                                     showSearch
                                     optionFilterProp="label"
