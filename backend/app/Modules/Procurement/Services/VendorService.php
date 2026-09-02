@@ -236,11 +236,14 @@ class VendorService
      * keyed on it — so archiving a vendor mutates nothing in Tally
      * (DEC-20260817-002 rule 4).
      *
-     * vendor_classifications.vendor_id CASCADEs (2026_09_03_100200,
-     * DEC-20260902-026) — the schema backstop (DependencyReport::cascadeGaps)
-     * refuses any hard delete this check does not cover, so a classified
-     * vendor is not provably unused: remove its classifications, or
-     * deactivate instead.
+     * vendor_classifications.vendor_id CASCADEs (2026_09_03_100200), which
+     * the schema backstop (DependencyReport::cascadeGaps) refuses to leave
+     * undeclared for ANY vendor — but a classification row is part of the
+     * vendor MASTER, not a transactional use of it (DEC-20260902-026: it
+     * controls the default list view, and never blocks). The FK cascade
+     * already removes these rows with the vendor, so the callable below
+     * exists purely to tell the backstop the cascade is accounted for; it
+     * always answers zero and can never turn into a refusal.
      *
      * @return list<DependencyCheck>
      */
@@ -253,9 +256,9 @@ class VendorService
                 ->label('subcontract order'),
             DependencyCheck::table('supplier_bills', 'vendor_id')
                 ->label('supplier bill'),
-            DependencyCheck::table('vendor_classifications', 'vendor_id')
-                ->label('classification')
-                ->cascadeSide(),
+            DependencyCheck::callable(fn (): int => 0, 'vendor_classifications')
+                ->covers('vendor_classifications', 'vendor_id')
+                ->label('classification'),
         ];
     }
 

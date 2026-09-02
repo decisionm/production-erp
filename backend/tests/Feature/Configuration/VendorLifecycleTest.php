@@ -6,6 +6,7 @@ use App\Modules\Procurement\Models\PurchaseOrder;
 use App\Modules\Procurement\Models\Vendor;
 use App\Modules\Procurement\Services\VendorService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 
 /**
  * THE VENDOR MASTER under the Configuration Lifecycle Contract
@@ -130,33 +131,29 @@ class VendorLifecycleTest extends ProductDefinitionLifecycleTestCase
     }
 
     /**
-     * DEC-20260902-026: vendor_classifications.vendor_id CASCADEs, so this
-     * class (not the database) is the only guard — a classified vendor is
-     * not provably unused, and a hard delete must refuse it just like a
-     * purchase order does. Removing the classification is what turns "not
-     * provably unused" back into "provably unused".
+     * DEC-20260902-026: classification is a view filter, never a block — a
+     * classification row is part of the vendor MASTER, not a transactional
+     * USE of it, so it must never keep a never-used vendor from hard-
+     * deleting. vendor_classifications.vendor_id CASCADEs, so the database
+     * removes both classification rows with the vendor; nothing here has to
+     * clean them up first.
      */
-    public function test_a_classified_vendor_is_refused_with_counts_then_deletable_once_unclassified(): void
+    public function test_a_classified_but_never_used_vendor_hard_deletes_and_its_classifications_go_with_it(): void
     {
         $owner = $this->ownerUser(...self::MODULE);
         $vendor = $this->vendor('V-CLASS');
         $vendor->classifications()->create(['classification' => 'resin']);
-
-        $response = $this->actingAs($owner)->deleteJson("/api/v1/procurement/vendors/{$vendor->id}");
-
-        $response->assertStatus(422);
-        $this->assertSame(
-            ['vendor_classifications'],
-            collect($response->json('blocking'))->pluck('code')->all(),
-        );
-        $this->assertSame(1, $response->json('blocking.0.count'));
-        $this->assertNotNull($vendor->fresh(), 'the vendor survives a refused delete');
-
-        $vendor->classifications()->delete();
+        $vendor->classifications()->create(['classification' => 'packaging']);
 
         $this->actingAs($owner)
             ->deleteJson("/api/v1/procurement/vendors/{$vendor->id}")
             ->assertStatus(204);
+
+        $this->assertNull(Vendor::withTrashed()->find($vendor->id));
+        // Queried straight off the table, not through the (now-gone) model's
+        // relation, so this proves the FK cascade actually fired rather than
+        // merely that Eloquent forgot about it.
+        $this->assertSame(0, DB::table('vendor_classifications')->where('vendor_id', $vendor->id)->count());
     }
 
     public function test_an_unused_vendor_is_really_deleted_and_the_code_is_freed(): void

@@ -57,6 +57,19 @@ class VendorClassificationTest extends TestCase
             ->assertOk()->assertJsonPath('data.classifications', []);
     }
 
+    /**
+     * A vendor's classifications are not a lifecycle fact — archiving one
+     * must not make the Vendors screen show it as suddenly unclassified.
+     */
+    public function test_archiving_a_classified_vendor_still_carries_its_classifications(): void
+    {
+        $id = $this->postJson('/api/v1/procurement/vendors', ['name' => 'Relpet Traders', 'classifications' => ['resin']])
+            ->json('data.id');
+
+        $this->postJson("/api/v1/procurement/vendors/{$id}/archive", ['reason' => 'Stopped supplying'])
+            ->assertOk()->assertJsonPath('data.classifications', ['resin']);
+    }
+
     public function test_the_list_filters_by_classification_and_by_unclassified(): void
     {
         $resin = Vendor::create(['code' => 'V-R', 'name' => 'Resin Co']);
