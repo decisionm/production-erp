@@ -2680,3 +2680,25 @@ reader added next to `FactorySetting::READ_BY_SOFTWARE` (which
 FactorySettingsTest pins) and the refusal it drives.
 *Open since 2026-09-02.* Number assigned on this branch; re-number at merge if
 another branch has claimed Q93.
+
+## Q94 · After the Store scans at issue, what is the ERP's day-bin balance, and does the floor record the tip-in?
+
+DEC-20260902-002 makes the Store's scan at the Store Issue the ONLY scan: the
+floor no longer scans the bag at the day-bin load. That decision expressly
+leaves two things open.
+
+(a) Does the ERP keep a separate day-bin balance beside the Production/WIP
+    balance, fed by the bags the Store scanned at issue, or is Production/WIP
+    the day bin for resin? Today the dashboard shows a day-bin estimate
+    (DEC-20260807-007: loads minus calculated consumption, never counted) and
+    DEC-20260810-001 reads resin provenance from the day-bin loads. If no floor
+    scan loads the bin, those loads must come from the Store Issue's scanned
+    bags, or the figure and the provenance go dark.
+
+(b) Does the floor record anything at all when it tips an issued bag into the
+    bin — a tap, a count, or nothing?
+
+**Blocks:** the code change that follows DEC-20260902-002 (moving the bag scan
+from the day-bin load to the Store Issue) cannot be designed until (a) is
+answered, because (a) decides which ledger the scan feeds.
+*Open since 2026-09-02.*
