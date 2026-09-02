@@ -14,6 +14,18 @@ describe('consumptionSummary (DEC-20260902-022)', () => {
         ]);
     });
 
+    it('shows the kilograms alone when the norm resolves to zero (variance_pct is null, variance_kg is not)', () => {
+        expect(consumptionSummary({
+            norm_source: 'item_weight', expected_kg: '0.0000', actual_kg: '4.5000', variance_kg: '4.5000', variance_pct: null,
+            rejection_kg: '0', scrap_kg: '0', unaccounted_kg: '4.5000',
+        })).toEqual([
+            { label: 'Expected kg', value: '0.0000' },
+            { label: 'Actual kg', value: '4.5000' },
+            { label: 'Variance', value: '+4.5000 kg' },
+            { label: 'Unaccounted kg', value: '4.5000' },
+        ]);
+    });
+
     it('shows a dash where no norm exists, never a zero', () => {
         expect(consumptionSummary({
             norm_source: null, expected_kg: null, actual_kg: '12.0000', variance_kg: null, variance_pct: null,
