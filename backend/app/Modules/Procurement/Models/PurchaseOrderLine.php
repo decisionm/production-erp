@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['purchase_order_id', 'item_id', 'quantity', 'unit_price', 'quantity_received'])]
+#[Fillable(['purchase_order_id', 'item_id', 'quantity', 'unit_price', 'quantity_received', 'unclassified_reason'])]
 class PurchaseOrderLine extends Model
 {
     protected function casts(): array

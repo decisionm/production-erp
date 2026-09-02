@@ -3,6 +3,7 @@
 namespace Tests\Feature\Inventory;
 
 use App\Models\User;
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Procurement\Models\Vendor;
@@ -55,7 +56,7 @@ class EveryQuantityDoorRefusesAMalformedNumberTest extends TestCase
 
         $this->item = Item::create([
             'sku' => 'MD-ITEM', 'name' => 'Malformed Door Item', 'uom' => 'Kgs.',
-            'is_active' => true, 'is_production_input' => true,
+            'is_active' => true, 'is_production_input' => true, 'category' => ItemCategory::RawMaterial,
         ]);
         $this->warehouse = Warehouse::create(['code' => 'MD-WH', 'name' => 'MD Store', 'is_active' => true, 'tally_guid' => 'md-gd']);
         $this->vendor = Vendor::create(['code' => 'MD-V', 'name' => 'MD Supplier', 'is_active' => true]);

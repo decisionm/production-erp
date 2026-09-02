@@ -3,6 +3,7 @@
 namespace Tests\Feature\Procurement;
 
 use App\Models\User;
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
@@ -87,7 +88,7 @@ class ProcurementEndToEndTest extends TestCase
             // (DEC-20260812-002). Carried on the ONE vendor master.
             'tally_ledger_name' => 'Vendor Alpha',
         ]);
-        $this->resin = Item::create(['sku' => 'ITEM_A', 'name' => 'ITEM_A', 'uom' => 'Kgs', 'is_active' => true]);
+        $this->resin = Item::create(['sku' => 'ITEM_A', 'name' => 'ITEM_A', 'uom' => 'Kgs', 'is_active' => true, 'category' => ItemCategory::RawMaterial]);
         $this->store = Warehouse::create(['code' => 'WH-A', 'name' => 'Warehouse A', 'is_active' => true]);
     }
 

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Procurement;
 
 use App\Models\User;
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialBag;
 use App\Modules\Inventory\Models\MaterialLot;
@@ -73,8 +74,8 @@ class OverReceiptContractTest extends TestCase
         config(['production.traceability_enabled' => true]);
 
         $this->vendor = Vendor::create(['code' => 'VND-A', 'name' => 'Vendor Alpha', 'tally_ledger_name' => 'Vendor Alpha']);
-        $this->itemA = Item::create(['sku' => 'ITEM_A', 'name' => 'ITEM_A', 'uom' => 'Kgs', 'is_active' => true, 'tally_stock_item_guid' => 'guid-item-a']);
-        $this->itemB = Item::create(['sku' => 'ITEM_B', 'name' => 'ITEM_B', 'uom' => 'Kgs', 'is_active' => true, 'tally_stock_item_guid' => 'guid-item-b']);
+        $this->itemA = Item::create(['sku' => 'ITEM_A', 'name' => 'ITEM_A', 'uom' => 'Kgs', 'is_active' => true, 'tally_stock_item_guid' => 'guid-item-a', 'category' => ItemCategory::RawMaterial]);
+        $this->itemB = Item::create(['sku' => 'ITEM_B', 'name' => 'ITEM_B', 'uom' => 'Kgs', 'is_active' => true, 'tally_stock_item_guid' => 'guid-item-b', 'category' => ItemCategory::RawMaterial]);
         $this->store = Warehouse::create(['code' => 'WH-A', 'name' => 'Warehouse A', 'is_active' => true, 'tally_guid' => 'guid-wh-a']);
 
         $user = User::factory()->create(['is_active' => true]);

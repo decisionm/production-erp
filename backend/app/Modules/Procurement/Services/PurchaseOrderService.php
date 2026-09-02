@@ -197,7 +197,7 @@ class PurchaseOrderService
     }
 
     /**
-     * @param  array{vendor_id: int, purchase_requisition_id?: int, order_date: string, expected_date?: string, notes?: string, lines: array<int, array{item_id: int, quantity: string, unit_price: string}>}  $data
+     * @param  array{vendor_id: int, purchase_requisition_id?: int, order_date: string, expected_date?: string, notes?: string, lines: array<int, array{item_id: int, quantity: string, unit_price: string, unclassified_reason?: string}>}  $data
      */
     public function create(array $data, ?int $createdBy): PurchaseOrder
     {
@@ -596,6 +596,7 @@ class PurchaseOrderService
                 'quantity' => $line['quantity'],
                 'unit_price' => $line['unit_price'],
                 'quantity_received' => 0,
+                'unclassified_reason' => $line['unclassified_reason'] ?? null,
             ]);
 
             $total = '0.0000';

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Acceptance;
 
 use App\Models\User;
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Enums\StockMovementType;
@@ -152,6 +153,7 @@ class AccountingChainTest extends TestCase
         $this->resin = Item::create([
             'sku' => 'ACC-RM-01', 'name' => 'ACC_RESIN', 'uom' => 'Kgs',
             'is_active' => true, 'tally_stock_item_guid' => 'acc-guid-resin',
+            'category' => ItemCategory::RawMaterial,
         ]);
         $this->store = Warehouse::create([
             'code' => 'ACC-STORE', 'name' => 'Acceptance Store',

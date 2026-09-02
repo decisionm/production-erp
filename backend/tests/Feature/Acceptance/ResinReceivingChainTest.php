@@ -3,6 +3,7 @@
 namespace Tests\Feature\Acceptance;
 
 use App\Models\User;
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialBag;
@@ -76,7 +77,7 @@ class ResinReceivingChainTest extends TestCase
 
         $this->resin = Item::create([
             'sku' => 'RM-RELPET', 'name' => 'Relpet PET Resin', 'uom' => 'Kgs',
-            'is_active' => true, 'is_production_input' => true,
+            'is_active' => true, 'is_production_input' => true, 'category' => ItemCategory::RawMaterial,
         ]);
 
         $this->store = Warehouse::create(['code' => 'RC-RM', 'name' => 'RC Raw Material Store', 'is_active' => true, 'tally_guid' => 'rc-gd']);

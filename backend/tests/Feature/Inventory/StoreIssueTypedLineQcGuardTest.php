@@ -3,6 +3,7 @@
 namespace Tests\Feature\Inventory;
 
 use App\Models\User;
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialBag;
@@ -71,7 +72,7 @@ class StoreIssueTypedLineQcGuardTest extends TestCase
 
         $this->resin = Item::create([
             'sku' => 'QG-RESIN', 'name' => 'QG Resin', 'uom' => 'KGS',
-            'is_active' => true, 'is_production_input' => true,
+            'is_active' => true, 'is_production_input' => true, 'category' => ItemCategory::RawMaterial,
         ]);
         $this->tray = Item::create([
             'sku' => 'QG-TRAY', 'name' => 'QG Tray', 'uom' => 'Nos',

@@ -4,6 +4,7 @@ namespace Tests\Feature\Inventory;
 
 use App\Models\User;
 use App\Modules\Inventory\Exceptions\IncomingQcHoldException;
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialBag;
@@ -82,7 +83,7 @@ class StockOutflowQcHoldTest extends TestCase
 
         $this->resin = Item::create([
             'sku' => 'QH-RESIN', 'name' => 'QH Resin', 'uom' => 'KGS',
-            'is_active' => true, 'is_production_input' => true,
+            'is_active' => true, 'is_production_input' => true, 'category' => ItemCategory::RawMaterial,
         ]);
 
         $this->storeKeeper = User::factory()->create(['is_active' => true]);

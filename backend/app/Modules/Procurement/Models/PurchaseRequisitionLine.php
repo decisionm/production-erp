@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['purchase_requisition_id', 'item_id', 'quantity', 'notes'])]
+#[Fillable(['purchase_requisition_id', 'item_id', 'quantity', 'notes', 'unclassified_reason'])]
 class PurchaseRequisitionLine extends Model
 {
     /**

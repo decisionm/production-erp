@@ -3,6 +3,7 @@
 namespace Tests\Feature\Procurement;
 
 use App\Models\User;
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
 use App\Modules\Procurement\Models\Enums\PurchaseRequisitionStatus;
@@ -483,7 +484,7 @@ class RequisitionCoverageTest extends TestCase
 
     private function item(string $sku, string $uom): Item
     {
-        return Item::create(['sku' => $sku, 'name' => "Relpet {$sku}", 'uom' => $uom]);
+        return Item::create(['sku' => $sku, 'name' => "Relpet {$sku}", 'uom' => $uom, 'category' => ItemCategory::RawMaterial]);
     }
 
     /** @param  list<array{0: Item, 1: string}>  $lines */
