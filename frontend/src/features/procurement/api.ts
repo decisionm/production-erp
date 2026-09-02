@@ -2,6 +2,7 @@ import { api } from '@/lib/api';
 import { type ListParamsSpec, compactParams } from '@/lib/listParams';
 import type { Paginated } from '@/lib/types';
 import { buildPurchaseOrderQuery, unwrapTraceResponse } from './purchaseOrders';
+import type { VendorClassification } from './vendorClassification';
 import type {
     GoodsReceiptListFilters,
     GoodsReceiptListParams,
@@ -38,10 +39,26 @@ import type {
  * search 50 rows out of 628 and answer "no such vendor" for one that plainly
  * exists — the defect four pickers in this app were fixed for.
  */
-export async function listVendors(page = 1, perPage = 50, search?: string): Promise<Paginated<Vendor>> {
+export async function listVendors(
+    page = 1,
+    perPage = 50,
+    search?: string,
+    // DEC-20260902-026: trailing and optional, so every existing positional
+    // caller still compiles. classification[]=... alone is "any of these";
+    // unclassified alone is "none"; both is those OR none (the server ORs
+    // them) — see the Vendors tab and vendorClassification.ts.
+    classifications?: VendorClassification[],
+    unclassified = false,
+): Promise<Paginated<Vendor>> {
     const term = search?.trim() ?? '';
     const { data } = await api.get<Paginated<Vendor>>('/procurement/vendors', {
-        params: { page, per_page: perPage, ...(term !== '' ? { q: term } : {}) },
+        params: {
+            page,
+            per_page: perPage,
+            ...(term !== '' ? { q: term } : {}),
+            ...(classifications && classifications.length > 0 ? { classification: classifications } : {}),
+            ...(unclassified ? { unclassified: 1 } : {}),
+        },
     });
     return data;
 }
@@ -68,6 +85,8 @@ export interface CreateVendorPayload {
     address?: string;
     gstin?: string;
     state_code?: string;
+    /** DEC-20260902-026: absent = leave alone; [] = clear; a non-empty array = set. */
+    classifications?: VendorClassification[];
     /** The vendor's Tally ledger name (Phase 6) — typed, never pulled; empty string clears it. */
     tally_ledger_name?: string;
 }

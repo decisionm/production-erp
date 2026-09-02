@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, Modal, Space, Table, Tabs, Tag, Typography } from 'antd';
+import { Button, Form, Input, Modal, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Controller, useForm } from 'react-hook-form';
@@ -14,6 +14,9 @@ import { useAuthStore } from '@/features/auth/store';
 import TallyVendorReviewPage from '@/features/procurement/pages/TallyVendorReviewPage';
 import { vendorActiveTab } from '@/features/procurement/vendorTabs';
 import { vendorLedgerWords } from '@/features/procurement/documentWords';
+import { DEFAULT_VENDOR_VIEW, VENDOR_CLASSIFICATIONS, classificationLabel, type VendorClassification } from '@/features/procurement/vendorClassification';
+import type { ListParams, ListParamsSpec } from '@/lib/listParams';
+import { useListParams } from '@/lib/useListParams';
 
 // The New Vendor form does NOT ask for a code. The server mints "V-0001" and
 // steps the sequence on, so there is nothing here for a person to guess at —
@@ -30,6 +33,11 @@ const vendorSchema = z.object({
         .optional()
         .or(z.literal('')),
     state_code: z.string().regex(/^[0-9]{2}$/, 'Enter a 2-digit GST state code').optional().or(z.literal('')),
+    // DEC-20260902-026: zero, one or many of the five procurement
+    // categories. No `.default()` — react-hook-form's resolver wants the
+    // input and output shapes to agree, so the [] default is set explicitly
+    // wherever the form is (re)opened, same as every other field here.
+    classifications: z.array(z.enum(['resin', 'packaging', 'consumables_spares_tooling', 'service', 'other'])),
     // The vendor's ledger name in Tally, EXACTLY as Tally spells it — the
     // party a staged Purchase Order voucher names (Phase 6). Typed by
     // Accounts; the ERP never reads it from Tally. Empty = not mapped, and
@@ -43,6 +51,27 @@ const editVendorSchema = vendorSchema.extend({
 
 type VendorFormValues = z.infer<typeof vendorSchema>;
 type EditVendorFormValues = z.infer<typeof editVendorSchema>;
+
+/** The Vendors tab's own pseudo-class — sent as `unclassified=1`, never as a real classification value. */
+const UNCLASSIFIED_FILTER_VALUE = '__unclassified';
+
+interface VendorListParams extends ListParams {
+    classification?: string[];
+}
+
+/**
+ * DEC-20260902-026: the Vendors tab's classification filter lives in the
+ * URL, the same as every other list's filters (useListParams) — a refresh
+ * or a pasted link keeps the chosen view. No `classification` key on the
+ * URL means the default view (the three material classes); a page with no
+ * list-params hook yet gets one, per the sibling pages' pattern.
+ */
+const VENDOR_LIST_SPEC: ListParamsSpec = {
+    lists: ['classification'],
+    allowed: {
+        classification: [...VENDOR_CLASSIFICATIONS.map((c) => c.value), UNCLASSIFIED_FILTER_VALUE],
+    },
+};
 
 /**
  * THE ONE VENDOR MASTER (DEC-20260825-003).
@@ -93,16 +122,27 @@ export default function VendorsPage() {
     const [searchInput, setSearchInput] = useState('');
     const [search, setSearch] = useState('');
 
+    // DEC-20260902-026: the classification filter, kept in the URL
+    // (useListParams). Unset on the URL = the default view (the three
+    // material classes); the pseudo-value `__unclassified` is split off
+    // before it reaches the API as `unclassified=1`.
+    const { params: listParams, setParams: setListParams } = useListParams<VendorListParams>(VENDOR_LIST_SPEC);
+    const selectedClassification = listParams.classification ?? DEFAULT_VENDOR_VIEW;
+    const classificationFilter = selectedClassification.filter(
+        (value): value is VendorClassification => value !== UNCLASSIFIED_FILTER_VALUE,
+    ) as VendorClassification[];
+    const unclassifiedFilter = selectedClassification.includes(UNCLASSIFIED_FILTER_VALUE);
+
     const { data, isLoading, isPending, isError, error, refetch } = useQuery({
-        queryKey: ['procurement', 'vendors', page, perPage, search],
-        queryFn: () => listVendors(page, perPage, search),
+        queryKey: ['procurement', 'vendors', page, perPage, search, classificationFilter, unclassifiedFilter],
+        queryFn: () => listVendors(page, perPage, search, classificationFilter, unclassifiedFilter),
     });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['procurement', 'vendors'] });
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<VendorFormValues>({
         resolver: zodResolver(vendorSchema),
-        defaultValues: { name: '', email: '', phone: '', gstin: '', state_code: '', tally_ledger_name: '' },
+        defaultValues: { name: '', email: '', phone: '', gstin: '', state_code: '', classifications: [], tally_ledger_name: '' },
     });
 
     const mutation = useMutation({
@@ -170,6 +210,30 @@ export default function VendorsPage() {
                 </Space>
             </Space>
 
+            {/*
+              DEC-20260902-026: Resin, Packaging and Consumables/Spares/
+              Tooling by default; Service, Other and Unclassified sit behind
+              this explicit choice. Kept in the URL (useListParams), so a
+              refresh or a pasted link keeps the chosen view.
+            */}
+            <Space style={{ marginBottom: 12 }}>
+                <Select
+                    mode="multiple"
+                    allowClear
+                    style={{ minWidth: 320 }}
+                    placeholder="Classification"
+                    value={selectedClassification}
+                    options={[
+                        ...VENDOR_CLASSIFICATIONS,
+                        { value: UNCLASSIFIED_FILTER_VALUE, label: 'Unclassified' },
+                    ]}
+                    onChange={(value: string[]) => {
+                        setPage(1);
+                        setListParams({ classification: value.length > 0 ? value : undefined });
+                    }}
+                />
+            </Space>
+
             <Table<Vendor>
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
@@ -201,6 +265,13 @@ export default function VendorsPage() {
                 columns={[
                     { title: 'Code', dataIndex: 'code' },
                     { title: 'Name', dataIndex: 'name' },
+                    {
+                        title: 'Classification',
+                        render: (_, row) =>
+                            (row.classifications ?? []).length > 0
+                                ? (row.classifications ?? []).map(classificationLabel).join(', ')
+                                : 'Unclassified',
+                    },
                     { title: 'Email', dataIndex: 'email' },
                     { title: 'Phone', dataIndex: 'phone' },
                     { title: 'GSTIN', dataIndex: 'gstin' },
@@ -262,6 +333,7 @@ export default function VendorsPage() {
                                     phone: row.phone ?? '',
                                     gstin: row.gstin ?? '',
                                     state_code: row.state_code ?? '',
+                                    classifications: row.classifications ?? [],
                                     tally_ledger_name: row.tally_ledger_name ?? '',
                                 });
                             };
@@ -309,6 +381,13 @@ export default function VendorsPage() {
                     >
                         <Controller name="state_code" control={control} render={({ field }) => <Input {...field} />} />
                     </Form.Item>
+                    <Form.Item label="Classification">
+                        <Controller
+                            name="classifications"
+                            control={control}
+                            render={({ field }) => <Select {...field} mode="multiple" options={VENDOR_CLASSIFICATIONS} allowClear />}
+                        />
+                    </Form.Item>
                     <Form.Item
                         label="Tally ledger name"
                         extra="Exactly as the ledger is named in Tally. Leave empty if not mapped — a Purchase Order for this vendor is then not staged for Tally."
@@ -353,6 +432,13 @@ export default function VendorsPage() {
                         help={editErrors.state_code?.message}
                     >
                         <Controller name="state_code" control={editControl} render={({ field }) => <Input {...field} />} />
+                    </Form.Item>
+                    <Form.Item label="Classification">
+                        <Controller
+                            name="classifications"
+                            control={editControl}
+                            render={({ field }) => <Select {...field} mode="multiple" options={VENDOR_CLASSIFICATIONS} allowClear />}
+                        />
                     </Form.Item>
                     <Form.Item
                         label="Tally ledger name"
