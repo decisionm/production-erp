@@ -55,6 +55,30 @@ only, floor does not scan again, so it iwll reach the day bin laod".
   Q94(a) names, or the day-bin figure and the resin provenance (DEC-20260810-001)
   go dark. Detail and citations: [research note](research/2026-09-02-quality-inventory-production-ground-truth.md) §1.
 
+## 2. End-of-day return: bin material stays, everything else may come back
+
+### Owner input (02-Sep-2026)
+
+Verbatim: "yes, and the return policy will not applicabel for Pet risen, other
+can be send" / "send back end of the day". Asked whether "other" is by name (only
+PET resin excluded) or by flow (anything tipped into the common day bin
+excluded): "B, only what goes in the day bin".
+
+### Result
+
+- **VERIFIED as a decision:** DEC-20260902-003. Material that goes into the
+  common day bin is never returned to the Store. Every other material — still in
+  its bag, box or roll — may be sent back at the end of the day, partially or
+  fully, as DEC-20260831-005 and DEC-20260901-001 already provide. Those two
+  decisions are narrowed to non-bin materials and otherwise unchanged.
+- **GAP:** the return screen today accepts any returnable Store Issue line
+  (`production-returns/returnable`, research note §1b). It must refuse a
+  bin-material line with a plain message.
+- **OPEN:** Q94(c) — how the ERP knows which items are bin materials once the
+  floor no longer scans at the bin. No item flag records it today, and whether
+  masterbatch goes into the bin is stated nowhere. The refusal cannot be built
+  until this is answered.
+
 ## Sections still to capture
 
 - Incoming Quality checklist for purchased material.

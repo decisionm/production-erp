@@ -2698,6 +2698,14 @@ leaves two things open.
 (b) Does the floor record anything at all when it tips an issued bag into the
     bin — a tap, a count, or nothing?
 
+(c) Which ITEMS go into the day bin? DEC-20260902-003 makes the end-of-day
+    return rule follow the flow — bin material is never returned, everything
+    else may be — so the ERP must know, per item, whether it is a bin material.
+    Today that fact exists only as the act of scanning a bag at the bin
+    (`FactoryDayBinService::loadBag`), which DEC-20260902-002 retires; no item
+    flag or category records it, and whether masterbatch goes into the bin is
+    stated in no primary source. Added 02-Sep-2026.
+
 **Blocks:** the code change that follows DEC-20260902-002 (moving the bag scan
 from the day-bin load to the Store Issue) cannot be designed until (a) is
 answered, because (a) decides which ledger the scan feeds.
