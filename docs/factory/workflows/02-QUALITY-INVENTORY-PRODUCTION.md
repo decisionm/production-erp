@@ -460,6 +460,13 @@ record's source.
 - **GAP:** no classification column, no filter, no proposal from the ledger
   group; every live vendor starts unclassified.
 
+- **VERIFIED as a decision:** DEC-20260902-027, Q59(b). The production-input
+  flag is the only eligibility rule for store requests and issues; category is
+  informational; a flag-category conflict warns and never changes the flag;
+  flag changes are audited. Q59(c) stays open.
+- **VERIFIED (code):** requests and issues already refuse an item without the
+  flag. **GAP:** no conflict warning and no audit of who set the flag.
+
 ## Sections still to capture
 
 - Store and held stock: governed by DEC-20260831-012 (hold, quality approval,

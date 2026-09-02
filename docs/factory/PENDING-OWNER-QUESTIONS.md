@@ -1441,8 +1441,10 @@ consumables, spares/tooling and unclassified items sit behind a deliberate
 'show additional purchasable items' choice, unclassified with a warning and a
 reason from an authorised person; finished goods never appear; every such
 purchase follows the full PR, PO, GRN, incoming Quality and stock workflow.
-Still open: (b) store material requests and (c) sales orders. The original
-entry follows.
+**(b) resolved 2026-09-02 by DEC-20260902-027:** the production-input flag
+stays the only rule for store requests and issues; category is informational,
+a flag-category conflict warns, and flag changes are audited. Still open:
+(c) sales orders. The original entry follows.
 
 PR #8 added the nullable `items.category` column and four values — Raw Material,
 Packing Material, Finished Good and Other — plus policy helpers intended for a
