@@ -14,6 +14,7 @@ use App\Modules\Production\Models\WorkCenter;
 use App\Modules\Production\Services\ShiftProductionEntryService;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
@@ -66,6 +67,33 @@ class FourEyesApprovalTest extends TestCase
             'quantity_scrap' => '0',
             'status' => ShiftProductionEntryStatus::Pending,
         ]);
+    }
+
+    /**
+     * A completed entry whose quality check has already been recorded, by
+     * $checker — the shared shape the third-comparison tests build on. Not
+     * an extraction from the two other tests below (they never record a
+     * quality check — this suite runs with the quality stage switched off),
+     * so it is new setup, not a moved one.
+     *
+     * @return array{0: ShiftProductionEntry, 1: User}
+     */
+    private function completedEntryCheckedBy(): array
+    {
+        $entry = $this->submittedEntry();
+
+        foreach (['production.manage', 'quality.manage'] as $permission) {
+            Permission::findOrCreate($permission, 'web');
+        }
+        $checker = User::factory()->create(['is_active' => true]);
+        $checker->givePermissionTo(['production.manage', 'quality.manage']);
+
+        $entry->forceFill([
+            'quality_checked_by' => $checker->id,
+            'quality_checked_at' => now(),
+        ])->save();
+
+        return [$entry->fresh(), $checker];
     }
 
     public function test_one_account_cannot_clear_both_gates(): void
@@ -124,6 +152,34 @@ class FourEyesApprovalTest extends TestCase
         $this->assertSame($solo->id, $approved->getRawOriginal('plant_manager_signed_by'));
         $this->assertSame($solo->id, $approved->getRawOriginal('accountant_signed_by'));
         $this->assertSame(1, TallySyncEntry::count());
+    }
+
+    /** DEC-20260902-010: the third comparison — checker vs plant manager. */
+    public function test_the_quality_checker_cannot_approve_as_plant_manager(): void
+    {
+        // completedEntryCheckedBy() — completed entry, quality check already
+        // recorded by $checker.
+        [$entry, $checker] = $this->completedEntryCheckedBy();
+
+        $checker->assignRole(Role::findOrCreate('Plant Manager', 'web'));
+        Sanctum::actingAs($checker);
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/pm-approve")
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'the person who checked quality cannot approve the same batch as plant manager');
+
+        $this->assertDatabaseHas('shift_production_entries', ['id' => $entry->id, 'status' => 'pending', 'plant_manager_signed_by' => null]);
+    }
+
+    public function test_the_flag_relaxes_the_checker_comparison_too(): void
+    {
+        config()->set('production.approvals.allow_same_user', true);
+        [$entry, $checker] = $this->completedEntryCheckedBy();
+
+        $checker->assignRole(Role::findOrCreate('Plant Manager', 'web'));
+        Sanctum::actingAs($checker);
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$entry->id}/pm-approve")->assertOk();
     }
 
     public function test_the_flag_defaults_to_off(): void

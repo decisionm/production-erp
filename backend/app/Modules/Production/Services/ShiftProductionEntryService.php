@@ -2740,6 +2740,21 @@ class ShiftProductionEntryService
             }
         }
 
+        // DEC-20260902-010 — the third four-eyes comparison. Same flag, same
+        // absence of an Administrator exemption, as the other two.
+        $checkedBy = ShiftProductionEntry::query()
+            ->whereKey($entry->id)
+            ->where('status', ShiftProductionEntryStatus::Pending->value)
+            ->value('quality_checked_by');
+
+        if (
+            $checkedBy !== null
+            && (int) $checkedBy === $signedBy
+            && ! (bool) config('production.approvals.allow_same_user', false)
+        ) {
+            throw new InvalidStatusTransitionException('the person who checked quality cannot approve the same batch as plant manager');
+        }
+
         return $this->advance($entry, ShiftProductionEntryStatus::Pending, ShiftProductionEntryStatus::PmApproved, [
             'plant_manager_signed_by' => $signedBy,
             'plant_manager_signed_at' => now(),
