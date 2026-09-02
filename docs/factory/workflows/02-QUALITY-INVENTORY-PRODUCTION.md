@@ -559,10 +559,10 @@ raises for the OWNER before any code, none of which an agent may answer:
    goes to Quality hold through the return, its remaining kg leaving
    Production/WIP and the resin pool together; Quality scraps or releases it.
    A declared narrowing of -003 and -004. Material in the bin has no door.
-2. DEC-20260902-005 says resin provenance is "read from the bags the Store
-   scanned at issue", while DEC-20260810-001 fixes the carton-trace wording as
-   "the day bin held loads from these lots" and Q54(d) is open. What the
-   carton-trace sentence becomes must be said, not inferred.
+2. ~~The carton-trace sentence~~ — **answered, DEC-20260902-037:** the trace
+   keeps its calculated bin-held-these-lots meaning and wording; the lot list
+   now comes from the bags scanned at Store Issue; exact Store Issue details are
+   shown separately and never combined into one sentence. Q54(d) closed.
 3. Whether a counted arrival MUST come in handling units, and what the GRN does
    when it does not (§5 above).
 4. Which treatment governs the resin figure on the Store ↔ Production page: the
