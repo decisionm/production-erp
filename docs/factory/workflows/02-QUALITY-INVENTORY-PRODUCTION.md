@@ -110,6 +110,21 @@ DEC-20260902-005.
   these two decisions is: add the flag, move the resin-pool fold to the Store
   Issue scan, retire the day-bin page and setting, surface the bin figure on the
   Store ↔ Production page, and make the return screen refuse a flagged item.
+- **GAP (from the review, load-bearing):** a TYPED Store Issue line moves
+  material to Production/WIP with no bag scan and no resin-pool entry
+  (`StoreIssueService::issue`, typed path). Under DEC-20260902-005 a typed line
+  for a bin material must be refused, or must fold the pool; otherwise the pool
+  loses its inflow silently (Q55(b)).
+- **GAP (from the review):** the closing day-bin figure written at completion
+  and handover (`recordClosingDayBin`) is not in the retirement list; what it
+  means once the bin is the WIP balance is unlisted.
+- **GAP (from the review):** the day bin's refusal set (Q55(c): no-bin-configured
+  422, the balance acknowledgement above the configured kg, the return and
+  count guards, the block on cancelling a batch with bin movements, null-not-zero
+  consumption) must be carried or expressly dropped, not lost.
+- **GAP (from the review, live read first):** `consumptionSource` still reads
+  the day-bin warehouse setting as its second step; the live value has never
+  been read (Q55(a)). Read it on live before retiring the setting.
 - **GAP (code):** the day-bin load today accepts any weighed bag, masterbatch
   included; after the build only a flagged item may be treated as bin material.
 
@@ -188,6 +203,9 @@ separately, one at a time.
   chain. The tolerance figure per product is master data a person enters.
 - **GAP:** no tolerance column exists on the product standard, and no screen
   compares a sample weight against the frozen unit weight.
+- **Narrowing, declared here:** DEC-20260902-007 fixes DEC-20260902-006's
+  "measured weight" as the TOTAL sample weight, from which the ERP computes the
+  per-piece average. Read the two together.
 - **VERIFIED as a decision:** DEC-20260902-008, visual observations. A
   maintained list of observation types, master data entered by an authorised
   person, ticked by the checker with an optional count per type, plus one free
@@ -270,6 +288,10 @@ purchase rates."
   figure ends inside on hold; the build replaces the figure with bag selection.
   Any bag already stuck on hold on live is counted before the build, never
   assumed.
+- **Narrowing, declared here:** DEC-20260902-012 narrows DEC-20260902-011 for
+  weighed materials: the rejected quantity is computed from the selected bags
+  and is never typed. Typed quantities remain only for counted materials, and
+  only until DEC-20260902-014's handling units exist.
 - **VERIFIED as a decision:** DEC-20260902-013. A counted arrival waits for
   incoming QA on its whole line quantity, no bags needed, enforced at the
   balance like the weighed hold. Rejected pieces leave stock through Rejections
@@ -287,6 +309,12 @@ purchase rates."
 - **GAP:** the GRN refuses a lots block for any item not in kilograms; the
   build adds handling units for counted materials, their labels, the unit-wise
   hold release and the unit scan at issue.
+- **Narrowing, declared here:** DEC-20260902-014 narrows DEC-20260902-013: the
+  counted hold is placed on the line quantity with no bags, and once handling
+  units exist it is released unit by unit. Two things the pair does not say
+  and an owner must: whether a handling-unit block is MANDATORY on a counted
+  GRN line, and what the GRN does with an arrival that comes with no labelled
+  units. Arrivals received before the build keep the typed path.
 - **VERIFIED as a decision:** DEC-20260902-015. No Tally voucher for an
   incoming rejection. The rejected quantity and the Rejections Out reference
   are shown on the Supplier Bill screen against the GRN line so Accounts can
@@ -353,6 +381,9 @@ record's source.
 - **VERIFIED (code):** the switch, the per-check severities and the named-gap
   strings already exist; the build is the rollout and the colour-only warning
   check.
+- **GAP (from the review):** the gate has ten checks; DEC-20260902-017 lists
+  eight refusals plus colour. `item_active` is a refusal in the shipped gate
+  and is NOT dropped by enforcing the list: an inactive item still refuses.
 
 ## 8. Batch lifecycle: the approval chain's posting gate
 
@@ -457,8 +488,9 @@ record's source.
   default; Service, Other and Unclassified through an explicit filter.
   Classification never blocks selecting a vendor. Existing vendors stay
   unclassified until reviewed.
-- **GAP:** no classification column, no filter, no proposal from the ledger
-  group; every live vendor starts unclassified.
+- **GAP:** no vendor classification exists at all (it is multi-valued, so a
+  list per vendor, not a column), no filter, no proposal from the ledger group;
+  every live vendor starts unclassified.
 
 - **VERIFIED as a decision:** DEC-20260902-027, Q59(b). The production-input
   flag is the only eligibility rule for store requests and issues; category is
@@ -510,7 +542,41 @@ record's source.
   contain active Finished Good items only; the server refuses any other
   category from the confirmed item-master category; historical orders stay
   readable. Q59 closed in full.
-- **GAP:** the sales-order picker and server do not refuse on category yet.
+- **GAP:** the sales-order picker and server do not refuse on category yet,
+  and the server does not check that the item is ACTIVE either: the request
+  validates only that the item exists.
+
+## Review (02-Sep-2026)
+
+An Opus second opinion on the 34 records is filed as
+[research/2026-09-02-opus-review-of-decisions.md](research/2026-09-02-opus-review-of-decisions.md).
+Verdict: no record is wrong in rule and every supersession is declared; merge
+PR #80 with the narrowings and gaps above added, which they now are. What it
+raises for the OWNER before any code, none of which an agent may answer:
+
+1. A damaged bin material has no door: DEC-20260902-003 forbids returning bin
+   material, and the damaged path to Quality (DEC-20260901-003) is reached only
+   through a return. A torn PET resin bag on the floor today can go nowhere.
+2. DEC-20260902-005 says resin provenance is "read from the bags the Store
+   scanned at issue", while DEC-20260810-001 fixes the carton-trace wording as
+   "the day bin held loads from these lots" and Q54(d) is open. What the
+   carton-trace sentence becomes must be said, not inferred.
+3. Whether a counted arrival MUST come in handling units, and what the GRN does
+   when it does not (§5 above).
+4. Which treatment governs the resin figure on the Store ↔ Production page: the
+   never-counted estimate of DEC-20260807-007, the usable quantity of
+   DEC-20260831-005, or a ledger row the Tally reconcile compares.
+5. Whether DEC-20260902-029 and DEC-20260902-031 still read as the owner's own
+   rules: -029 rests on "we can go with your recommendation of A"; -031 records
+   the opposite of the owner's first answer after a Codex argument the owner
+   accepted.
+
+Build-blocking, not merge-blocking: a rollout order for DEC-20260902-013, -023
+and -035, each of which refuses a real live transaction on day one unless the
+DEC-20260827-001 classification run reaches live first; the resin-pool inflow
+before the floor scan retires; Q55(a) and Q55(c); and the live count of who
+holds procurement write, since DEC-20260902-025 plus the Store-role record on
+PR #79 can leave a requisition with no eligible approver.
 
 ## Status
 

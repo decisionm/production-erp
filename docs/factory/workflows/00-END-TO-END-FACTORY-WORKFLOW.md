@@ -25,40 +25,47 @@ flowchart LR
 
     subgraph procurement ["Procurement"]
         purchaseNeed["Material need"] --> requisition["Purchase requisition"]
-        requisition --> requisitionApproval{"Approved by authorised person?"}
-        requisitionApproval -->|"No"| rejectedRequest["Return or reject"]
-        requisitionApproval -->|"Yes"| purchaseOrder["Purchase order"]
+        requisition --> requisitionApproval{"Approved by a different procurement user?"}
+        requisitionApproval -->|"Rejected by approver"| rejectedRequest["Rejected"]
+        requisition -->|"Requester withdraws"| withdrawnRequest["Withdrawn"]
+        requisitionApproval -->|"Yes"| purchaseOrder["Purchase order (PO first, always)"]
         purchaseOrder --> deliverySchedule["Delivery schedule"]
         deliverySchedule --> goodsReceipt["Partial or full GRN"]
-        goodsReceipt --> incomingInspection["Incoming inspection"]
+        goodsReceipt --> labels["Bag labels (weighed) or handling-unit labels (counted)"]
+        goodsReceipt --> qcHold["Held for incoming Quality (every arrival)"]
+        qcHold --> incomingInspection["Incoming inspection: whole bags or units"]
         incomingInspection -->|"Accepted"| usableMaterial["Usable material stock"]
-        incomingInspection -->|"Rejected"| rejectedMaterial["Rejected material control"]
-        goodsReceipt --> supplierBill["Supplier bill recorded by Accounts"]
+        incomingInspection -->|"Rejected"| rejectionsOut["Rejections Out issue"]
+        rejectionsOut -.-> supplierBill["Supplier bill: rejected qty and reference shown"]
+        goodsReceipt --> supplierBill
     end
 
     subgraph inventory ["Store and inventory"]
-        usableMaterial --> barcodeLabels["Bag or lot labels"]
         usableMaterial --> storeStock["Single operational Store"]
-        storeStock --> storeProduction["Store issues material to Production"]
+        storeStock --> storeIssue["Store Issue: Store scans the bag once"]
+        storeIssue --> productionWip["Production/WIP (the day bin for PET resin)"]
+        productionWip -->|"End of day, non-bin material still in its container"| storeStock
+        productionWip -->|"Damaged non-bin material"| qualityHold["Quality hold"]
         storeStock --> salesHold["Hold finished goods for a sales order"]
     end
 
     subgraph production ["Production"]
-        storeProduction --> productionPlan["Capacity and completion estimate"]
-        productionPlan --> productionQueue["Production queue"]
-        productionQueue --> startBatch["Start batch"]
+        productionRequest["Production request"] --> productionQueue["Queue: promised date first, manual position sticks"]
+        productionQueue --> productionPlan["Completion estimate: ceiling, one machine"]
+        productionQueue --> startBatch["Start batch: readiness gate, packaging, override reason"]
+        productionWip --> startBatch
         startBatch --> recordRun["Output, consumption, exceptions and downtime"]
-        recordRun --> completeBatch["Complete batch"]
-        completeBatch --> productionQuality["Production quality checklist"]
-        productionQuality --> productionApproval["Plant Manager and Accounts approvals"]
-        productionApproval --> finishedStock["Finished goods stock"]
+        recordRun --> completeBatch["Complete batch: variance shown"]
+        completeBatch --> finishedStock["Finished goods in the Store"]
+        completeBatch --> productionQuality["Quality: checklist beside the OK/rejected count"]
+        productionQuality --> pmApproval["Plant Manager approval (not the checker)"]
+        pmApproval --> accountsApproval["Accounts approval (not the PM; postable voucher)"]
     end
 
     subgraph sales ["Sales and dispatch"]
-        salesOrder["Sales order"] --> stockAvailable{"Finished goods available?"}
+        salesOrder["Sales order: finished goods only"] --> stockAvailable{"Finished goods available?"}
         stockAvailable -->|"Yes"| salesHold
-        stockAvailable -->|"No"| productionRequest["Send shortage to Production"]
-        productionRequest --> productionPlan
+        stockAvailable -->|"No"| productionRequest
         finishedStock --> salesHold
         salesHold --> dispatchQuality["Internal Quality approval"]
         dispatchQuality --> storeDispatch["Store dispatches"]
@@ -67,7 +74,7 @@ flowchart LR
 
     subgraph tally ["Tally and reports"]
         purchaseOrder -.-> tallyPurchaseOrder["Tally Purchase Order"]
-        productionApproval -.-> tallyStockJournal["Tally Stock Journal"]
+        accountsApproval -.-> tallyStockJournal["Tally Stock Journal, one per shift"]
         deliveryComplete --> tallySalesInvoice["Tally creates Sales Invoice"]
         tallySalesInvoice --> importSalesInvoice["ERP imports and matches invoice"]
         tallyStockJournal --> reconciliation["Reports and reconciliation"]
@@ -76,13 +83,16 @@ flowchart LR
 
     roleDashboard --> purchaseNeed
     roleDashboard --> incomingInspection
-    roleDashboard --> storeProduction
-    roleDashboard --> productionPlan
+    roleDashboard --> storeIssue
+    roleDashboard --> productionQueue
     roleDashboard --> salesOrder
 ```
 
 The dotted Tally arrows mean a separate integration action. They do not mean the
 browser talks directly to Tally. The local Tally Agent is the integration boundary.
+Redrawn 02-Sep-2026 to the factory DEC-20260902-002 to -035 define; the earlier
+drawing hung finished goods off approval and showed no scan, no day bin, no
+return, no hold for counted material and no queue order.
 
 ## Role dashboard requirement
 
@@ -91,7 +101,7 @@ that role.
 
 | Role | Dashboard must answer |
 |---|---|
-| Store | What was requested, what must be issued, what is waiting for QC, what sales stock is held, and what is ready to dispatch? |
+| Store | What was requested, what must be issued, what is waiting for QC, what finished goods are completed, Quality-pending, approved and rejected, what sales stock is held, and what is ready to dispatch? |
 | Procurement | What requisitions need action, what approved requests need a PO, what POs are due, and what deliveries are short or late? |
 | Quality | What incoming material and finished goods need inspection or approval? |
 | Production | What is queued, what can start, what is running, what is down, and what is waiting for completion? |
