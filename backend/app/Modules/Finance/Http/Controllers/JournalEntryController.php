@@ -3,6 +3,7 @@
 namespace App\Modules\Finance\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Finance\Http\Requests\ListJournalEntriesRequest;
 use App\Modules\Finance\Http\Requests\StoreJournalEntryRequest;
 use App\Modules\Finance\Http\Resources\JournalEntryResource;
 use App\Modules\Finance\Models\JournalEntry;
@@ -13,9 +14,12 @@ class JournalEntryController extends Controller
 {
     public function __construct(private readonly JournalEntryService $entries) {}
 
-    public function index(): AnonymousResourceCollection
+    public function index(ListJournalEntriesRequest $request): AnonymousResourceCollection
     {
-        return JournalEntryResource::collection($this->entries->paginate());
+        return JournalEntryResource::collection($this->entries->paginate(
+            (int) ($request->validated('per_page') ?? 20),
+            $request->validated('sort'),
+        ));
     }
 
     public function store(StoreJournalEntryRequest $request): JournalEntryResource

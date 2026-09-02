@@ -4,8 +4,10 @@ namespace App\Modules\Finance\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Finance\Exceptions\UnbalancedJournalEntryException;
+use App\Modules\Finance\Http\Requests\ListJournalEntriesRequest;
 use App\Modules\Finance\Models\Enums\JournalEntryStatus;
 use App\Modules\Finance\Models\JournalEntry;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
@@ -16,12 +18,13 @@ use Illuminate\Support\Facades\DB;
  */
 class JournalEntryService
 {
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /** Newest first when no sort is asked for — what this list always was. */
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return JournalEntry::query()
-            ->with(['lines.glAccount'])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+        $query = JournalEntry::query()->with(['lines.glAccount']);
+        ListSort::apply($query, $sort, ListJournalEntriesRequest::SORTABLE, '-id');
+
+        return $query->paginate($perPage);
     }
 
     /**

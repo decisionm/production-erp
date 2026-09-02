@@ -1,25 +1,40 @@
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, InputNumber, Space, Table, Tabs, Tag, Typography } from 'antd';
+import type { TableProps } from 'antd';
 import { useState } from 'react';
 import { getGstr1Report, getInvoiceGstBreakdown } from '@/features/compliance/api';
 import type { GstInvoiceLineBreakdown, Gstr1Row } from '@/features/compliance/types';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
+import { TABLE_STICKY } from '@/lib/tableProps';
 
-const gstr1Columns = [
-    { title: 'Invoice', render: (_: unknown, row: Gstr1Row) => `INV #${row.invoice_id}` },
-    { title: 'Date', dataIndex: 'invoice_date' },
-    { title: 'Customer', dataIndex: 'customer_name' },
-    { title: 'GSTIN', dataIndex: 'customer_gstin' },
-    {
-        title: 'Supply Type',
-        dataIndex: 'supply_type',
-        render: (type: string) => <Tag color={type === 'inter_state' ? 'purple' : 'blue'}>{type.replace('_', ' ')}</Tag>,
-    },
-    { title: 'Taxable Value', dataIndex: 'taxable_value' },
-    { title: 'CGST', dataIndex: 'cgst' },
-    { title: 'SGST', dataIndex: 'sgst' },
-    { title: 'IGST', dataIndex: 'igst' },
-    { title: 'Total Tax', dataIndex: 'total_tax' },
-];
+const supplyTypeLabel = (type: unknown) => String(type).replace('_', ' ');
+
+/**
+ * The B2B and B2C tables hold their WHOLE section in the browser (the
+ * return answers arrays), so sorters and filters are client-side over the
+ * rows each table is given.
+ */
+function gstr1Columns(rows: readonly Gstr1Row[]): TableProps<Gstr1Row>['columns'] {
+    return [
+        { title: 'Invoice', sorter: columnSorter((row) => row.invoice_id, 'number'), render: (_, row) => `INV #${row.invoice_id}` },
+        { title: 'Date', dataIndex: 'invoice_date', sorter: columnSorter((row) => row.invoice_date, 'date') },
+        { title: 'Customer', dataIndex: 'customer_name', sorter: columnSorter((row) => row.customer_name, 'text') },
+        { title: 'GSTIN', dataIndex: 'customer_gstin', sorter: columnSorter((row) => row.customer_gstin, 'text') },
+        {
+            title: 'Supply Type',
+            dataIndex: 'supply_type',
+            sorter: columnSorter((row) => row.supply_type, 'text'),
+            filters: filterOptions(rows, (row) => row.supply_type, supplyTypeLabel),
+            onFilter: onFilterBy((row) => row.supply_type),
+            render: (type: string) => <Tag color={type === 'inter_state' ? 'purple' : 'blue'}>{supplyTypeLabel(type)}</Tag>,
+        },
+        { title: 'Taxable Value', dataIndex: 'taxable_value', sorter: columnSorter((row) => row.taxable_value, 'number') },
+        { title: 'CGST', dataIndex: 'cgst', sorter: columnSorter((row) => row.cgst, 'number') },
+        { title: 'SGST', dataIndex: 'sgst', sorter: columnSorter((row) => row.sgst, 'number') },
+        { title: 'IGST', dataIndex: 'igst', sorter: columnSorter((row) => row.igst, 'number') },
+        { title: 'Total Tax', dataIndex: 'total_tax', sorter: columnSorter((row) => row.total_tax, 'number') },
+    ];
+}
 
 function Gstr1Tab() {
     const { data, isLoading } = useQuery({ queryKey: ['compliance', 'reports', 'gstr1'], queryFn: getGstr1Report });
@@ -43,10 +58,10 @@ function Gstr1Tab() {
             )}
 
             <Typography.Title level={5}>B2B (registered customers)</Typography.Title>
-            <Table scroll={{ x: 'max-content' }} rowKey="invoice_id" loading={isLoading} dataSource={data?.b2b} pagination={false} columns={gstr1Columns} />
+            <Table<Gstr1Row> sticky={TABLE_STICKY} scroll={{ x: 'max-content' }} rowKey="invoice_id" loading={isLoading} dataSource={data?.b2b} pagination={false} columns={gstr1Columns(data?.b2b ?? [])} />
 
             <Typography.Title level={5} style={{ marginTop: 24 }}>B2C</Typography.Title>
-            <Table scroll={{ x: 'max-content' }} rowKey="invoice_id" loading={isLoading} dataSource={data?.b2c} pagination={false} columns={gstr1Columns} />
+            <Table<Gstr1Row> sticky={TABLE_STICKY} scroll={{ x: 'max-content' }} rowKey="invoice_id" loading={isLoading} dataSource={data?.b2c} pagination={false} columns={gstr1Columns(data?.b2c ?? [])} />
 
             {data && (
                 <Space direction="vertical" style={{ marginTop: 24 }}>
@@ -104,18 +119,19 @@ function InvoiceBreakdownTab() {
                     </Space>
 
                     <Table<GstInvoiceLineBreakdown>
+                        sticky={TABLE_STICKY}
                         scroll={{ x: 'max-content' }}
                         rowKey="item_id"
                         dataSource={data.lines}
                         pagination={false}
                         columns={[
-                            { title: 'HSN/SAC', dataIndex: 'hsn_sac_code' },
-                            { title: 'Taxable Value', dataIndex: 'taxable_value' },
-                            { title: 'Rate %', dataIndex: 'rate_percent' },
-                            { title: 'CGST', dataIndex: 'cgst' },
-                            { title: 'SGST', dataIndex: 'sgst' },
-                            { title: 'IGST', dataIndex: 'igst' },
-                            { title: 'Total', dataIndex: 'total' },
+                            { title: 'HSN/SAC', dataIndex: 'hsn_sac_code', sorter: columnSorter((row) => row.hsn_sac_code, 'text') },
+                            { title: 'Taxable Value', dataIndex: 'taxable_value', sorter: columnSorter((row) => row.taxable_value, 'number') },
+                            { title: 'Rate %', dataIndex: 'rate_percent', sorter: columnSorter((row) => row.rate_percent, 'number') },
+                            { title: 'CGST', dataIndex: 'cgst', sorter: columnSorter((row) => row.cgst, 'number') },
+                            { title: 'SGST', dataIndex: 'sgst', sorter: columnSorter((row) => row.sgst, 'number') },
+                            { title: 'IGST', dataIndex: 'igst', sorter: columnSorter((row) => row.igst, 'number') },
+                            { title: 'Total', dataIndex: 'total', sorter: columnSorter((row) => row.total, 'number') },
                         ]}
                     />
 

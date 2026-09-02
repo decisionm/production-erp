@@ -32,7 +32,12 @@ import {
     serialiseFilters,
 } from '@/features/exports/filters';
 import type { ExportFilterField, ExportFilterValues, ExportKind, ExportRun } from '@/features/exports/types';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 import { downloadBlob } from '@/lib/csv';
+import { TABLE_STICKY } from '@/lib/tableProps';
+
+/** The Outcome column's three states, as the filter menu names them. */
+const OUTCOME_LABELS: Record<string, string> = { completed: 'Completed', refused: 'Refused', incomplete: 'Not completed' };
 
 /**
  * The Download / Export Center (MASTER-PLAN Phase 4.5).
@@ -180,22 +185,34 @@ function ExportKindCard({ kind }: { kind: ExportKind }) {
 function RecentDownloads({ kinds }: { kinds: readonly ExportKind[] }) {
     const { data, isLoading, isError, error } = useQuery({ queryKey: RUNS_QUERY_KEY, queryFn: listExportRuns });
     const labelOf = (key: string) => kinds.find((kind) => kind.key === key)?.label ?? key;
+    const runs = data ?? [];
+    const outcomeOf = (run: ExportRun) => runOutcome(run).state;
 
     return (
         <Table<ExportRun>
+            sticky={TABLE_STICKY}
             size="small"
             rowKey="id"
             loading={isLoading}
+            // The whole run list is in the browser (an unpaged array), so the
+            // sorters and filters are client-side over all of it.
             pagination={false}
             scroll={{ x: 'max-content' }}
-            dataSource={data ?? []}
+            dataSource={runs}
             locale={{
                 emptyText: isError
                     ? `Could not read your downloads: ${(error as { message?: string })?.message ?? 'unknown error'}`
                     : 'Nothing downloaded from this login yet.',
             }}
             columns={[
-                { title: 'Kind', dataIndex: 'kind', render: (key: string) => labelOf(key) },
+                {
+                    title: 'Kind',
+                    dataIndex: 'kind',
+                    sorter: columnSorter((run) => labelOf(run.kind), 'text'),
+                    filters: filterOptions(runs, (run) => run.kind, (key) => labelOf(String(key))),
+                    onFilter: onFilterBy((run) => run.kind),
+                    render: (key: string) => labelOf(key),
+                },
                 {
                     title: 'Filters',
                     dataIndex: 'filters',
@@ -203,10 +220,18 @@ function RecentDownloads({ kinds }: { kinds: readonly ExportKind[] }) {
                         <Typography.Text style={{ fontSize: 12 }}>{filtersSummary(filters)}</Typography.Text>
                     ),
                 },
-                { title: 'Rows', dataIndex: 'row_count', align: 'right', render: (n: number) => n.toLocaleString('en-IN') },
+                {
+                    title: 'Rows',
+                    dataIndex: 'row_count',
+                    align: 'right',
+                    sorter: columnSorter((run) => run.row_count, 'number'),
+                    render: (n: number) => n.toLocaleString('en-IN'),
+                },
                 { title: 'File', dataIndex: 'file_name', render: (name: string) => <Typography.Text code>{name}</Typography.Text> },
                 {
                     title: 'Outcome',
+                    filters: filterOptions(runs, outcomeOf, (state) => OUTCOME_LABELS[String(state)] ?? String(state)),
+                    onFilter: onFilterBy(outcomeOf),
                     render: (_, run) => {
                         const outcome = runOutcome(run);
                         const color = outcome.state === 'completed' ? 'green' : outcome.state === 'refused' ? 'red' : 'orange';
@@ -217,6 +242,7 @@ function RecentDownloads({ kinds }: { kinds: readonly ExportKind[] }) {
                 {
                     title: 'When',
                     dataIndex: 'created_at',
+                    sorter: columnSorter((run) => run.created_at, 'date'),
                     // A server instant (created_at), so the browser's clock is
                     // the right one to read it on — see lib/datetime.ts.
                     render: (at: string | null) => (at ? new Date(at).toLocaleString() : '—'),
