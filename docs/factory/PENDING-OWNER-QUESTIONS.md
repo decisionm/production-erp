@@ -2821,7 +2821,14 @@ from the day-bin load to the Store Issue) cannot be designed until (a) is
 answered, because (a) decides which ledger the scan feeds.
 *Open since 2026-09-02.*
 
-## Q96 · The ERP's own Sales Invoice: retire it, or keep it as a disciplined proforma?
+## Q96 · The ERP's own Sales Invoice: retire it, or keep it as a disciplined proforma? — RESOLVED
+
+**Resolved 2026-09-03 by DEC-20260903-004 — option A: the ERP's own sales
+invoice is retired; the Invoices screen and the create/issue routes are
+withdrawn, no proforma replaces them, existing rows stay as read-only history,
+and the imported Tally invoice matched to the order is the ERP's invoice
+record. Owed build: chapter 3 item 12. Until it ships, PR #88's cap holds.**
+The original question follows.
 
 What the read-only spot check of the live database found (03-Sep-2026 04:00 IST,
 4 orders, 2 deliveries, 2 invoices, all demo-era July data against seeded customers):
