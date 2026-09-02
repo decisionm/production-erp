@@ -236,17 +236,38 @@ check, the observations, the sample count and the checker rule.
   no observation list.
 - Citations: [research note](research/2026-09-02-quality-inventory-production-ground-truth.md) §2.
 
+### Owner input (02-Sep-2026)
+
+Verbatim: "incoming inspector sees PO, supplier, lot, bag count, sample weight,
+visual defects and refer codex and take it only if you okay", with a Codex draft
+of the screen. Asked whether the supplier is hidden as FC-06 stands or shown:
+"A. Keep the supplier hidden from Quality as FC-06 stands. The PO and GRN
+references provide enough traceability without showing supplier details or
+purchase rates."
+
 ### Result
 
 - **VERIFIED:** the hold, the whole-line inspection, the accept/reject split and
   the Rejections Out issue are built and tested.
-- **OPEN (to ask, one at a time):**
-  1. What does the incoming inspector see and record, in the same shape as the
-     finished-goods screen?
-  2. May QC split one bag's kilograms between accepted and rejected, or is a bag
-     always accepted or rejected whole?
-  3. Counted packaging: Q87.
-  4. The Tally rejection voucher: Accounts, not the floor.
+- **VERIFIED as a decision:** DEC-20260902-011, the incoming screen. One screen
+  per GRN line. Read-only: GRN and PO reference, received date, material,
+  received quantity and unit, lot, and for weighed materials the bag count,
+  barcodes and receipt weights. No supplier, no rate (FC-06). The inspector
+  records bags sampled, measured sample weight, observations from the
+  maintained list, one note, and the accepted and rejected quantities. Inspected
+  is the full received quantity, never typed. Evidence only; the quantities stay
+  the only stock action. Counted packaging hides the bag and weight fields until
+  Q87.
+- **GAP:** the screen today asks for the inspected quantity and has no sampled
+  bags, sample weight or observation fields; the build removes the typed
+  inspected figure, adds the evidence fields, and keeps the quantities' stock
+  effect exactly as it is.
+- **OPEN (asked one at a time):**
+  1. May QC split one bag's kilograms between accepted and rejected, or is a bag
+     always accepted or rejected whole? Today a bag the rejection ends inside
+     stays on hold with a note.
+  2. Counted packaging: Q87.
+  3. The Tally rejection voucher: Accounts, not the floor.
 
 ## Sections still to capture
 
