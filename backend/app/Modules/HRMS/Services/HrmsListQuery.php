@@ -51,6 +51,20 @@ class HrmsListQuery
         });
     }
 
+    /**
+     * The attendance-import review list's `q`: the employee code or name AS
+     * THE PUNCH REPORT PRINTED THEM, on the line itself — an unknown
+     * employee has no master row to search through, and the whole point of
+     * that filter is finding them.
+     */
+    public function whereImportLineMatches(Builder $lines, string $term): void
+    {
+        $lines->where(function (Builder $any) use ($term) {
+            $this->grammar->whereLike($any, 'employee_code', $term);
+            $any->orWhere(fn (Builder $name) => $this->grammar->whereLike($name, 'employee_name', $term));
+        });
+    }
+
     /** Inclusive range on a plain DATE column. */
     public function applyDateRange(Builder $query, string $column, ?string $from, ?string $to): void
     {
