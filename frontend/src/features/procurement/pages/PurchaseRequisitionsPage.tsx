@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
+import { Button, Checkbox, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import { useState } from 'react';
 import { Controller, useFieldArray, useForm, useWatch } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -19,6 +19,7 @@ import { apiMessage } from '@/features/procurement/components/apiMessage';
 import { prDrawerTitle, prNumber, requisitionStatusTag } from '@/features/procurement/documentWords';
 import { balanceToOrderWords, coverageStatusTag, hasCoverage, quantityWithUom } from '@/features/procurement/requisitionCoverage';
 import { poNumber } from '@/features/procurement/purchaseOrders';
+import { isUnclassified, purchasePickerItems } from '@/features/procurement/purchasePicker';
 import { instant } from '@/features/tally-sync/drawer';
 import { itemLabel } from '@/lib/itemLabel';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
@@ -34,6 +35,9 @@ const requisitionSchema = z.object({
                 item_id: z.number({ error: 'Item is required' }),
                 quantity: z.number().gt(0, 'Quantity must be greater than 0'),
                 notes: z.string().optional(),
+                // DEC-20260902-023: required only when the chosen item is
+                // unclassified — the server (Task 4) is the enforcement.
+                unclassified_reason: z.string().optional(),
             }),
         )
         .min(1, 'Add at least one line'),
@@ -123,7 +127,15 @@ export default function PurchaseRequisitionsPage() {
         placeholderData: (previous) => previous,
     });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
-    const itemOptions = items?.data.map((item) => ({ value: item.id, label: itemLabel(item) })) ?? [];
+    // DEC-20260902-023: raw and packing material by default; Other and
+    // unclassified items only behind this deliberate choice, the latter
+    // flagged because the line will demand a reason.
+    const [showAdditional, setShowAdditional] = useState(false);
+    const pickerItems = purchasePickerItems(items?.data, showAdditional);
+    const itemOptions = pickerItems.map(({ item, warning }) => ({
+        value: item.id,
+        label: warning ? `${itemLabel(item)} · ${warning}` : itemLabel(item),
+    }));
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<RequisitionFormValues>({
         resolver: zodResolver(requisitionSchema),
@@ -407,6 +419,11 @@ export default function PurchaseRequisitionsPage() {
                     </Form.Item>
 
                     <Typography.Text strong>Lines</Typography.Text>
+                    <div style={{ marginTop: 4, marginBottom: 4 }}>
+                        <Checkbox checked={showAdditional} onChange={(e) => setShowAdditional(e.target.checked)}>
+                            Show additional purchasable items
+                        </Checkbox>
+                    </div>
                     {errors.lines?.root && (
                         <div style={{ color: '#ff4d4f', marginBottom: 8 }}>{errors.lines.root.message}</div>
                     )}
@@ -445,6 +462,18 @@ export default function PurchaseRequisitionsPage() {
                             />
                             <Button danger onClick={() => remove(index)}>Remove</Button>
                         </Space>
+                        {(() => {
+                            const chosen = items?.data.find((item) => item.id === watchedLines?.[index]?.item_id);
+                            return chosen && isUnclassified(chosen) ? (
+                                <Controller
+                                    name={`lines.${index}.unclassified_reason`}
+                                    control={control}
+                                    render={({ field }) => (
+                                        <Input {...field} placeholder="Reason" style={{ width: 260, marginTop: 4 }} required />
+                                    )}
+                                />
+                            ) : null;
+                        })()}
                         {/*
                           Only the array-level error was rendered, so a line
                           with no item or no quantity failed validation with

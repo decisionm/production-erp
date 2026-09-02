@@ -1,4 +1,4 @@
-import { Button, DatePicker, Input, InputNumber, Select, Space, Typography } from 'antd';
+import { Button, Checkbox, DatePicker, Input, InputNumber, Select, Space, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { type Control, Controller, type FieldErrors, useFieldArray, useWatch } from 'react-hook-form';
 import { z } from 'zod';
@@ -21,6 +21,9 @@ export const purchaseOrderLineSchema = z.object({
     item_id: z.number({ error: 'Item is required' }),
     quantity: z.number().gt(0, 'Quantity must be greater than 0'),
     unit_price: z.number().min(0),
+    // DEC-20260902-023: required only when the chosen item is unclassified
+    // — the server (Task 4) is the enforcement, not this field.
+    unclassified_reason: z.string().optional(),
     // Item/due-date delivery windows (their sum may not exceed the line —
     // the server enforces it; the arrival screen consumes them
     // oldest-due-first).
@@ -129,6 +132,17 @@ interface PurchaseOrderLinesFieldsProps<T extends LinesFormValues> {
      * again. Said above the lines so nobody wonders where the rate went.
      */
     ratesNotPrefilled?: boolean;
+    /**
+     * DEC-20260902-023: whether the picker is offering Other/unclassified
+     * items alongside Raw and Packing material, and the setter for the
+     * checkbox that decides it. The state lives with whichever host query
+     * built `itemOptions`, not here — these fields hold no item list of
+     * their own.
+     */
+    showAdditional?: boolean;
+    onShowAdditionalChange?: (value: boolean) => void;
+    /** The item ids `itemOptions` is offering unclassified — gates the reason input per line. */
+    unclassifiedItemIds?: ReadonlySet<number>;
 }
 
 /**
@@ -144,6 +158,9 @@ export default function PurchaseOrderLinesFields<T extends LinesFormValues>({
     vendorId = null,
     setUnitPrice,
     ratesNotPrefilled = false,
+    showAdditional,
+    onShowAdditionalChange,
+    unclassifiedItemIds,
 }: PurchaseOrderLinesFieldsProps<T>) {
     // The host form has more fields than `lines`; these fields only ever
     // address `lines.*`, so the narrower control type is the honest one.
@@ -163,6 +180,13 @@ export default function PurchaseOrderLinesFields<T extends LinesFormValues>({
                     Unit prices are not shown to this login (FC-06), so they are not prefilled — enter the rate for each line
                     again. The previous lines are kept in the order's revision history.
                 </Typography.Text>
+            )}
+            {onShowAdditionalChange && (
+                <div style={{ marginTop: 4, marginBottom: 4 }}>
+                    <Checkbox checked={showAdditional ?? false} onChange={(e) => onShowAdditionalChange(e.target.checked)}>
+                        Show additional purchasable items
+                    </Checkbox>
+                </div>
             )}
             {errors.lines?.root && (
                 <div style={{ color: '#ff4d4f', marginBottom: 8 }}>{errors.lines.root.message}</div>
@@ -196,6 +220,15 @@ export default function PurchaseOrderLinesFields<T extends LinesFormValues>({
                         />
                         <Button danger onClick={() => remove(index)}>Remove</Button>
                     </Space>
+                    {unclassifiedItemIds?.has(lineValues?.[index]?.item_id as number) && (
+                        <Controller
+                            name={`lines.${index}.unclassified_reason`}
+                            control={linesControl}
+                            render={({ field }) => (
+                                <Input {...field} placeholder="Reason" style={{ width: 260, marginTop: 4 }} required />
+                            )}
+                        />
+                    )}
                     {/*
                       WHICH LINE IS WRONG, AND WHY. Only the array-level error
                       was rendered, so a line missing an item, a quantity or a

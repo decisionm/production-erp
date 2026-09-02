@@ -41,6 +41,10 @@ interface CreatePurchaseOrderModalProps {
     itemOptions: { value: number; label: string }[];
     /** When set, the form opens prefilled from an approved requisition. */
     raiseFrom?: RaiseFromRequisition | null;
+    /** DEC-20260902-023 — forwarded to the lines editor unchanged. */
+    showAdditional: boolean;
+    onShowAdditionalChange: (value: boolean) => void;
+    unclassifiedItemIds: ReadonlySet<number>;
 }
 
 /**
@@ -56,7 +60,17 @@ interface CreatePurchaseOrderModalProps {
  * and every rate are still typed here — a requisition names neither
  * (FC-06: no money on the requisition surface).
  */
-export default function CreatePurchaseOrderModal({ open, onClose, onCreated, vendorOptions, itemOptions, raiseFrom = null }: CreatePurchaseOrderModalProps) {
+export default function CreatePurchaseOrderModal({
+    open,
+    onClose,
+    onCreated,
+    vendorOptions,
+    itemOptions,
+    raiseFrom = null,
+    showAdditional,
+    onShowAdditionalChange,
+    unclassifiedItemIds,
+}: CreatePurchaseOrderModalProps) {
     const { control, handleSubmit, reset, setValue, formState: { errors } } = useForm<OrderFormValues>({
         resolver: zodResolver(orderSchema),
         defaultValues: { lines: [emptyPurchaseOrderLine()] },
@@ -199,6 +213,9 @@ export default function CreatePurchaseOrderModal({ open, onClose, onCreated, ven
                     // the ones for the party actually being ordered from.
                     vendorId={vendorId ?? null}
                     setUnitPrice={(index, rate) => setValue(`lines.${index}.unit_price`, rate, { shouldDirty: true, shouldValidate: true })}
+                    showAdditional={showAdditional}
+                    onShowAdditionalChange={onShowAdditionalChange}
+                    unclassifiedItemIds={unclassifiedItemIds}
                 />
             </Form>
         </Modal>
