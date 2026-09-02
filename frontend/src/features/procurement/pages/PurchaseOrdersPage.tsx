@@ -24,6 +24,7 @@ import {
     statusTag,
     tallyStateLine,
 } from '@/features/procurement/purchaseOrders';
+import { purchasePickerItems } from '@/features/procurement/purchasePicker';
 import type { PurchaseOrder } from '@/features/procurement/types';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { usePurchaseOrderListParams } from '@/features/procurement/usePurchaseOrderListParams';
@@ -87,21 +88,36 @@ export default function PurchaseOrdersPage() {
         isActive: (v) => v.is_active,
         option: (v) => ({ value: v.id, label: `${v.code} — ${v.name}` }),
     });
-    // The item picker applies `PurchasableItem`, the rule the server applies:
-    // no archived item, and the category is not consulted (Q59 is open — see
-    // isPurchasableItem, which also says why the trashed half of the server's
-    // refusal has nothing to match here). The order being AMENDED keeps its own
-    // items visible-but-disabled, so a draft that names a since-archived item
-    // still shows what it says instead of silently blanking the line. The
-    // FILTER bar builds its own options and is deliberately left alone: past
-    // orders must stay findable.
+    // DEC-20260902-023: the picker offers Raw and Packing material by
+    // default; Other and unclassified items only behind "Show additional
+    // purchasable items", and a finished good never at all, whatever the
+    // choice (purchasePickerItems). `purchasableItemOptions` is still the
+    // source of the option shape and of the AMENDED order's own
+    // visible-but-disabled items — but it is composed on the ALREADY
+    // category-filtered list, so its archived-item `keepIds` branch cannot
+    // fire for an item `purchasePickerItems` dropped for being inactive
+    // before this call ever sees it (an amended draft naming a
+    // since-archived item renders that line blank rather than "(Retired)" —
+    // a known gap of this composition, not new drift in `purchasableItemOptions`
+    // itself). The FILTER bar builds its own options and is deliberately left
+    // alone: past orders must stay findable.
     //
     // `amendedItemIds` is what tolerates a line the payload served without an
-    // item — see its docblock.
-    const itemOptions = useMemo(
-        () => purchasableItemOptions(items?.data, amendedItemIds(amendOrder?.lines)),
-        [items, amendOrder],
+    // item — see its docblock. `purchasableItemOptions` builds its label from
+    // `itemLabel` alone and knows nothing of `warning`, so the "· Unclassified
+    // — reason required" suffix is joined back on afterward from `pickerItems`.
+    const [showAdditional, setShowAdditional] = useState(false);
+    const pickerItems = useMemo(() => purchasePickerItems(items?.data, showAdditional), [items, showAdditional]);
+    const unclassifiedItemIds = useMemo(
+        () => new Set(pickerItems.filter((p) => p.warning).map((p) => p.id)),
+        [pickerItems],
     );
+    const itemOptions = useMemo(() => {
+        const warningById = new Map(pickerItems.filter((p) => p.warning).map((p) => [p.id, p.warning as string]));
+        return purchasableItemOptions(pickerItems.map((p) => p.item), amendedItemIds(amendOrder?.lines)).map((option) =>
+            warningById.has(option.value) ? { ...option, label: `${option.label} · ${warningById.get(option.value)}` } : option,
+        );
+    }, [pickerItems, amendOrder]);
 
     const orders = useMemo(() => data?.data ?? [], [data]);
     const rowFor = (id: number | null) => (id === null ? undefined : orders.find((order) => order.id === id));
@@ -268,6 +284,9 @@ export default function PurchaseOrdersPage() {
                 vendorOptions={vendorOptions}
                 itemOptions={itemOptions}
                 raiseFrom={raiseFrom}
+                showAdditional={showAdditional}
+                onShowAdditionalChange={setShowAdditional}
+                unclassifiedItemIds={unclassifiedItemIds}
             />
 
             <PurchaseOrderReasonModal
@@ -276,7 +295,14 @@ export default function PurchaseOrdersPage() {
                 onClose={() => setReasonAction(null)}
             />
 
-            <AmendPurchaseOrderModal order={amendOrder} onClose={() => setAmendOrder(null)} itemOptions={itemOptions} />
+            <AmendPurchaseOrderModal
+                order={amendOrder}
+                onClose={() => setAmendOrder(null)}
+                itemOptions={itemOptions}
+                showAdditional={showAdditional}
+                onShowAdditionalChange={setShowAdditional}
+                unclassifiedItemIds={unclassifiedItemIds}
+            />
 
             <PurchaseOrderDetailDrawer
                 orderId={openId}

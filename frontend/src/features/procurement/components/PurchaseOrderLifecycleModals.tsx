@@ -165,6 +165,10 @@ interface AmendModalProps {
     onClose: () => void;
     onDone?: (order: PurchaseOrder) => void;
     itemOptions: { value: number; label: string }[];
+    /** DEC-20260902-023 — forwarded to the lines editor unchanged. */
+    showAdditional: boolean;
+    onShowAdditionalChange: (value: boolean) => void;
+    unclassifiedItemIds: ReadonlySet<number>;
 }
 
 /**
@@ -175,7 +179,15 @@ interface AmendModalProps {
  * amendment changes what the vendor holds and is an owner question, not a
  * button.
  */
-export function AmendPurchaseOrderModal({ order, onClose, onDone, itemOptions }: AmendModalProps) {
+export function AmendPurchaseOrderModal({
+    order,
+    onClose,
+    onDone,
+    itemOptions,
+    showAdditional,
+    onShowAdditionalChange,
+    unclassifiedItemIds,
+}: AmendModalProps) {
     const invalidate = useInvalidatePurchaseOrders();
     const { control, handleSubmit, reset, setValue, formState: { errors } } = useForm<AmendValues>({
         resolver: zodResolver(amendSchema),
@@ -196,6 +208,12 @@ export function AmendPurchaseOrderModal({ order, onClose, onDone, itemOptions }:
                     quantity: line.quantity,
                     unit_price: line.unit_price,
                     ...(line.schedules && line.schedules.length > 0 ? { schedules: line.schedules } : {}),
+                    // DEC-20260902-023: this whitelist maps the form's line
+                    // shape onto the wire payload explicitly, so a new field
+                    // on the form is silently dropped unless it is named
+                    // here too — the create modal's `...values` spread has
+                    // no such gate, and this one must not drift from it.
+                    ...(line.unclassified_reason ? { unclassified_reason: line.unclassified_reason } : {}),
                 })),
             }),
         onSuccess: async (updated) => {
@@ -253,6 +271,9 @@ export function AmendPurchaseOrderModal({ order, onClose, onDone, itemOptions }:
                     vendorId={order?.vendor?.id ?? null}
                     setUnitPrice={(index, rate) => setValue(`lines.${index}.unit_price`, rate, { shouldDirty: true, shouldValidate: true })}
                     ratesNotPrefilled={defaults?.ratesNotPrefilled ?? false}
+                    showAdditional={showAdditional}
+                    onShowAdditionalChange={onShowAdditionalChange}
+                    unclassifiedItemIds={unclassifiedItemIds}
                 />
             </Form>
         </Modal>

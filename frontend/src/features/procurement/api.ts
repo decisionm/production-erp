@@ -108,7 +108,9 @@ export async function listPurchaseRequisitions(
 export interface CreatePurchaseRequisitionPayload {
     needed_by_date?: string;
     notes?: string;
-    lines: { item_id: number; quantity: number; notes?: string }[];
+    // DEC-20260902-023: a reason for a line whose item is unclassified
+    // (StorePurchaseRequisitionRequest, Task 4) — sent, ignored until then.
+    lines: { item_id: number; quantity: number; notes?: string; unclassified_reason?: string }[];
 }
 
 export async function createPurchaseRequisition(
@@ -187,6 +189,9 @@ export interface CreatePurchaseOrderPayload {
         quantity: number;
         unit_price: number;
         schedules?: { due_date: string; quantity: number; tally_reference?: string }[];
+        // DEC-20260902-023: a reason for a line whose item is unclassified
+        // (StorePurchaseOrderRequest, Task 4) — sent, ignored until then.
+        unclassified_reason?: string;
     }[];
 }
 
