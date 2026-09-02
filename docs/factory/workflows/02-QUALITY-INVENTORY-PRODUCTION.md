@@ -161,20 +161,31 @@ compares it with the standard weight, and records the visual defects found.
   tab, which records why scrap arose, not what a checker saw on a sample.
 - Details and citations: [research note](research/2026-09-02-quality-inventory-production-ground-truth.md) §3.
 
+### Owner answer (02-Sep-2026)
+
+Asked whether the checklist replaces the count or sits beside it, the owner
+confirmed: it sits beside the count as supporting evidence; the OK and rejected
+count remains the only action that changes finished-goods stock and books scrap;
+no second stock path; tolerance, sample-size rule and defect list are asked
+separately, one at a time.
+
 ### Result
 
-- **REQUIRED:** one checklist screen per completed batch showing the batch,
-  sample count, weight and visual defects.
-- **GAP:** none of the four exists as a checklist; only the count and note do.
-- **OPEN (to ask, one at a time):**
-  1. Does the checklist replace the ok/rejected count, or sit beside it? The
-     count is what nets stock and books scrap today.
-  2. Weight: the measured sample weight against the run's frozen unit weight.
-     Is there a tolerance, and who states it? Not to be invented.
-  3. Visual defects: a fixed list a person maintains, or free text?
-  4. Sample count: entered by the checker each time, or a fixed rule per product?
-  5. Who is the checker, and may a checker who also holds Plant Manager approve
-     their own check? The code leaves this as a comment, with no question id.
+- **VERIFIED as a decision:** DEC-20260902-006. The Quality screen after a
+  completed batch shows the batch and records sample count, measured weight,
+  standard weight (the run's frozen unit weight) and visual observations. That
+  record is evidence. The reviewed/OK/rejected count stays the only stock and
+  scrap action, under four eyes.
+- **GAP:** none of the four evidence fields exists; the screen today takes only
+  the count and a note. The build adds the fields beside the count on the same
+  screen and changes no stock effect.
+- **OPEN (asked one at a time, in this order):**
+  1. Weight: the measured sample weight against the frozen standard weight. Is
+     there a tolerance, and who states it? Not to be invented.
+  2. Visual observations: a maintained list, or free text?
+  3. Sample count: entered by the checker each time, or a fixed rule per product?
+  4. May a checker who also holds Plant Manager approve their own check? The
+     code leaves this as a comment, with no question id.
 
 ## Sections still to capture
 
