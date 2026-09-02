@@ -9,12 +9,14 @@ use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Procurement\Models\Enums\PurchaseOrderStatus;
 use App\Modules\Procurement\Models\Enums\PurchaseRequisitionStatus;
 use App\Modules\Procurement\Models\GoodsReceiptNote;
+use App\Modules\Procurement\Models\GoodsReceiptNoteLine;
 use App\Modules\Procurement\Models\PurchaseOrder;
 use App\Modules\Procurement\Models\PurchaseRequisition;
 use App\Modules\Procurement\Models\SupplierBill;
 use App\Modules\Procurement\Models\Vendor;
 use App\Modules\Procurement\Services\PurchaseRequisitionService;
 use App\Modules\Procurement\Services\SupplierBillService;
+use App\Modules\Quality\Models\IncomingInspection;
 use App\Modules\TallySync\Models\Ledger;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -360,6 +362,44 @@ class SupplierBillTest extends TestCase
         $data = $this->postJson('/api/v1/procurement/supplier-bills', $payload)->assertSuccessful()->json('data');
 
         $this->assertSame('100.0000', $data['lines'][0]['received_quantity']);
+    }
+
+    /**
+     * I2 / DEC-20260902-015: the rejection must be visible on a RECORDED
+     * bill's own detail, not only on the create-form's GRN-line picker — a
+     * supplier credit note arrives AFTER the bill is recorded, which is the
+     * moment Accounts opens this screen to match it.
+     */
+    public function test_a_matched_line_on_a_recorded_bill_shows_its_rejection(): void
+    {
+        $grnLineId = $this->receiveLine();
+        // receiveLine() leaves 'Someone' (its own procurement+finance actor)
+        // acting; that user id is as good as any for the inspection stamp.
+        $inspector = GoodsReceiptNoteLine::query()->findOrFail($grnLineId)->goodsReceiptNote->createdBy;
+
+        IncomingInspection::create([
+            'goods_receipt_note_line_id' => $grnLineId,
+            'item_id' => $this->resin->id,
+            'inspected_quantity' => '100.0000',
+            'accepted_quantity' => '75.0000',
+            'rejected_quantity' => '25.0000',
+            'result' => 'partial',
+            'inspection_date' => now()->toDateString(),
+            'inspected_by' => $inspector->id,
+            'rejections_out_reference' => 'RJO-BILL-1',
+        ]);
+
+        $this->actAsAccounts();
+        $payload = $this->payload();
+        $payload['lines'][0]['goods_receipt_note_line_id'] = $grnLineId;
+        $id = $this->postJson('/api/v1/procurement/supplier-bills', $payload)->assertSuccessful()->json('data.id');
+
+        $this->postJson("/api/v1/procurement/supplier-bills/{$id}/record")->assertOk();
+
+        $data = $this->getJson("/api/v1/procurement/supplier-bills/{$id}")->assertOk()->json('data');
+
+        $this->assertSame('25.0000', $data['lines'][0]['qc_rejected_quantity']);
+        $this->assertSame('RJO-BILL-1', $data['lines'][0]['qc_rejections_out_reference']);
     }
 
     public function test_recording_stamps_who_and_when_and_freezes_the_bill(): void

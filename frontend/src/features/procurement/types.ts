@@ -681,6 +681,15 @@ export interface SupplierBillLine {
     amount: string;
     /** The matched arrival's quantity, for the billed-vs-received variance. */
     received_quantity?: string | null;
+    /**
+     * DEC-20260902-015: the matched GRN line's Incoming QC disposition —
+     * visible here (not only on the create-form's GRN-line picker) so
+     * Accounts can match the supplier's paper credit note against a
+     * RECORDED bill, which is when the credit note actually arrives.
+     * Nullable: no inspection yet, or no matched GRN line.
+     */
+    qc_rejected_quantity?: string | null;
+    qc_rejections_out_reference?: string | null;
 }
 
 /**
