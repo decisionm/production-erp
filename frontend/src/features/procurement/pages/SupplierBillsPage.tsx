@@ -698,6 +698,23 @@ export default function SupplierBillsPage() {
                                         return <Tag color="orange">{diff > 0 ? `billed ${diff.toFixed(4)} more` : `billed ${(-diff).toFixed(4)} less`}</Tag>;
                                     },
                                 },
+                                {
+                                    // DEC-20260902-015: the rejected quantity and the
+                                    // Rejections Out reference, against the matching GRN
+                                    // line, so Accounts can match the supplier's paper
+                                    // credit note to them on the recorded bill itself.
+                                    title: 'Rejected',
+                                    align: 'right',
+                                    render: (_, line) =>
+                                        line.qc_rejected_quantity != null && Number(line.qc_rejected_quantity) > 0 ? (
+                                            <span style={numeric}>
+                                                {line.qc_rejected_quantity}
+                                                {line.qc_rejections_out_reference ? ` · ${line.qc_rejections_out_reference}` : ''}
+                                            </span>
+                                        ) : (
+                                            '—'
+                                        ),
+                                },
                                 { title: 'Rate', align: 'right', render: (_, line) => <span style={numeric}>{line.rate}</span> },
                                 { title: 'Amount', align: 'right', render: (_, line) => <span style={numeric}>{line.amount}</span> },
                             ]}

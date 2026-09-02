@@ -34,7 +34,12 @@ use Illuminate\Validation\ValidationException;
  */
 class SupplierBillService
 {
-    private const WITH = ['vendor', 'purchaseOrder', 'lines.item', 'lines.goodsReceiptNoteLine', 'createdBy', 'recordedBy'];
+    // 'lines.goodsReceiptNoteLine.incomingInspections' (I2, DEC-20260902-015):
+    // the recorded bill's OWN detail must show the rejected quantity and the
+    // Rejections Out reference too, not only the create-form's GRN-line
+    // picker — a supplier credit note arrives AFTER the bill is recorded,
+    // which is the moment Accounts opens this screen to match it.
+    private const WITH = ['vendor', 'purchaseOrder', 'lines.item', 'lines.goodsReceiptNoteLine.incomingInspections', 'createdBy', 'recordedBy'];
 
     /** Attachment rules: what a scanned bill actually is, capped at 10 MB. */
     public const ATTACHMENT_MIMES = ['pdf', 'jpg', 'jpeg', 'png', 'webp'];

@@ -25,6 +25,14 @@ class SupplierBillLineResource extends JsonResource
             // The matched arrival's quantity, for the variance the screen
             // shows (billed vs received).
             'received_quantity' => $this->whenLoaded('goodsReceiptNoteLine', fn () => $this->goodsReceiptNoteLine?->quantity),
+            // DEC-20260902-015: the rejected quantity and the Rejections Out
+            // reference must be VISIBLE against the matching GRN line — not
+            // only on the create-form's picker, but on the RECORDED bill's
+            // own detail, because a supplier credit note arrives after the
+            // bill is recorded, which is when Accounts opens this screen to
+            // match it. Nullable: no inspection yet, or no matched GRN line.
+            'qc_rejected_quantity' => $this->whenLoaded('goodsReceiptNoteLine', fn () => $this->goodsReceiptNoteLine?->incomingInspections?->first()?->rejected_quantity),
+            'qc_rejections_out_reference' => $this->whenLoaded('goodsReceiptNoteLine', fn () => $this->goodsReceiptNoteLine?->incomingInspections?->first()?->rejections_out_reference),
         ];
     }
 }
