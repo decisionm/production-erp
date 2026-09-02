@@ -22,20 +22,21 @@ use Illuminate\Contracts\Validation\ValidationRule;
  * this request and to the warehouse on a goods receipt; the item was simply
  * never given it, so `exists:items,id` accepted an out-of-service row.
  *
- * THE ITEM'S CATEGORY IS NOT CONSULTED, DELIBERATELY. `ItemCategory` carries
- * a `purchasable()` helper that would refuse a finished good here, and this
- * rule does not call it. Q59 asks which categories each document may use —
- * (a) is a purchase order raw+packing only, or may `Other` be bought too;
- * (d) what happens to an item nobody has classified — and it says plainly
- * that what must not proceed is "making a document refuse an item" until
- * those are settled. So a finished good, a consumable, and an unclassified
- * item are all accepted on a purchase-order line: the ERP records what the
- * factory does and does not narrow it on a rule nobody has confirmed.
+ * THIS RULE STILL DOES NOT CONSULT THE ITEM'S CATEGORY — that is handled
+ * elsewhere, not absent. Q59(a)/(d) are answered: DEC-20260902-023 refuses a
+ * finished good and demands a reason for an unclassified item on a
+ * requisition and on an ERP-entered purchase order (create and, for a NEW or
+ * CHANGED line, amend). That refusal is
+ * `App\Modules\Procurement\Support\PurchaseLineEligibility`, called from
+ * each request's `withValidator()` hook alongside this rule — a sibling
+ * check, not a change to this one. `ItemCategory::purchasable()` is still
+ * not called HERE; the eligibility check reads categories through
+ * `ItemService::categoriesFor()` instead (cross-module reads go through the
+ * other module's Service, not its Eloquent model).
  *
- * That is an OWNER decision to reverse, not a cleanup. If Q59(a) comes back
- * saying a purchase order is for raw and packing material only, the refusal
- * belongs here — and `InactiveMasterGuardTest`'s negative controls are the
- * tests that must be rewritten to say so, deliberately.
+ * `InactiveMasterGuardTest`'s negative controls were rewritten to say so —
+ * see its class docblock — and `PurchaseLineEligibilityTest` pins the new
+ * refusal in full.
  *
  * Not applied to the FILTER bar, a report, or any read: a purchase order
  * already raised against an item since archived must stay readable.
