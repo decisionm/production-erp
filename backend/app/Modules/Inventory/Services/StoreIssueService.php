@@ -17,7 +17,9 @@ use App\Modules\Inventory\Models\StoreIssueLine;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Sales\Services\SalesDocumentQuery;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -739,15 +741,58 @@ class StoreIssueService
      */
     public function hasMaterialStandingInProduction(int $itemId, int $wipWarehouseId): bool
     {
-        return StoreIssueLine::query()
+        return $this->standingInProduction($wipWarehouseId)
             ->where('item_id', $itemId)
+            ->exists();
+    }
+
+    /**
+     * WHICH OF THESE MATERIALS THE STORE HAS HANDED TO PRODUCTION AND NOT HAD
+     * BACK — the same open-handover test as hasMaterialStandingInProduction(),
+     * asked for a set at once.
+     *
+     * Asked by the completion screen's resin suggestion
+     * (RunMaterialSuggestionService): the resin in the bin is whichever one
+     * the Store scanned out on an open issue (DEC-20260902-002,
+     * DEC-20260902-005), and that answer has to come from the issue rather
+     * than from Production/WIP's balance, because the WIP row predates the
+     * store-issue flow and carries rehearsal-era kilograms no issue put there.
+     *
+     * @param  iterable<int>  $itemIds
+     * @return Collection<int, int> the subset of $itemIds standing in production, ascending
+     */
+    public function itemsStandingInProduction(int $wipWarehouseId, iterable $itemIds): Collection
+    {
+        $ids = collect($itemIds)->map(fn ($id) => (int) $id)->unique()->values();
+
+        if ($ids->isEmpty()) {
+            return collect();
+        }
+
+        return $this->standingInProduction($wipWarehouseId)
+            ->whereIn('item_id', $ids->all())
+            ->distinct()
+            ->orderBy('item_id')
+            ->pluck('item_id')
+            ->map(fn ($id) => (int) $id)
+            ->values();
+    }
+
+    /**
+     * Open handover lines into Production/WIP: an issue still issued or
+     * partly returned, with kilograms it has not had back.
+     *
+     * @return Builder<StoreIssueLine>
+     */
+    private function standingInProduction(int $wipWarehouseId): Builder
+    {
+        return StoreIssueLine::query()
             ->where('to_warehouse_id', $wipWarehouseId)
             ->whereColumn('quantity_issued', '>', 'quantity_returned')
             ->whereHas('storeIssue', fn ($query) => $query->whereIn('status', [
                 StoreIssueStatus::Issued->value,
                 StoreIssueStatus::PartiallyReturned->value,
-            ]))
-            ->exists();
+            ]));
     }
 
     /**

@@ -3,6 +3,8 @@
 namespace App\Modules\Production\Services;
 
 use App\Modules\Inventory\Models\Item;
+use App\Modules\Inventory\Services\ProductionWipLocationResolver;
+use App\Modules\Inventory\Services\StoreIssueService;
 use App\Modules\Production\Models\FactorySetting;
 use App\Modules\Production\Models\MasterbatchDosing;
 use App\Modules\Production\Models\ProductionConfiguration;
@@ -23,17 +25,28 @@ use Illuminate\Support\Facades\DB;
  * answers nothing about what was ACTUALLY consumed — see "advisory only"
  * below, which is absolute.
  *
- * ## Why the resin item is resolved from HISTORY, not from its name
+ * ## Why the resin item is resolved from the STORE'S HANDOVER, then HISTORY,
+ * ## and from its name only last
  *
- * This catalogue's resin is "PET Polyster Chips" and "Relpet". Neither
- * contains the word resin, polymer, or granule. A name rule has already
- * failed here once — the empty Resin picker on go-live morning, which is why
- * the frontend's own matcher carries the comment "a generic pattern already
- * missed them once". A name is a spelling somebody chose in Tally; a
- * consumption row is the factory stating, with a weight, that this material
- * went into bottles. The record of what was issued cannot be out of date with
- * the catalogue, so it ranks first and the name pattern is only the answer
- * when there is no history at all (a fresh instance, day one).
+ * The resin in the bin is whichever one the Store scanned out to
+ * Production/WIP on an issue it has not had back (DEC-20260902-002,
+ * DEC-20260902-005) — the Store's own statement, and the one the bin's
+ * "issued minus consumed" balance depends on. That tier is
+ * resolveResinStandingInProduction(), and it exists because the history
+ * below cannot correct itself: on the live instance every batch kept naming
+ * the item the first batches had named, for fifteen days after the Store
+ * had issued a different one.
+ *
+ * With nothing standing, the history answers. This catalogue's resin is
+ * "PET Polyster Chips" and "Relpet". Neither contains the word resin,
+ * polymer, or granule. A name rule has already failed here once — the empty
+ * Resin picker on go-live morning, which is why the frontend's own matcher
+ * carries the comment "a generic pattern already missed them once". A name
+ * is a spelling somebody chose in Tally; a consumption row is the factory
+ * stating, with a weight, that this material went into bottles. The record
+ * of what was issued cannot be out of date with the catalogue, so it ranks
+ * above the name pattern, which is only the answer when there is no history
+ * at all (a fresh instance, day one).
  *
  * ## Why the masterbatch is resolved on items.colour and on DATA, never on
  * ## masterbatch names
@@ -103,9 +116,11 @@ class RunMaterialSuggestionService
     public const RESIN_TOTAL_KG_BASIS = 'production_kg + rejection_kg + lumps_kg';
 
     /**
-     * Resin spellings, used ONLY when no consumption history exists. Taken
-     * verbatim from the frontend matcher that this factory's live catalogue
-     * forced into existence ("PET Polyster Chips", "Relpet").
+     * Resin spellings, used ONLY when no consumption history exists — and to
+     * narrow several open handovers to the one that looks like resin, never
+     * to choose between two that both do. Taken verbatim from the frontend
+     * matcher that this factory's live catalogue forced into existence
+     * ("PET Polyster Chips", "Relpet").
      */
     private const RESIN_NAME_PATTERN = '/resin|granul|polym|poly\s*e?ster|relpet|pet\s*(chip|raw)|\bchips\b/i';
 
@@ -133,6 +148,11 @@ class RunMaterialSuggestionService
     public function __construct(
         private readonly MasterbatchDosingService $dosings,
         private readonly ProductionCalculationEngine $engine,
+        // WHICH ROW IS PRODUCTION/WIP, and which materials the Store has
+        // handed into it and not had back — read through Inventory's own
+        // services, never its tables (see resolveResinStandingInProduction).
+        private readonly ProductionWipLocationResolver $productionWip,
+        private readonly StoreIssueService $storeIssues,
     ) {}
 
     /**
@@ -382,6 +402,13 @@ class RunMaterialSuggestionService
             );
         }
 
+        // THE RESIN THE STORE HANDED OVER answers before any history does.
+        $standing = $this->resolveResinStandingInProduction($pool);
+
+        if ($standing !== null) {
+            return $standing;
+        }
+
         $ranked = $this->rankByConsumption($pool);
 
         if ($ranked !== []) {
@@ -391,6 +418,88 @@ class RunMaterialSuggestionService
         // No history at all — a fresh instance, day one. Now, and only now,
         // the spelling is the best available answer.
         return $this->resolveResinByName($this->nameMatches($pool), null);
+    }
+
+    /**
+     * WHICH RESIN IS IN THE BIN — the Store's own handover, when there is one.
+     *
+     * Material reaches the floor through a Store Issue, and the Store's scan
+     * at that issue is the one event that moves PET resin into Production/WIP
+     * and feeds the resin pool (DEC-20260902-002, DEC-20260902-005). The
+     * bin's balance is "issued minus calculated consumption" of ONE item,
+     * which only holds if the batch's consumption names the item the issue
+     * moved. So an open handover outranks the consumption history.
+     *
+     * WHY THE HISTORY CANNOT BE LEFT TO ANSWER THIS. It is self-reinforcing:
+     * whatever the first batches named stays the most-issued material for
+     * ever, whatever the Store has actually handed over since. On the live
+     * instance (spot check, 03-Sep-2026) the Store issued 1,000 kg of Relpet
+     * to Production/WIP on 18-Aug and every batch for the next fifteen days
+     * still consumed "Pet Resin" — a different item row, the one the history
+     * is made of — drawing the Store negative while the issued kilograms sat
+     * untouched on the floor. The consumption path itself was doing what
+     * DEC-20260831-009 says (nothing of THAT item stood in WIP, so it drew
+     * from the Store); the wrong item was chosen one screen earlier, here.
+     *
+     * THE HANDOVER, NOT THE BALANCE. Production/WIP's own balance is not
+     * consulted, deliberately: the WIP row predates the store-issue flow and
+     * carries rehearsal-era kilograms no issue put there, and offering those
+     * as "the resin in the bin" would repeat the defect with a different
+     * item. An OPEN issue with kilograms not yet returned is the Store's own
+     * statement, and it lets go by itself: once the material is back and the
+     * issue closed, the history answers exactly as before.
+     *
+     * TWO MATERIALS STANDING resolve the way two histories do — the history
+     * breaks the tie between THOSE two, and a dead heat is null with both
+     * names, never the lower id. Which resin a product runs on is Q9, still
+     * open, and this tier does not pretend to answer it.
+     *
+     * @param  Collection<int, Item>  $pool
+     * @return ?array{item: ?Item, source: string, tied: list<string>} null when nothing stands
+     */
+    private function resolveResinStandingInProduction(Collection $pool): ?array
+    {
+        $wipId = $this->productionWip->warehouseId();
+
+        if ($wipId === null) {
+            return null;
+        }
+
+        $standingIds = $this->storeIssues->itemsStandingInProduction($wipId, $pool->pluck('id'));
+
+        $standing = $pool
+            ->filter(fn (Item $item) => $standingIds->contains((int) $item->id))
+            ->values();
+
+        if ($standing->isEmpty()) {
+            return null;
+        }
+
+        if ($standing->count() === 1) {
+            return ['item' => $standing->first(), 'source' => 'standing_in_production', 'tied' => []];
+        }
+
+        // Several handovers open at once: masterbatch and packing are kept
+        // out by the pool already, so these are resin-family materials, and
+        // the spelling narrows them only when it singles one out.
+        $named = $this->nameMatches($standing);
+
+        if ($named->count() === 1) {
+            return ['item' => $named->first(), 'source' => 'standing_in_production', 'tied' => []];
+        }
+
+        $candidates = $named->count() > 1 ? $named : $standing;
+        $ranked = $this->rankByConsumption($candidates);
+
+        if ($ranked !== []) {
+            return $this->firstOrAmbiguous($ranked, 'standing_in_production_history');
+        }
+
+        return [
+            'item' => null,
+            'source' => 'ambiguous_standing',
+            'tied' => $candidates->map(fn (Item $item) => (string) $item->name)->all(),
+        ];
     }
 
     /**
@@ -746,6 +855,9 @@ class RunMaterialSuggestionService
             : ' Grams per bottle is the bottle’s own unit weight ('.$grams.' g).';
 
         return match ($resolved['source']) {
+            'standing_in_production' => 'Issued by the Store to Production and not yet consumed: '.$resolved['item']->name.'.'.$weight,
+            'standing_in_production_history' => 'Of the materials the Store has issued to Production, the most issued on past shifts: '.$resolved['item']->name.'.'.$weight,
+            'ambiguous_standing' => 'Several materials the Store issued are standing in Production ('.implode(', ', $resolved['tied']).') — pick the resin yourself.'.$weight,
             'consumption_history' => 'Most issued resin on past shifts: '.$resolved['item']->name.'.'.$weight,
             'name_pattern' => 'No resin has been issued yet, so this was matched on the item name: '.$resolved['item']->name.'.'.$weight,
             'name_pattern_unit_gap' => 'No kg-unit raw material exists in the masters, so this was matched on the item name: '.$resolved['item']->name.'. Check that item’s unit of measure.'.$weight,

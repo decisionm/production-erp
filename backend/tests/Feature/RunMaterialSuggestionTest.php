@@ -3,8 +3,11 @@
 namespace Tests\Feature;
 
 use App\Models\User;
+use App\Modules\Inventory\Models\Enums\StoreIssueStatus;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\StockBalance;
+use App\Modules\Inventory\Models\StoreIssue;
+use App\Modules\Inventory\Models\StoreIssueLine;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Production\Models\Enums\BatchStatus;
 use App\Modules\Production\Models\Enums\ConfigurationStatus;
@@ -381,6 +384,125 @@ class RunMaterialSuggestionTest extends TestCase
         // weighs 5 g whichever resin fills it, and the supervisor picking the
         // material should not have to re-derive the figure beside it.
         $this->assertSame('5.0000', $resin['grams_per_bottle']);
+    }
+
+    // -------------------------------------------- resin the store handed over --
+
+    /**
+     * WHICH RESIN IS IN THE BIN — the Store's own handover answers before the
+     * history does (DEC-20260902-002, DEC-20260902-005, DEC-20260831-009).
+     *
+     * The live defect this pins (spot check, 03-Sep-2026): the Store issued
+     * 1,000 kg of Relpet to Production/WIP on 18-Aug, and for the next
+     * fifteen days every batch still consumed "Pet Resin" — a different item
+     * row, the one the history is made of — so the batches drew the Store
+     * negative while the issued kilograms sat untouched on the floor. The
+     * history is self-reinforcing: whatever the first batches named stays
+     * the most-issued material forever, whatever the Store has actually
+     * handed over since.
+     *
+     * The bin's balance is "issued minus calculated consumption" of ONE item
+     * (DEC-20260902-005), which can only hold if the consumption names the
+     * item the issue moved. So an open Store Issue standing in Production/WIP
+     * outranks the consumption history; a balance alone does not, because
+     * the WIP row predates the store-issue flow and carries rehearsal-era
+     * kilograms no issue put there. And it lets go: once the Store has the
+     * material back, the history answers exactly as before.
+     */
+    public function test_the_resin_the_store_issued_to_production_outranks_the_consumption_history(): void
+    {
+        $this->actingAsProduction();
+
+        $wip = Warehouse::create(['code' => 'WIP', 'name' => 'Production WIP']);
+        $relpet = Item::create(['sku' => 'RELPET', 'name' => 'Relpet G5801M', 'uom' => 'Kgs']);
+
+        // A month of shifts booked against the chips.
+        $this->issuedOnAPastShift([$this->chips->id => '180.0000']);
+        $this->issuedOnAPastShift([$this->chips->id => '176.5000']);
+        $this->issuedOnAPastShift([$this->chips->id => '172.0000']);
+
+        // Kilograms standing in Production/WIP with no Store Issue behind
+        // them do not change the answer — that is the pre-flow residue.
+        StockBalance::create(['item_id' => $relpet->id, 'warehouse_id' => $wip->id, 'quantity' => '1000.0000', 'average_cost' => '132.0000']);
+
+        $before = $this->preview()['suggested_resin'];
+        $this->assertSame($this->chips->id, $before['item']['id']);
+        $this->assertSame('consumption_history', $before['source']);
+
+        // The Store hands Relpet over. Now that is the resin in the bin.
+        $line = $this->storeIssuedToProduction($relpet, $wip, '1000.0000');
+
+        $resin = $this->preview()['suggested_resin'];
+        $this->assertSame($relpet->id, $resin['item']['id']);
+        $this->assertSame('standing_in_production', $resin['source']);
+        $this->assertStringContainsString('Relpet G5801M', $resin['reason']);
+        $this->assertStringContainsString('Store', $resin['reason']);
+
+        // Everything comes back and the issue closes: nothing of Relpet is
+        // standing in production any more, so the history answers again.
+        $line->update(['quantity_returned' => '1000.0000']);
+        $line->storeIssue->update(['status' => StoreIssueStatus::Returned]);
+
+        $after = $this->preview()['suggested_resin'];
+        $this->assertSame($this->chips->id, $after['item']['id']);
+        $this->assertSame('consumption_history', $after['source']);
+    }
+
+    public function test_two_resins_standing_in_production_resolve_by_history_or_to_null(): void
+    {
+        $this->actingAsProduction();
+
+        $wip = Warehouse::create(['code' => 'WIP', 'name' => 'Production WIP']);
+        $relpet = Item::create(['sku' => 'RELPET', 'name' => 'Relpet G5801M', 'uom' => 'Kgs']);
+
+        // Both real resins handed over and neither consumed yet: the ERP
+        // cannot know which one the machine is eating (Q9 is open), so it
+        // says so instead of picking the lower id.
+        $this->storeIssuedToProduction($relpet, $wip, '500.0000');
+        $this->storeIssuedToProduction($this->chips, $wip, '500.0000');
+
+        $resin = $this->preview()['suggested_resin'];
+        $this->assertNull($resin['item']);
+        $this->assertSame('ambiguous_standing', $resin['source']);
+        $this->assertStringContainsString('Relpet G5801M', $resin['reason']);
+        $this->assertStringContainsString('PET Polyster Chips', $resin['reason']);
+
+        // The history breaks the tie between the materials standing there —
+        // but only between THOSE: a third material with a longer history and
+        // no handover is not on the floor and is not offered.
+        $sanpet = Item::create(['sku' => 'SANPET-80', 'name' => 'Sanpet Bright 80 Grade', 'uom' => 'Kgs']);
+        $this->issuedOnAPastShift([$sanpet->id => '180.0000']);
+        $this->issuedOnAPastShift([$sanpet->id => '176.5000']);
+        $this->issuedOnAPastShift([$this->chips->id => '172.0000']);
+
+        $resin = $this->preview()['suggested_resin'];
+        $this->assertSame($this->chips->id, $resin['item']['id']);
+        $this->assertSame('standing_in_production_history', $resin['source']);
+        $this->assertStringContainsString('PET Polyster Chips', $resin['reason']);
+    }
+
+    /** The Store's handover of one material into Production/WIP, still open. */
+    private function storeIssuedToProduction(Item $item, Warehouse $wip, string $kg): StoreIssueLine
+    {
+        $storekeeper = User::factory()->create(['is_active' => true]);
+
+        $issue = StoreIssue::create([
+            'issue_number' => 'SI-'.str_pad((string) (StoreIssue::count() + 1), 6, '0', STR_PAD_LEFT),
+            'status' => StoreIssueStatus::Issued,
+            'issued_by' => $storekeeper->id,
+            'received_by' => $storekeeper->id,
+            'issued_at' => now(),
+        ]);
+
+        return StoreIssueLine::create([
+            'store_issue_id' => $issue->id,
+            'item_id' => $item->id,
+            'from_warehouse_id' => $this->rmStore->id,
+            'to_warehouse_id' => $wip->id,
+            'quantity_issued' => $kg,
+            'quantity_returned' => '0',
+            'uom' => 'Kgs',
+        ]);
     }
 
     // ----------------------------------------------------------- masterbatch --
