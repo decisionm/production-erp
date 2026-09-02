@@ -1433,7 +1433,16 @@ any lot/bag trace for a counted material, and any correct handling of the film-v
 distinction.
 *Open since 2026-08-18.*
 
-## Q59 · Which item categories may each document use?
+## Q59 · Which item categories may each document use? — PARTLY RESOLVED
+
+**(a) and (d)-for-purchases resolved 2026-09-02 by DEC-20260902-023:** the
+requisition and PO pickers show Raw Material and Packing Material by default;
+consumables, spares/tooling and unclassified items sit behind a deliberate
+'show additional purchasable items' choice, unclassified with a warning and a
+reason from an authorised person; finished goods never appear; every such
+purchase follows the full PR, PO, GRN, incoming Quality and stock workflow.
+Still open: (b) store material requests and (c) sales orders. The original
+entry follows.
 
 PR #8 added the nullable `items.category` column and four values — Raw Material,
 Packing Material, Finished Good and Other — plus policy helpers intended for a

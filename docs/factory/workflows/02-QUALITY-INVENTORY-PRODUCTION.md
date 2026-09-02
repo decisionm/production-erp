@@ -427,6 +427,19 @@ record's source.
 - **GAP:** the figures exist at completion; the build shows them on the Quality
   screen and both approval screens.
 
+## 13. Chapter 1 leftovers recorded here
+
+- **VERIFIED as a decision:** DEC-20260902-023, Q59(a). Requisition and PO
+  pickers show Raw Material and Packing Material by default. Consumables,
+  spares or tooling and unclassified items sit behind a deliberate "show
+  additional purchasable items" choice, unclassified with a warning and a
+  reason from an authorised person. Finished goods never appear. Every such
+  purchase follows the full PR, PO, GRN, incoming Quality and stock workflow.
+  Q59(b) and (c) stay open.
+- **GAP:** the picker calls the all-items endpoint and the backend accepts any
+  existing item; the build adds the default filter, the deliberate choice, the
+  finished-goods refusal and the unclassified reason.
+
 ## Sections still to capture
 
 - Store and held stock: governed by DEC-20260831-012 (hold, quality approval,
