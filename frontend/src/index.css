@@ -1,3 +1,25 @@
+/* Visual refresh (03-Sep-2026). The values here mirror src/theme/tokens.ts;
+   antd tokens carry the components, these custom properties carry the few
+   rules a token cannot reach (the sider's chevron rail, solid status pills,
+   the sort arrows on a navy header, focus rings on bare buttons). */
+:root {
+    --brand-navy: #12256b;
+    --brand-navy-deep: #0a145b;
+    --brand-ink: #141b33;
+    --brand-orange: #f07c1a;
+    --brand-orange-soft: #fff4ea;
+    --brand-glass: #f2f6fb;
+    --brand-teal: #0e9aa7;
+    --brand-rule: #d9e0ec;
+    --brand-rule-soft: #eaeff6;
+    --brand-text-secondary: #5b6579;
+    --brand-success: #1b8a4c;
+    --brand-warning: #d98e04;
+    --brand-danger: #c8321f;
+    --brand-font: 'Archivo Variable', 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+        'Helvetica Neue', Arial, sans-serif;
+}
+
 html,
 body,
 #root {
@@ -10,12 +32,103 @@ body,
     overflow-x: clip;
 }
 
+body {
+    font-family: var(--brand-font);
+    background: var(--brand-glass);
+    color: var(--brand-ink);
+    -webkit-font-smoothing: antialiased;
+}
+
+/* ------------------------------------------------------------------ */
+/* Type                                                                  */
+/* ------------------------------------------------------------------ */
+
+/* Page titles: Archivo one width step wider and heavy. The extra width is
+   the one typographic gesture on a page; everything below it is width 100. */
+h1.ant-typography,
+h2.ant-typography,
+h3.ant-typography {
+    font-stretch: 112%;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+}
+
+h4.ant-typography,
+h5.ant-typography {
+    font-weight: 700;
+}
+
+/* Figures line up in a column, so a quantity can be compared by eye. */
+.ant-table-cell,
+.ant-statistic-content,
+.ant-descriptions-item-content,
+.ant-input-number-input {
+    font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ */
+/* Shell                                                                 */
+/* ------------------------------------------------------------------ */
+
+.app-sider {
+    border-inline-end: 1px solid var(--brand-rule);
+}
+
+.app-sider .ant-menu-inline,
+.app-sider .ant-menu-inline-collapsed {
+    border-inline-end: 0 !important;
+    background: transparent;
+}
+
+.app-sider .ant-menu-submenu-title {
+    font-weight: 600;
+}
+
+.app-sider .ant-menu-item {
+    position: relative;
+    font-weight: 500;
+}
+
+/* The brand mark is a chevron; the active item wears one. */
+.app-sider .ant-menu-item-selected::before {
+    content: '';
+    position: absolute;
+    inset-inline-start: -4px;
+    top: 50%;
+    width: 10px;
+    height: 16px;
+    transform: translateY(-50%);
+    background: var(--brand-orange);
+    clip-path: polygon(0 0, 100% 50%, 0 100%, 35% 50%);
+}
+
+.app-sider .ant-menu-item-selected {
+    font-weight: 700;
+    box-shadow: 0 1px 2px rgba(10, 20, 91, 0.08);
+}
+
+.app-header {
+    border-bottom: 1px solid var(--brand-rule);
+}
+
 .app-header-leading {
     display: flex;
     align-items: center;
     gap: 12px;
     min-width: 0;
     flex: 1 1 auto;
+}
+
+.app-breadcrumb {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.app-breadcrumb .ant-breadcrumb-link:last-child,
+.app-breadcrumb li:last-child .ant-breadcrumb-link {
+    font-weight: 700;
 }
 
 .skip-to-content {
@@ -26,7 +139,7 @@ body,
     transform: translateY(-160%);
     padding: 8px 12px;
     border-radius: 6px;
-    background: #1677ff;
+    background: var(--brand-navy);
     color: #fff;
     font-weight: 600;
 }
@@ -34,12 +147,6 @@ body,
 .skip-to-content:focus {
     transform: translateY(0);
     color: #fff;
-}
-
-.app-breadcrumb {
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
 }
 
 .account-menu-button {
@@ -52,6 +159,60 @@ body,
 .account-user-name {
     max-width: 190px;
 }
+
+/* ------------------------------------------------------------------ */
+/* Tables                                                                */
+/* ------------------------------------------------------------------ */
+
+.ant-table-wrapper .ant-table-thead > tr > th {
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+}
+
+/* Sort arrows must be visible on navy, and the active one is the accent. */
+.ant-table-wrapper .ant-table-column-sorter {
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.ant-table-wrapper .ant-table-column-sorter-up.active,
+.ant-table-wrapper .ant-table-column-sorter-down.active {
+    color: var(--brand-orange);
+}
+
+.ant-table-wrapper .ant-table-filter-trigger {
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.ant-table-wrapper .ant-table-filter-trigger.active {
+    color: var(--brand-orange);
+}
+
+.ant-table-wrapper .ant-table-thead th.ant-table-column-has-sorters:hover {
+    color: #fff;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr > td {
+    border-bottom-color: var(--brand-rule-soft);
+}
+
+.ant-table-wrapper .ant-table-row-expand-icon {
+    color: var(--brand-navy);
+}
+
+/* ------------------------------------------------------------------ */
+/* Status pills. The ConfigProvider sets every Tag to the solid variant     */
+/* so a state reads from across a table; this only sets the weight.       */
+/* ------------------------------------------------------------------ */
+
+.ant-tag {
+    font-weight: 600;
+    padding-inline: 10px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Mobile                                                                */
+/* ------------------------------------------------------------------ */
 
 @media (max-width: 768px) {
     .login-brand-panel {
@@ -90,7 +251,7 @@ body,
    :focus-visible, not :focus — a thumb tap must not leave a ring behind on a
    shop-floor tablet. */
 .floor-attention-chip:focus-visible {
-    outline: 2px solid #1677ff;
+    outline: 2px solid var(--brand-orange);
     outline-offset: 2px;
     border-radius: 8px;
 }
@@ -119,7 +280,7 @@ body,
    :focus-visible, not :focus — choosing a category with a thumb on a store
    tablet must not leave a ring behind. */
 .category-facet:focus-visible {
-    outline: 2px solid #1677ff;
+    outline: 2px solid var(--brand-orange);
     outline-offset: -2px;
     border-radius: 6px;
 }
