@@ -68,6 +68,13 @@ class SqlGuardTest extends TestCase
         ];
     }
 
+    public function test_count_star_on_a_table_with_hidden_columns_is_fine(): void
+    {
+        $sql = $this->guard->check('SELECT po.status, COUNT(*) AS n FROM purchase_orders po GROUP BY po.status', ['purchase_orders'], ['purchase_orders' => ['total_amount']], 200);
+
+        $this->assertStringEndsWith('LIMIT 200', $sql);
+    }
+
     public function test_star_on_a_table_without_hidden_columns_is_fine(): void
     {
         $sql = $this->guard->check('SELECT * FROM vendors', ['vendors', 'purchase_orders'], ['purchase_orders' => ['total_amount']], 200);

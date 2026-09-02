@@ -106,7 +106,9 @@ class SqlGuard
             return;
         }
 
-        if (preg_match('/(^|[\s,(])(`?[a-z_][a-z0-9_]*`?\s*\.\s*)?\*/i', $sql)) {
+        // A select-list star — `SELECT *`, `SELECT po.*`, `, *` — not the
+        // star inside COUNT(*), which names no column.
+        if (preg_match('/(\bSELECT\s+(?:DISTINCT\s+)?|,\s*)(`?[a-z_][a-z0-9_]*`?\s*\.\s*)?\*/i', $sql)) {
             $names = implode(', ', array_keys($hidden));
 
             throw new SqlRefusedException("SELECT * is not allowed here: {$names} is not available to you. Name the columns.");
