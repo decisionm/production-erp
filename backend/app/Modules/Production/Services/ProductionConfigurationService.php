@@ -843,12 +843,43 @@ class ProductionConfigurationService
         return null;
     }
 
+    /**
+     * DEC-20260902-021: a cycle-time override outside the approved
+     * CONFIGURATION's own cycle_time_min/cycle_time_max is refused, whatever
+     * the reason given — this is the "future factory decision" the method
+     * was kept empty for. Scoped to the configuration's own bounds only,
+     * never a machine- or workbook-level fallback: the GLOBAL workbook range
+     * (the GLOBAL_CYCLE_TIME_MIN/MAX factory-rules rows, which nothing else
+     * reads either — see FactorySetting::READ_BY_SOFTWARE) stays advisory
+     * via cycleTimeWarning() above, because the factory's own product master
+     * carries 48 approved standards above that global range.
+     */
     private function assertCycleTimeAllowed(string $value, ?ProductionConfiguration $configuration): void
     {
-        // Intentionally empty of throws — see cycleTimeWarning(). Kept as a
-        // named seam so the call site still reads as "check the cycle time",
-        // and so a future factory decision to make bounds hard has one
-        // obvious place to live.
+        if ($configuration === null) {
+            return;
+        }
+
+        $min = $configuration->cycle_time_min;
+        $max = $configuration->cycle_time_max;
+
+        $belowMin = $min !== null && (float) $value < (float) $min;
+        $aboveMax = $max !== null && (float) $value > (float) $max;
+
+        if (! $belowMin && ! $aboveMax) {
+            return;
+        }
+
+        $machine = $configuration->workCenter ?? WorkCenter::find($configuration->work_center_id);
+        $name = $machine->name ?? 'This machine';
+
+        $message = match (true) {
+            $min !== null && $max !== null => "{$name} allows a cycle time between {$min}s and {$max}s.",
+            $min !== null => "{$name} has a minimum cycle time of {$min}s.",
+            default => "{$name} has a maximum cycle time of {$max}s.",
+        };
+
+        throw ValidationException::withMessages(['cycle_time_override' => $message]);
     }
 
     private function assertCavitiesAllowed(int $value, ?ProductionConfiguration $configuration): void
