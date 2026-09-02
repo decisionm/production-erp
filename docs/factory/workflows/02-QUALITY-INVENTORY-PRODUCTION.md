@@ -440,13 +440,25 @@ record's source.
   existing item; the build adds the default filter, the deliberate choice, the
   finished-goods refusal and the unclassified reason.
 
-- **VERIFIED as a decision:** DEC-20260902-024, the requisition approver. Any
-  procurement-write holder except the requester; self-approval refused with a
-  clear message; requester, approver and time recorded; no Administrator
-  bypass; the Store raises but cannot approve its own. A role restriction
-  would be a separate decision.
+- **VERIFIED as a decision:** DEC-20260902-025, the requisition approver
+  (supersedes -024 only to withdraw an inferred clause). Any procurement-write
+  holder except the requester approves; self-approval refused with a clear
+  message; requester, approver and time recorded; no Administrator bypass; the
+  Store raises but cannot approve its own. Rejection stays an approver action
+  with no requester comparison. A requester withdraws or cancels their own
+  requisition through a separate action.
 - **GAP:** approval records the approver but never compares them with the
-  requester; the build adds the comparison and the message.
+  requester; no withdraw or cancel action exists for a requester. The build
+  adds the comparison, the message and the withdraw action.
+- **VERIFIED as a decision:** DEC-20260902-026, vendor classification. Five
+  classes: Resin; Packaging; Consumables, Spares and Tooling; Service; Other.
+  One or more per vendor, set by a person with procurement write; the Tally
+  ledger group only proposes. Vendors tab and PO picker show the first three by
+  default; Service, Other and Unclassified through an explicit filter.
+  Classification never blocks selecting a vendor. Existing vendors stay
+  unclassified until reviewed.
+- **GAP:** no classification column, no filter, no proposal from the ledger
+  group; every live vendor starts unclassified.
 
 ## Sections still to capture
 

@@ -83,12 +83,13 @@ separate daily procurement stage.
    better ERP value with a blank value.
 5. Do not create duplicate vendors from similar names or shared GSTINs.
 
-### Open point
+### Resolved 02-Sep-2026
 
-**OPEN:** “Packaging vendors only” may mean the default Vendor tab should show
-packaging vendors, or it may mean Procurement should keep resin and packaging
-vendors while hiding service and unrelated ledgers. The exact visible categories
-must be confirmed before filtering records out.
+**DEC-20260902-026:** five classifications — Resin; Packaging; Consumables,
+Spares and Tooling; Service; Other — one or more per vendor, set by a person;
+the Tally ledger group only proposes. The default view shows the first three;
+Service, Other and Unclassified sit behind an explicit filter. Classification
+never blocks selecting a vendor.
 
 ## 3. Purchase requisition
 
@@ -116,14 +117,14 @@ must be confirmed before filtering records out.
 
 ### Result
 
-- **REQUIRED:** Purchase requisitions and purchase orders should use Raw Material and
-  Packing Material, as stated by the owner on 02-Sep-2026.
-- **GAP:** The current picker and backend do not enforce that rule.
-- **OPEN:** Who approves a purchase requisition, and must the system always block the
-  requester from approving their own request?
-
-The category rule must be recorded as a factory decision before it becomes a hard
-server refusal.
+- **VERIFIED as a decision:** DEC-20260902-023 — the pickers show Raw Material and
+  Packing Material by default; consumables, spares or tooling and unclassified
+  items sit behind a deliberate choice; finished goods never appear; every such
+  purchase follows the full workflow.
+- **VERIFIED as a decision:** DEC-20260902-025 — any procurement-write holder
+  except the requester approves; self-approval refused; no Administrator bypass;
+  rejection is an approver action; a requester withdraws their own.
+- **GAP:** The current picker and backend enforce neither rule yet.
 
 ## 4. Purchase order and delivery schedule
 
