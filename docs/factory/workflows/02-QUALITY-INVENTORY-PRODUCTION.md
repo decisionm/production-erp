@@ -375,9 +375,22 @@ record's source.
 - **GAP (rollout, not code):** the switch exists; the live preview run and the
   master-data corrections have not been done for this purpose.
 
+## 9. Completion: what a run may consume
+
+### Result
+
+- **VERIFIED as a decision:** DEC-20260902-019. Complete Batch refuses only
+  finished goods and the run's own product. Any other off-plan item is an added
+  line with a reason and an authorised person. A spare, tooling or unclassified
+  item shows its category with a warning and is not blocked; item, quantity,
+  reason and person are audited. Nothing is classified automatically. Category
+  restrictions come only through a new decision once every active live item is
+  categorised. Q90 closed.
+- **GAP:** the completion drawer does not show the added item's category or a
+  warning today; the refusal set and the audit already exist.
+
 ## Sections still to capture
 
-- Batch lifecycle: queue, start, run recording, complete — the remaining open
-  points (Q45 default packaging, Q90 category refusal, Q93 factory rules,
-  variance bands).
+- Batch lifecycle: the remaining open points (Q45 default packaging, Q93
+  factory rules, variance bands).
 - Store and held stock.

@@ -2539,7 +2539,15 @@ categories — now built. What remains open is the Tally half above.
 
 ---
 
-## Q90 · Which materials may a production run consume at all — is the category enough?
+## Q90 · Which materials may a production run consume at all — is the category enough? — RESOLVED
+
+**Resolved 2026-09-02 by DEC-20260902-019:** keep the shipped refusal set —
+finished goods and the run's own product — and refuse no category yet. A
+spare, tooling or unclassified item is accepted as an added line with a reason
+and an authorised person, its category shown with a warning, and item,
+quantity, reason and person audited. Category restrictions come only through a
+new decision after every active live item is categorised by a person. The
+original entry follows.
 
 A completion line is now refused unless the material is on a controlled list,
 and a line naming a material the run was not planned on is recorded as an
