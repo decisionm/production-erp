@@ -525,6 +525,61 @@ class BatchQualityStageTest extends TestCase
     }
 
     // =================================================================
+    // 8b. THE PM GATE'S OWN FOUR EYES (DEC-20260902-010) — end to end,
+    // through the real quality-check endpoint this time, not a hand-set
+    // column: the checker who also holds Plant Manager may not approve the
+    // batch they just certified.
+    // =================================================================
+
+    public function test_the_quality_checker_cannot_approve_as_plant_manager(): void
+    {
+        $this->actAs();
+        $entryId = $this->completedBatch();
+
+        // One person holds quality.manage AND Plant Manager, checks the
+        // batch, then tries to approve their own check.
+        $checker = $this->actAs('Plant Manager');
+        $this->check($entryId, ['reviewed_nos' => 10000, 'ok_nos' => 9800, 'rejected_nos' => 200])->assertOk();
+
+        $refused = $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/pm-approve")
+            ->assertStatus(422);
+        $this->assertSame('the person who checked quality cannot approve the same batch as plant manager', $refused->json('message'));
+
+        $entry = ShiftProductionEntry::findOrFail($entryId);
+        $this->assertSame('pending', $entry->status->value);
+        $this->assertNull($entry->plant_manager_signed_by);
+        $this->assertSame($checker->id, $entry->quality_checked_by, 'The checker on the row is who the gate compared against.');
+
+        // A DIFFERENT Plant Manager may.
+        $secondPm = $this->actAs('Plant Manager');
+        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/pm-approve")->assertOk();
+
+        $approved = ShiftProductionEntry::findOrFail($entryId);
+        $this->assertSame('pm_approved', $approved->status->value);
+        $this->assertSame($secondPm->id, $approved->plant_manager_signed_by);
+    }
+
+    public function test_an_administrator_checker_is_not_exempt_from_the_pm_gate(): void
+    {
+        $this->actAs();
+        $entryId = $this->completedBatch();
+
+        // The checker holds Administrator on top of Plant Manager — the
+        // obvious next thought, refused deliberately, exactly as it is at
+        // the accountant gate: there is no Administrator exemption.
+        $checker = $this->actAs('Plant Manager');
+        Role::findOrCreate('Administrator', 'web');
+        $checker->assignRole('Administrator');
+        $this->check($entryId, ['reviewed_nos' => 10000, 'ok_nos' => 9800, 'rejected_nos' => 200])->assertOk();
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/pm-approve")
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'the person who checked quality cannot approve the same batch as plant manager');
+
+        $this->assertNull(ShiftProductionEntry::findOrFail($entryId)->plant_manager_signed_by);
+    }
+
+    // =================================================================
     // 9. THE SWITCH
     // =================================================================
 
