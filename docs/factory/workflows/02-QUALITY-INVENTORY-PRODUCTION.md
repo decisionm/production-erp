@@ -194,9 +194,12 @@ separately, one at a time.
   note. Evidence only; never a stock, scrap or approval effect. The entries are
   not invented; until a person enters them the screen offers the note alone.
 - **GAP:** no observation-type master exists and the screen has only the note.
+- **VERIFIED as a decision:** DEC-20260902-009, the sample count. The checker
+  enters how many pieces were sampled each time. No minimum, fixed count or
+  per-product rule. Evidence only. A per-product minimum would be a new decision
+  adding a warning on top.
 - **OPEN (asked one at a time, in this order):**
-  1. Sample count: entered by the checker each time, or a fixed rule per product?
-  2. May a checker who also holds Plant Manager approve their own check? The
+  1. May a checker who also holds Plant Manager approve their own check? The
      code leaves this as a comment, with no question id.
 
 ## Sections still to capture
