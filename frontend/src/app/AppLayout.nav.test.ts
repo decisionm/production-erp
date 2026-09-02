@@ -27,6 +27,7 @@ import { allNavItems, buildNavItems, navTrailForPath } from './AppLayout';
  */
 const CONFIGURED_ORDER = [
     'Dashboard',
+    'Ask ERP',
     'Procurement',
     'Inventory',
     'Production',

@@ -55,6 +55,10 @@ export const ADOPTED_MODULES = new Set([
     // Master data and access, needed to administer any of the above.
     'users',
     'roles',
+    // ASK ERP — adopted with the page (03-Sep-2026). Not a module with data
+    // of its own: it reads only what the login's other permissions already
+    // allow, so there is no row count to wait for.
+    'assistant',
     // Sales stays because it is the demand side of the spine the factory is
     // being taken through next — purchase order through to sales received, the
     // manager's own request. Not kept on a row count; see the note above.

@@ -75,6 +75,7 @@ const GstRegistrationsPage = lazyPage(() => import('@/features/compliance/pages/
 const GstReportsPage = lazyPage(() => import('@/features/compliance/pages/GstReportsPage'));
 const HelpPage = lazyPage(() => import('@/features/help/pages/HelpPage'));
 const SettingsPage = lazyPage(() => import('@/features/settings/pages/SettingsPage'));
+const AskErpPage = lazyPage(() => import('@/features/ask-erp/pages/AskErpPage'));
 const AttendancePage = lazyPage(() => import('@/features/hrms/pages/AttendancePage'));
 const AttendanceImportsPage = lazyPage(() => import('@/features/hrms/pages/AttendanceImportsPage'));
 const AttendanceImportPage = lazyPage(() => import('@/features/hrms/pages/AttendanceImportPage'));
@@ -162,6 +163,7 @@ export default function App() {
                                 <Routes>
                                     <Route path="/" element={<DashboardPage />} />
                                     <Route path="/account/change-password" element={<ChangePasswordPage />} />
+                                    <Route path="/ask-erp" element={<AskErpPage />} />
                                     <Route path="/crm/leads" element={<LeadsPage />} />
                                     <Route path="/crm/opportunities" element={<OpportunitiesPage />} />
                                     <Route path="/crm/quotations" element={<QuotationsPage />} />
