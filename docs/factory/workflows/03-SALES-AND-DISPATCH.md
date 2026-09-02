@@ -2,7 +2,7 @@
 
 **Status:** Capture in progress — owner walkthrough 02-Sep-2026  
 **Owner input captured:** 02-Sep-2026  
-**Code and active decisions checked:** pending — research note under `research/` in progress  
+**Code and active decisions checked:** 02-Sep-2026 — see `research/2026-09-02-sales-and-dispatch-ground-truth.md`  
 
 Same reading rule as the end-to-end document: VERIFIED, GAP, OPEN, REQUIRED.
 Nothing in this file is a decision. A REQUIRED line becomes binding only when it
@@ -46,17 +46,50 @@ own statement of the flow:
 
 - **VERIFIED as decisions:** every step above is carried by a record already in
   force; the walkthrough confirms them as one flow.
-- **REQUIRED (new in this walkthrough):** there is no customer-approval step
-  anywhere in the flow. Dispatch approval is Internal Quality's, on a Sales
-  Order line, once the full required quantity is held and the finished goods
-  have passed batch Quality.
-- **Verification pending:** the current pages and routes for each step, from
-  the research note.
+- **VERIFIED as a decision (not new):** there is no customer-approval step
+  anywhere in the flow, and dispatch is gated on Internal Quality's recorded
+  approval of the fully held line — DEC-20260831-006, 31-Aug-2026, which also
+  forbids dispatching beyond the approved quantity and expressly leaves open
+  whether Quality may withdraw an approval after goods have moved.
+- **VERIFIED (code, 02-Sep-2026)** — detail and citations in the
+  [research note](research/2026-09-02-sales-and-dispatch-ground-truth.md):
+  the sales order carries the customer PO reference; the Store Fulfilment page
+  holds against a line, refuses above free stock, releases and re-points with a
+  reason, and sends the shortfall to Production; dispatch approval is recorded
+  per line with who, when and quantity, only when the line is fully held; the
+  Store raises the delivery on its own permission; a delivery is refused above
+  the remaining approved quantity and an order becomes partially delivered;
+  no outbound sales voucher path is switched on; the Tally invoice importer
+  matches by customer plus customer PO reference and records an unmatched
+  voucher for a person.
+- **GAP (from the note):** the import runs only as an artisan command over an
+  XML file; no screen lists unmatched invoices, and a match writes no status on
+  the sales order although DEC-20260831-012 says it must.
+- **GAP (from the note):** DEC-20260902-031 (queue by promised date) and
+  DEC-20260902-035 (active finished goods only) are recorded, not built: the
+  picker and server accept any item, inactive included.
+- **GAP (from the note):** a delivery may be dispatched from any warehouse
+  while holds live only in the finished-goods warehouse, so a dispatch can
+  leave its hold standing.
+- **GAP (from the note):** step 5 says the Store scans and dispatches only the
+  approved cartons, but approval is a quantity, typed deliveries exist, and
+  live has no cartons yet; nothing joins a hold or an approval to a batch.
+- **Stale text (from the note):** the Tally mirror statement on the Sales
+  Orders and Invoices pages still describes the reversed outbound direction;
+  several code comments cite superseded decision ids; Q61 and Q72 lack their
+  RESOLVED markers though DEC-20260831-012 resolves them.
 - **OPEN (to ask, one at a time):**
-  1. Partial dispatch: may the Store dispatch part of a line before the full
-     quantity is held and approved, or only the whole approved quantity?
-  2. What Internal Quality checks at dispatch approval: a sign-off on the held
-     cartons, or a second checklist?
-  3. Sales Order amendment after a hold exists: quantity, date, cancellation.
-  4. Customer master: who creates customers, the Tally ledger import, FC-06.
-  5. An imported Tally invoice that matches no order: who resolves it, and how.
+  1. Partial dispatch after full approval, and whether an approval can be
+     withdrawn once goods have moved (DEC-20260831-006 leaves the second open;
+     the code refuses it).
+  2. Step 4 says the finished goods must have "passed batch Quality" before
+     dispatch approval. Nothing in code joins a hold or a dispatch approval to
+     a batch; the approval checks only that the line is fully held. Is the
+     batch's own Quality stage the gate, and how does the ERP know which
+     batches a hold draws on?
+  3. "Promised date": the schema and form carry `expected_date`, whose meaning
+     Q67 says was never recorded. Is it the date promised to the customer?
+  4. Sales Order amendment after a hold exists: quantity, date, cancellation.
+  5. Customer master: who creates customers, the Tally ledger import, FC-06.
+  6. An imported Tally invoice that matches no order: who resolves it, and how.
+  7. Dispatch by carton scan versus typed quantity, given live has no cartons.
