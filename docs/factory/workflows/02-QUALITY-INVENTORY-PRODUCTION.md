@@ -210,9 +210,46 @@ separately, one at a time.
 Section 4 is complete: DEC-20260902-006 to -010 cover the screen, the weight
 check, the observations, the sample count and the checker rule.
 
+## 5. Incoming Quality for purchased material
+
+### Current application
+
+- Every arrival waits for incoming QA before the Store may issue it
+  (DEC-20260831-011). A bag born on a GRN is created `waiting_qc`; the hold is
+  enforced at the balance and outranks every outflow door (DEC-20260825-001).
+- The inspection is one per GRN line and must cover the whole line: inspected =
+  received, accepted + rejected = inspected. A partial inspection is refused.
+  Fields: inspected, accepted, rejected quantities, date, notes. Result is pass,
+  fail or partial.
+- Rejected kilograms leave stock through a "Rejections Out" issue. Whole bags
+  that fit the rejected figure flip to `rejected_qc`; the rest flip to
+  `in_store`. A bag the rejection ends inside stays `waiting_qc` with a note,
+  because splitting one bag's kilograms is an open owner decision with no
+  question number.
+- Nothing reaches Tally for a rejection. The voucher shape is named open inside
+  DEC-20260825-001, DEC-20260830-001, DEC-20260901-003 and DEC-20260901-006, and
+  is Accounts' to answer.
+- Counted materials (cartons, trays, pouches) create no bags and so are not held.
+  How a counted material records what arrived is Q87.
+- The page offers a New Inspection form and a per-row view. There is no
+  checklist: no sample count, no measured weight against the bag or lot weight,
+  no observation list.
+- Citations: [research note](research/2026-09-02-quality-inventory-production-ground-truth.md) §2.
+
+### Result
+
+- **VERIFIED:** the hold, the whole-line inspection, the accept/reject split and
+  the Rejections Out issue are built and tested.
+- **OPEN (to ask, one at a time):**
+  1. What does the incoming inspector see and record, in the same shape as the
+     finished-goods screen?
+  2. May QC split one bag's kilograms between accepted and rejected, or is a bag
+     always accepted or rejected whole?
+  3. Counted packaging: Q87.
+  4. The Tally rejection voucher: Accounts, not the floor.
+
 ## Sections still to capture
 
-- Incoming Quality checklist for purchased material.
 - Product Configuration standards and what a batch completion checks against them.
 - Batch lifecycle: queue, start, run recording, complete, QC, approvals.
 - Store, held stock and the finished-goods store acceptance.
