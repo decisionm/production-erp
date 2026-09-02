@@ -75,9 +75,9 @@ separate daily procurement stage.
 
 ### Required changes
 
-1. Add a clear vendor classification and filters.
+1. Add a clear vendor classification and filters. **Built: PR #83.**
 2. Show `34 — Puducherry`, `33 — Tamil Nadu`, and the correct label for every valid
-   state code instead of showing only the number.
+   state code instead of showing only the number. **Built: PR #83.**
 3. Keep Tally review inside Vendors and show only rows that need a decision.
 4. Import missing contact data from the verified Excel source without overwriting a
    better ERP value with a blank value.
@@ -124,7 +124,7 @@ never blocks selecting a vendor.
 - **VERIFIED as a decision:** DEC-20260902-025 — any procurement-write holder
   except the requester approves; self-approval refused; no Administrator bypass;
   rejection is an approver action; a requester withdraws their own.
-- **GAP:** The current picker and backend enforce neither rule yet.
+- **Built:** PR #83 — pickers, server refusal and reason, self-approval refusal and withdraw.
 
 ## 4. Purchase order and delivery schedule
 
