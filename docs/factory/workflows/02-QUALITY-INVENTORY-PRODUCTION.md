@@ -414,7 +414,22 @@ record's source.
 - **GAP:** the override reason is recorded when given but not demanded; the
   build makes it required and adds the reader beside the colour map.
 
+## 12. Completion and approvals: variance is advisory
+
+### Result
+
+- **VERIFIED as a decision:** DEC-20260902-022. Expected, actual, variance
+  percent and unaccounted kilograms are shown at Complete Batch, Quality
+  review, Plant Manager approval and Accounts approval. Both must see them
+  before signing. No automatic refusal. Both blocking settings stay disabled;
+  no workbook figure is copied. Thresholds, if ever, come through a new
+  decision.
+- **GAP:** the figures exist at completion; the build shows them on the Quality
+  screen and both approval screens.
+
 ## Sections still to capture
 
-- Batch lifecycle: consumption variance bands (the last chapter-2 question).
-- Store and held stock.
+- Store and held stock: governed by DEC-20260831-012 (hold, quality approval,
+  dispatch as ERP acts; Tally originates the invoice) and DEC-20260901-005
+  (the Store dispatches). To be written as a baseline section once chapter 1's
+  leftovers are recorded.
