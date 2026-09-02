@@ -78,7 +78,12 @@ export function ruleDraftChanged(setting: Pick<FactorySetting, 'data_type' | 'va
     return check.value !== (setting.value ?? null);
 }
 
+/** DEC-20260902-021: one of the ten rows is enforced, by Start Batch itself, not by reading the row. */
+const ENFORCED_ELSEWHERE: Record<string, string> = { REQUIRE_OVERRIDE_REASON: 'Enforced at Start Batch' };
+
 /** The words the row wears for whether any code reads it. */
-export function ruleAppliedLabel(applied: boolean): { text: string; tone: 'success' | 'default' } {
+export function ruleAppliedLabel(applied: boolean, key?: string): { text: string; tone: 'success' | 'default' } {
+    if (key && ENFORCED_ELSEWHERE[key]) return { text: ENFORCED_ELSEWHERE[key], tone: 'success' };
+
     return applied ? { text: 'In use', tone: 'success' } : { text: 'Not in use', tone: 'default' };
 }

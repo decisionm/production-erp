@@ -60,4 +60,8 @@ describe('ruleAppliedLabel', () => {
         expect(ruleAppliedLabel(true)).toEqual({ text: 'In use', tone: 'success' });
         expect(ruleAppliedLabel(false)).toEqual({ text: 'Not in use', tone: 'default' });
     });
+
+    it('DEC-20260902-021: REQUIRE_OVERRIDE_REASON is enforced at Start Batch, not by reading the row', () => {
+        expect(ruleAppliedLabel(false, 'REQUIRE_OVERRIDE_REASON')).toEqual({ text: 'Enforced at Start Batch', tone: 'success' });
+    });
 });

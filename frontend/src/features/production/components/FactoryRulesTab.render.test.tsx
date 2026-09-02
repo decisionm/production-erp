@@ -121,6 +121,10 @@ describe('FactoryRulesTab', () => {
         expect(html).toContain('In use');
         expect(html).toContain('Not in use');
         expect(html).toContain('Read by');
+        // DEC-20260902-021: REQUIRE_OVERRIDE_REASON is enforced at Start
+        // Batch itself, not by any code reading the row — the applied flag
+        // (false here) must not label it "Not in use".
+        expect(html).toContain('Enforced at Start Batch');
     });
 
     it('names who last changed a rule and why', () => {
