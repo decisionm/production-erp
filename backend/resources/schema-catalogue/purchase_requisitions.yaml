@@ -59,6 +59,17 @@ columns:
     type: datetime
     nullable: true
     meaning: 'When it was rejected'
+  -
+    name: withdrawn_by
+    type: integer
+    nullable: true
+    meaning: "the user who withdrew their own requisition (DEC-20260902-025: a withdrawal is the requester's own act, not a rejection); null unless withdrawn"
+    references: users.id
+  -
+    name: withdrawn_at
+    type: datetime
+    nullable: true
+    meaning: 'when the requester withdrew it; null unless status is withdrawn'
 joins:
   - 'purchase_requisitions.withdrawn_by = users.id'
   - 'purchase_requisitions.requested_by = users.id'

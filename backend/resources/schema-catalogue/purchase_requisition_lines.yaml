@@ -36,6 +36,11 @@ columns:
     type: datetime
     nullable: true
     meaning: 'When the line was last changed'
+  -
+    name: unclassified_reason
+    type: string
+    nullable: true
+    meaning: 'free-text reason an authorised person gave for buying an item that has no material category (DEC-20260902-023); null when the item is classified'
 joins:
   - 'purchase_requisition_lines.item_id = items.id'
   - 'purchase_requisition_lines.purchase_requisition_id = purchase_requisitions.id'
