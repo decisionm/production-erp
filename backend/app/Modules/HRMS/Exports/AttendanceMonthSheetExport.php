@@ -51,10 +51,15 @@ class AttendanceMonthSheetExport extends AbstractExportKind
         return ['hrms.view', 'hrms.manage'];
     }
 
+    /**
+     * The run to print. The screen always names it; left out, the NEWEST
+     * run is printed, and with no run at all the file has its fixed
+     * columns and no rows — never a guess at a period.
+     */
     public function filterRules(): array
     {
         return [
-            'attendance_import_id' => ['required', 'integer', 'exists:attendance_imports,id'],
+            'attendance_import_id' => ['nullable', 'integer', 'exists:attendance_imports,id'],
         ];
     }
 
@@ -88,6 +93,9 @@ class AttendanceMonthSheetExport extends AbstractExportKind
     public function rows(array $filters, ?Authenticatable $reader): iterable
     {
         $import = $this->import($filters);
+        if ($import === null) {
+            return;
+        }
         $days = $this->days();
 
         foreach ($this->imports->linesByEmployee($import) as $lines) {
@@ -97,7 +105,9 @@ class AttendanceMonthSheetExport extends AbstractExportKind
 
     public function count(array $filters, ?Authenticatable $reader): int
     {
-        return $this->imports->employeeCount($this->import($filters));
+        $import = $this->import($filters);
+
+        return $import === null ? 0 : $this->imports->employeeCount($import);
     }
 
     /**
@@ -151,15 +161,18 @@ class AttendanceMonthSheetExport extends AbstractExportKind
         return bcdiv((string) $minutes, '60', 2);
     }
 
-    /** @var array{id: int, import: AttendanceImport}|null the run's import, so count(), columns() and rows() read one */
+    /** @var array{id: ?int, import: ?AttendanceImport}|null the run's import, so count(), columns() and rows() read one */
     private ?array $memo = null;
 
     /** @param  array<string, mixed>  $filters */
-    private function import(array $filters): AttendanceImport
+    private function import(array $filters): ?AttendanceImport
     {
-        $id = (int) $filters['attendance_import_id'];
+        $id = isset($filters['attendance_import_id']) ? (int) $filters['attendance_import_id'] : null;
         if ($this->memo === null || $this->memo['id'] !== $id) {
-            $this->memo = ['id' => $id, 'import' => AttendanceImport::query()->findOrFail($id)];
+            $import = $id === null
+                ? AttendanceImport::query()->orderByDesc('id')->first()
+                : AttendanceImport::query()->findOrFail($id);
+            $this->memo = ['id' => $id, 'import' => $import];
         }
 
         return $this->memo['import'];
@@ -168,11 +181,10 @@ class AttendanceMonthSheetExport extends AbstractExportKind
     /** Every date of the memoised import's period, Y-m-d; none before count() has run. */
     private function days(): array
     {
-        if ($this->memo === null) {
+        $import = $this->memo['import'] ?? null;
+        if ($import === null) {
             return [];
         }
-
-        $import = $this->memo['import'];
         $days = [];
         $day = CarbonImmutable::parse($import->period_from->toDateString());
         $last = CarbonImmutable::parse($import->period_to->toDateString());

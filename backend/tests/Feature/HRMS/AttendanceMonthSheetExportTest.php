@@ -128,6 +128,15 @@ class AttendanceMonthSheetExportTest extends TestCase
         $this->assertSame('0.50', $bala['ot_hours']);
     }
 
+    public function test_with_no_run_at_all_the_sheet_has_its_fixed_columns_and_no_rows(): void
+    {
+        $this->actAs(['hrms.view']);
+
+        $csv = $this->csv($this->postJson('/api/v1/exports/attendance_month_sheet', [])->assertOk());
+        $this->assertSame('early_out_minutes', end($csv['headers']));
+        $this->assertSame([], $csv['rows']);
+    }
+
     public function test_a_correction_shows_in_the_sheet(): void
     {
         $this->actAs(['hrms.manage']);
@@ -151,8 +160,15 @@ class AttendanceMonthSheetExportTest extends TestCase
         $this->assertSame('hrms', $catalogue['attendance_month_sheet']['module']);
         $this->assertSame('attendance_import_id', $catalogue['attendance_month_sheet']['filters'][0]['name']);
         $this->postJson('/api/v1/exports/attendance_month_sheet', ['attendance_import_id' => $id])->assertOk();
-        $this->postJson('/api/v1/exports/attendance_month_sheet', [])->assertUnprocessable()->assertJsonValidationErrors(['attendance_import_id']);
         $this->postJson('/api/v1/exports/attendance_month_sheet', ['attendance_import_id' => 999])->assertUnprocessable()->assertJsonValidationErrors(['attendance_import_id']);
+        $this->postJson('/api/v1/exports/attendance_month_sheet', ['attendance_import_id' => 'x'])->assertUnprocessable()->assertJsonValidationErrors(['attendance_import_id']);
+
+        // No run named: the newest one — and with none at all, the fixed
+        // columns and no rows, never a guessed period.
+        $named = $this->csv($this->postJson('/api/v1/exports/attendance_month_sheet', ['attendance_import_id' => $id])->assertOk());
+        $latest = $this->csv($this->postJson('/api/v1/exports/attendance_month_sheet', [])->assertOk());
+        $this->assertSame($named['rows'], $latest['rows']);
+        $this->assertSame($named['headers'], $latest['headers']);
 
         $this->actAs(['sales.view']);
         $this->assertFalse(collect($this->getJson('/api/v1/exports')->json('data'))->keyBy('key')->has('attendance_month_sheet'));
