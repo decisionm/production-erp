@@ -320,8 +320,41 @@ separate stage, with the Codex text quoted in the record's source.
 - **GAP:** the Store dashboard has no finished-goods block with those four
   figures; this joins the role-dashboard requirement in the end-to-end map.
 
+## 7. Product standards and the Start Batch gate
+
+### Current application
+
+- A readiness gate checks item active, unit, weight, cycle time, cavities,
+  packing count, colour, Tally item, Tally godown and an active machine. As
+  shipped it is watch-only (`production.readiness.enforced` is false): every
+  gap is a named warning and the batch starts. Only a wrong-product packaging
+  or an unresolvable finished-goods location refuses.
+- The standards workspace lists every product with its numbered gaps in views
+  ready, incomplete and all.
+- Citations: [research note](research/2026-09-02-quality-inventory-production-ground-truth.md) §3e–§3f.
+
+### Owner input (02-Sep-2026)
+
+Asked whether the gate should refuse: "A", with the Codex text quoted in the
+record's source.
+
+### Result
+
+- **VERIFIED as a decision:** DEC-20260902-017. The gate is enforced: Start
+  Batch refuses a product missing unit, weight, cycle time, cavities, packing
+  count, Tally item, Tally godown or an active machine configuration, naming
+  every missing field. Colour stays a warning. Rollout: not immediately; first
+  the workspace is run against live data and every active production product
+  is corrected with verified values by an authorised person, nothing invented;
+  then the switch is thrown. Inactive or unused products do not delay it.
+- **GAP (rollout, not code):** the live readiness view has not been run for
+  this purpose. The count of active products not Ready is taken on live, never
+  assumed, before the switch.
+- **VERIFIED (code):** the switch, the per-check severities and the named-gap
+  strings already exist; the build is the rollout and the colour-only warning
+  check.
+
 ## Sections still to capture
 
-- Product Configuration standards and what a batch completion checks against them.
 - Batch lifecycle: queue, start, run recording, complete, QC, approvals.
-- Store, held stock and the finished-goods store acceptance.
+- Store and held stock.
