@@ -124,25 +124,26 @@ return [
      * flag above — in the open, for everyone — not silently for whoever
      * happens to carry a role.
      *
-     * SCOPE is the accountant gate and the quality gate.
+     * SCOPE is the accountant gate, the quality gate, and (DEC-20260902-010)
+     * the plant-manager gate.
      *
      * The quality gate compares the checker against the person who COUNTED
      * the output at Complete Batch (shift_production_entries.completed_by) —
      * a check that certifies its own count certifies nothing. The accountant
-     * gate compares against the plant manager's signature. The same flag
-     * relaxes both, because a one-person office is one-person for all of them
-     * or none.
+     * gate compares against the plant manager's signature. The plant-manager
+     * gate compares against the quality checker's signature. The same flag
+     * relaxes all three, because a one-person office is one-person for all of
+     * them or none.
      *
-     * IT IS STILL NOT THE PM GATE, and the reason is now narrower than it was.
-     * It used to be "the PM is first in the chain, so there is no earlier
-     * signature to collide with"; with quality sitting ahead of the PM that is
-     * no longer true — a QC checker who also holds the Plant Manager role
-     * could check a batch and then approve their own check. Whether that
-     * should be barred is a policy question the owner's brief does not answer
-     * ("all the machines will go to quality queue... then go to next level"
-     * says nothing about who stands at the next level), so the behaviour is
-     * deliberately left as it was rather than tightened on a guess. Raise it
-     * with the factory before adding a third comparison here.
+     * IT IS NOW ALSO THE PM GATE (DEC-20260902-010). It used to be "the PM is
+     * first in the chain, so there is no earlier signature to collide with";
+     * with quality sitting ahead of the PM that stopped being true — a QC
+     * checker who also holds the Plant Manager role could check a batch and
+     * then approve their own check. DEC-20260902-010 settles the policy
+     * question the previous version of this note left open, so pmApprove()
+     * carries this third comparison too: the quality checker (row's
+     * quality_checked_by) must not be the plant-manager signer, same flag,
+     * same absence of an Administrator exemption as the other two.
      */
     'approvals' => [
         'allow_same_user' => (bool) env('PROD_APPROVALS_ALLOW_SAME_USER', false),
