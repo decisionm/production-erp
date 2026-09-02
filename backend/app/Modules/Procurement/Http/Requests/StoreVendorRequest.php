@@ -2,7 +2,9 @@
 
 namespace App\Modules\Procurement\Http\Requests;
 
+use App\Modules\Procurement\Models\Enums\VendorClassification;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class StoreVendorRequest extends FormRequest
 {
@@ -28,6 +30,9 @@ class StoreVendorRequest extends FormRequest
             'is_active' => ['boolean'],
             // The vendor's Tally ledger name (Phase 6) — typed by Accounts, never pulled.
             'tally_ledger_name' => ['nullable', 'string', 'max:255'],
+            // DEC-20260902-026: one or more of five classifications, set by a person.
+            'classifications' => ['sometimes', 'array'],
+            'classifications.*' => ['string', Rule::enum(VendorClassification::class)],
         ];
     }
 }

@@ -5,6 +5,7 @@ namespace App\Modules\Procurement\Models;
 use App\Support\Configuration\Concerns\RecordsConfigurationAudit;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 // tally_ledger_name (Phase 6): the vendor's ledger name in Tally — the party a
@@ -22,5 +23,11 @@ class Vendor extends Model
         return [
             'is_active' => 'boolean',
         ];
+    }
+
+    /** DEC-20260902-026: one or more of five classifications, set by a person — never derived from Tally. */
+    public function classifications(): HasMany
+    {
+        return $this->hasMany(VendorClassificationRow::class);
     }
 }

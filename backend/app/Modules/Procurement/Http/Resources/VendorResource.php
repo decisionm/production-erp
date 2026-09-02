@@ -47,6 +47,13 @@ class VendorResource extends JsonResource
                 'synced_at' => Ledger::where('tally_guid', $vendor->tally_ledger_guid)
                     ->first(['tally_synced_at'])?->tally_synced_at?->toIso8601String(),
             ] : null,
+            // DEC-20260902-026: one or more of five classifications, set by a
+            // person — sorted values, never labels; the frontend maps those.
+            'classifications' => $this->whenLoaded(
+                'classifications',
+                fn () => $this->classifications->map(fn ($row) => $row->classification->value)->sort()->values()->all(),
+                [],
+            ),
             'is_active' => $this->is_active,
             // Archived-by-soft-delete, distinct from is_active. Both exist on
             // this table and only the screen can tell the operator which one
