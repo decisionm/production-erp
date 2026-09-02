@@ -1615,7 +1615,9 @@ none of those touch Tally. *Open since 2026-08-26.*
 
 **(a) resolved 2026-09-02 by DEC-20260902-028:** the ERP never moves a hold on
 its own; the first hold placed keeps the stock; only a Store user re-points it,
-with a reason, audited. (b) to (f) still open. The original entry follows.
+with a reason, audited. **(b) resolved 2026-09-02 by DEC-20260902-029:** the
+Store re-points on its own judgement, no approval, audited. (c) to (f) still
+open. The original entry follows.
 
 Store fulfilment lets the store hold FG stock against a confirmed sales-order
 line. The build refuses to hold more than exists, but it does not decide WHOSE

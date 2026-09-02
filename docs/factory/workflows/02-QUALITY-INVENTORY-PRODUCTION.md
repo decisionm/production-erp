@@ -482,9 +482,12 @@ record's source.
 
 - **VERIFIED as a decision:** DEC-20260902-028, Q62(a). The ERP never moves a
   hold on its own. First hold wins; only a person re-points it.
-- **OPEN (one at a time):** Q62(b) approval for a re-point; (c) customer
-  priority; (d) production request queue order; (e) when a request is
-  answered; (f) parallel lines for planning dates.
+- **VERIFIED as a decision:** DEC-20260902-029, Q62(b). The Store re-points a
+  hold on its own judgement, at once, with lines, quantity, reason and person
+  recorded. No approval step.
+- **OPEN (one at a time):** Q62(c) customer priority; (d) production request
+  queue order; (e) when a request is answered; (f) parallel lines for planning
+  dates.
 
 ## Sections still to capture
 
