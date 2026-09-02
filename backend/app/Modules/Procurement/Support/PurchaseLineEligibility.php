@@ -42,6 +42,17 @@ final class PurchaseLineEligibility
 
                 continue;
             }
+            // DEC-20260902-023: "finished goods, and any produced or
+            // work-in-progress product, must NEVER appear in either
+            // picker" — WorkInProgress is the other half of that sentence,
+            // refused with its own wording rather than reused finished-good
+            // text, since a half-made bottle is not what "finished good"
+            // means to the person reading the refusal.
+            if ($category === ItemCategory::WorkInProgress) {
+                $fail("lines.{$index}.item_id", 'A produced item is not purchased.');
+
+                continue;
+            }
             if ($category === null && trim((string) ($line['unclassified_reason'] ?? '')) === '') {
                 $fail("lines.{$index}.unclassified_reason", 'An unclassified item needs a reason.');
             }
