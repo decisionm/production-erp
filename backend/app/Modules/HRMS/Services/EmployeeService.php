@@ -269,6 +269,11 @@ class EmployeeService
                 ->label('shift production entry'),
             DependencyCheck::table('shift_summaries', 'supervisor_id')
                 ->label('shift summary'),
+            // The punch-report import's review copy (03-Sep). SET NULL: a
+            // line would survive with its employee blanked, which is the
+            // quiet failure this list exists to count.
+            DependencyCheck::table('attendance_import_lines', 'employee_id')
+                ->label('attendance import line'),
         ];
     }
 }
