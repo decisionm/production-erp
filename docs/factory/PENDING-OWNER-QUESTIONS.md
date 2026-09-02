@@ -2106,7 +2106,15 @@ a bag.
 
 *Was open 2026-08-30 → 2026-08-31.*
 
-## Q78 · Is there a store-acceptance step for finished goods, and may the Storekeeper approve dispatch? — PARTLY RESOLVED
+## Q78 · Is there a store-acceptance step for finished goods, and may the Storekeeper approve dispatch? — RESOLVED
+
+**Store-acceptance half resolved 2026-09-02 by DEC-20260902-016:** there is NO
+separate Store-acceptance stage. Complete Batch records finished goods in the
+Store; Quality, Plant Manager and Accounts follow; the Store does not sign
+again; its dashboard shows completed, Quality-pending, approved and rejected
+quantities; a count difference goes back to Production through the existing
+return. The dispatch half was resolved 01-Sep by DEC-20260901-005 (the text
+below names the id it was first minted under). The original entry follows.
 
 The Storekeeper role now exists as a definition
 (`roles:define-storekeeper`, dry-run first). Two of the capabilities asked

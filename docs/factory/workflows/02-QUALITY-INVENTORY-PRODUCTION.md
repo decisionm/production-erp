@@ -299,6 +299,27 @@ purchase rates."
 Section 5 is complete: DEC-20260902-011 to -015 cover the screen, whole-bag
 rejection, the counted-material hold, handling units and the Tally boundary.
 
+## 6. Finished goods into the Store: no acceptance stage
+
+### Owner input (02-Sep-2026)
+
+Asked whether a Store-acceptance step should exist (Q78's open half): "A" — no
+separate stage, with the Codex text quoted in the record's source.
+
+### Result
+
+- **VERIFIED as a decision:** DEC-20260902-016. Complete Batch records the
+  finished goods in the Store, as today. Quality, Plant Manager and Accounts
+  follow. The Store does not sign again. Its dashboard shows completed,
+  Quality-pending, approved and rejected finished-goods quantities. A count
+  difference goes back to Production through the existing return-to-production
+  action. Q78 closed in full.
+- **VERIFIED (code):** completion already receives produced pieces into the
+  batch's finished-goods warehouse and return-to-production already exists
+  under the quality permission (research note §3b, §3d).
+- **GAP:** the Store dashboard has no finished-goods block with those four
+  figures; this joins the role-dashboard requirement in the end-to-end map.
+
 ## Sections still to capture
 
 - Product Configuration standards and what a batch completion checks against them.
