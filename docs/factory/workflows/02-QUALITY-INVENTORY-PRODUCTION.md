@@ -568,9 +568,11 @@ raises for the OWNER before any code, none of which an agent may answer:
    labels it at the gate; a counted line with no units is refused; switched on
    after the live packaging masters are checked; arrivals received before the
    build keep the typed path. A declared narrowing of -013.
-4. Which treatment governs the resin figure on the Store ↔ Production page: the
-   never-counted estimate of DEC-20260807-007, the usable quantity of
-   DEC-20260831-005, or a ledger row the Tally reconcile compares.
+4. ~~Which treatment governs the resin figure~~ — **answered, DEC-20260902-039:**
+   one figure; labelled Estimated on every screen; shown negative when negative
+   with a warning; netting treats negative as zero; other materials carry no
+   label; the Tally reconcile compares the item total across the one godown and
+   never re-anchors the row; no second figure.
 5. Whether DEC-20260902-029 and DEC-20260902-031 still read as the owner's own
    rules: -029 rests on "we can go with your recommendation of A"; -031 records
    the opposite of the owner's first answer after a Codex argument the owner
