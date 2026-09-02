@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation } from '@tanstack/react-query';
-import { Alert, DatePicker, Form, Input, Modal, Select, Space, Switch } from 'antd';
+import { Alert, Checkbox, DatePicker, Form, Input, Modal, Select, Space, Switch } from 'antd';
 import { useEffect, useRef } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { z } from 'zod';
@@ -41,6 +41,14 @@ interface CreatePurchaseOrderModalProps {
     itemOptions: { value: number; label: string }[];
     /** When set, the form opens prefilled from an approved requisition. */
     raiseFrom?: RaiseFromRequisition | null;
+    /**
+     * DEC-20260902-026: whether `vendorOptions` is offering Service, Other
+     * and unclassified vendors alongside the three material classes. The
+     * state lives with the page's own vendor query, not here — same shape
+     * as `showAdditional` below.
+     */
+    showAllVendors: boolean;
+    onShowAllVendorsChange: (value: boolean) => void;
     /** DEC-20260902-023 — forwarded to the lines editor unchanged. */
     showAdditional: boolean;
     onShowAdditionalChange: (value: boolean) => void;
@@ -67,6 +75,8 @@ export default function CreatePurchaseOrderModal({
     vendorOptions,
     itemOptions,
     raiseFrom = null,
+    showAllVendors,
+    onShowAllVendorsChange,
     showAdditional,
     onShowAdditionalChange,
     unclassifiedItemIds,
@@ -149,6 +159,11 @@ export default function CreatePurchaseOrderModal({
                             <Select {...field} options={vendorOptions} showSearch optionFilterProp="label" />
                         )}
                     />
+                    <div style={{ marginTop: 4 }}>
+                        <Checkbox checked={showAllVendors} onChange={(e) => onShowAllVendorsChange(e.target.checked)}>
+                            Show all vendors
+                        </Checkbox>
+                    </div>
                 </Form.Item>
                 <Form.Item label="Order Date" validateStatus={errors.order_date ? 'error' : ''} help={errors.order_date?.message}>
                     <Controller

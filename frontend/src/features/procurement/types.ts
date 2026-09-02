@@ -4,6 +4,7 @@ import type { Item, Warehouse } from '@/features/inventory/types';
 import type { MaterialLot } from '@/features/production/types';
 import type { TallyLink } from '@/features/sales/types';
 import type { ListParams } from '@/lib/listParams';
+import type { VendorClassification } from './vendorClassification';
 
 export interface Vendor {
     id: number;
@@ -14,6 +15,13 @@ export interface Vendor {
     address: string | null;
     gstin: string | null;
     state_code: string | null;
+    /**
+     * DEC-20260902-026: which of the five procurement categories this
+     * vendor is classified under — zero, one or many. Sorted values; an
+     * empty array means unclassified, which the Vendors tab and the PO
+     * picker both treat as "behind the explicit filter", never as an error.
+     */
+    classifications: VendorClassification[];
     /**
      * The vendor's ledger name in Tally — the party a staged Purchase Order
      * voucher would name (Phase 6). Typed by Accounts on the vendor form,

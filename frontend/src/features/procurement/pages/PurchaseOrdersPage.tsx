@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { listAllItems } from '@/features/inventory/api';
 import { listAllVendors, listPurchaseOrders, sendPurchaseOrder } from '@/features/procurement/api';
 import { apiMessage } from '@/features/procurement/components/apiMessage';
@@ -25,6 +24,7 @@ import {
     tallyStateLine,
 } from '@/features/procurement/purchaseOrders';
 import { isUnclassified } from '@/features/procurement/purchasePicker';
+import { vendorPickerOptions } from '@/features/procurement/vendorClassification';
 import type { PurchaseOrder } from '@/features/procurement/types';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { usePurchaseOrderListParams } from '@/features/procurement/usePurchaseOrderListParams';
@@ -79,15 +79,22 @@ export default function PurchaseOrdersPage() {
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
 
     // WS-B: `StorePurchaseOrderRequest` refuses a RETIRED vendor on an
-    // ERP-entered order, so the buyer is no longer offered one. (The Tally
-    // MIRROR path keeps accepting it — it records an order Tally already
-    // holds — but nothing on this screen raises a mirror.) The FILTER bar is
+    // ERP-entered order, so the buyer is no longer offered one — same rule
+    // vendorPickerOptions applies (is_active only). (The Tally MIRROR path
+    // keeps accepting it — it records an order Tally already holds — but
+    // nothing on this screen raises a mirror.) The FILTER bar is
     // deliberately untouched: past orders against a retired vendor must stay
     // findable.
-    const vendorOptions = activePickerOptions(vendors?.data, {
-        isActive: (v) => v.is_active,
-        option: (v) => ({ value: v.id, label: `${v.code} — ${v.name}` }),
-    });
+    //
+    // DEC-20260902-026: the picker offers resin, packaging and consumables/
+    // spares/tooling vendors by default; service, other and unclassified
+    // vendors only behind "Show all vendors" — vendorPickerOptions
+    // (vendorClassification.ts) is the shared rule the Vendors tab uses too.
+    const [showAllVendors, setShowAllVendors] = useState(false);
+    const vendorOptions = useMemo(
+        () => vendorPickerOptions(vendors?.data, showAllVendors),
+        [vendors, showAllVendors],
+    );
     // DEC-20260902-023: the picker offers Raw and Packing material by
     // default; Other and unclassified items only behind "Show additional
     // purchasable items", and a finished good never at all UNLESS it is
@@ -279,6 +286,8 @@ export default function PurchaseOrdersPage() {
                 vendorOptions={vendorOptions}
                 itemOptions={itemOptions}
                 raiseFrom={raiseFrom}
+                showAllVendors={showAllVendors}
+                onShowAllVendorsChange={setShowAllVendors}
                 showAdditional={showAdditional}
                 onShowAdditionalChange={setShowAdditional}
                 unclassifiedItemIds={unclassifiedItemIds}

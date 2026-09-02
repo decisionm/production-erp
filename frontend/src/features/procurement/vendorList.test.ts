@@ -95,6 +95,39 @@ describe('the vendors table asks the server for one page at a time', () => {
         const uri = decodeURIComponent(api.getUri(requests[0]));
         expect(uri).toBe('/api/v1/procurement/vendors?page=2&per_page=20');
     });
+
+    // DEC-20260902-026 (Task 6, over Task 5's contract): classification and
+    // unclassified are trailing, optional, and OR together on the server.
+    // Pinned as a REQUEST — not just the pure vendorPickerOptions helper —
+    // because a key typo here (`classifications` for `classification`, or
+    // `unclassified: true` for `1`) would still typecheck and still pass
+    // every other test, and only fail against the live backend.
+    it('sends classification[] and unclassified=1 the way the server reads them', async () => {
+        await listVendors(1, 50, undefined, ['resin', 'packaging'], true);
+
+        expect(requests[0].params).toEqual({
+            page: 1,
+            per_page: 50,
+            classification: ['resin', 'packaging'],
+            unclassified: 1,
+        });
+        // The bracket form is what discriminates a correct serializer from
+        // one that merely looks right — a plain `classification=resin,packaging`
+        // would pass the params.toEqual above and still not be what the
+        // server's `classification[]=` reader expects.
+        const uri = decodeURIComponent(api.getUri(requests[0]));
+        expect(uri).toBe(
+            '/api/v1/procurement/vendors?page=1&per_page=50&classification[]=resin&classification[]=packaging&unclassified=1',
+        );
+    });
+
+    it('sends neither key for an empty classification list and unclassified=false — the "every vendor" case', async () => {
+        await listVendors(1, 50, undefined, [], false);
+
+        expect(requests[0].params).toEqual({ page: 1, per_page: 50 });
+        expect((requests[0].params as Record<string, unknown>).classification).toBeUndefined();
+        expect((requests[0].params as Record<string, unknown>).unclassified).toBeUndefined();
+    });
 });
 
 describe('the picker list is untouched by the table\'s paging', () => {
@@ -147,12 +180,17 @@ describe('the vendors screen draws a real pager', () => {
         // The search term joined page and perPage when the Tally ledger import
         // took this table from four rows to 628; a bare call would be the
         // unpaged read this whole file exists to prevent.
-        expect(VENDORS_PAGE).toMatch(/queryFn:\s*\(\)\s*=>\s*listVendors\(page,\s*perPage(,\s*search)?\)/);
+        // DEC-20260902-026 appended two trailing, optional classification
+        // arguments after `search` (ruling: existing positional params stay
+        // first, in order) — the group below tolerates them without
+        // loosening the thing this test actually protects: page, perPage
+        // and search stay first, in that order, and never a bare call.
+        expect(VENDORS_PAGE).toMatch(/queryFn:\s*\(\)\s*=>\s*listVendors\(page,\s*perPage(,\s*search)?(,[^)]*)?\)/);
         expect(VENDORS_PAGE).not.toMatch(/queryFn:\s*listVendors\b/);
     });
 
     it('keys the query by page so a page change refetches', () => {
-        expect(VENDORS_PAGE).toMatch(/queryKey:\s*\['procurement',\s*'vendors',\s*page,\s*perPage(,\s*search)?\]/);
+        expect(VENDORS_PAGE).toMatch(/queryKey:\s*\['procurement',\s*'vendors',\s*page,\s*perPage(,\s*search)?(,[^\]]*)?\]/);
     });
 
     it('searches the SERVER, and keys the query by the term so a search refetches', () => {
@@ -160,8 +198,8 @@ describe('the vendors screen draws a real pager', () => {
         // 628 and answer "no such vendor" for one that plainly exists — the
         // defect four pickers in this app were fixed for. The term has to reach
         // the query key too, or typing one would show the previous results.
-        expect(VENDORS_PAGE).toMatch(/queryKey:\s*\['procurement',\s*'vendors',\s*page,\s*perPage,\s*search\]/);
-        expect(VENDORS_PAGE).toMatch(/listVendors\(page,\s*perPage,\s*search\)/);
+        expect(VENDORS_PAGE).toMatch(/queryKey:\s*\['procurement',\s*'vendors',\s*page,\s*perPage,\s*search(,[^\]]*)?\]/);
+        expect(VENDORS_PAGE).toMatch(/listVendors\(page,\s*perPage,\s*search(,[^)]*)?\)/);
         expect(VENDORS_PAGE).toContain('Input.Search');
     });
 
