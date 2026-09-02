@@ -89,6 +89,7 @@ import {
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
 import { correctionLists } from '@/features/production/correctionReads';
+import { addedLineWarning } from '@/features/production/addedLine';
 import {
     completedTodaySummary,
     completedTodayUnits,
@@ -1835,11 +1836,17 @@ export default function ShiftProductionEntryPage() {
      * would strand a finished, packed batch.
      */
     const consumableOptions = useMemo(() => {
-        if (consumableMaterials === undefined) return itemOptions;
+        // category: null here — the fallback (list still in flight) carries no
+        // classification, same as an item the server hasn't classified yet.
+        if (consumableMaterials === undefined) return itemOptions.map((option) => ({ ...option, category: null as string | null }));
 
         return [...consumableMaterials.options]
             .sort((a, b) => Number(b.is_expected) - Number(a.is_expected) || a.name.localeCompare(b.name))
-            .map((option) => ({ value: option.item_id, label: option.sku ? `${option.name} (${option.sku})` : option.name }));
+            .map((option) => ({
+                value: option.item_id,
+                label: option.sku ? `${option.name} (${option.sku})` : option.name,
+                category: option.category,
+            }));
         // itemOptions is rebuilt each render from `items`; keying the memo on
         // `items` rather than on it keeps this from recomputing every time.
         // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -8694,6 +8701,15 @@ export default function ShiftProductionEntryPage() {
                         // reason here rather than letting the drawer come back
                         // with a 422 the supervisor cannot answer.
                         const isUnplanned = isUnplannedMaterial(selectedItemId);
+                        // DEC-20260902-019: the category of an added line,
+                        // shown as a warning — never a block. Unclassified
+                        // and Other are the two cases worth a supervisor's
+                        // second look; raw/packing material stay silent.
+                        // No item chosen yet is not "unclassified" — it's
+                        // nothing to warn about, so the lookup is skipped.
+                        const addedLineTag = selectedItemId
+                            ? addedLineWarning(consumableOptions.find((option) => option.value === selectedItemId)?.category)
+                            : null;
                         return (
                         <Row key={field.id} gutter={[8, 8]} align="middle" style={{ marginTop: 8 }}>
                             {/* The exception lines no longer carry a source
@@ -8709,9 +8725,29 @@ export default function ShiftProductionEntryPage() {
                                     name={`material_consumptions.${index}.item_id`}
                                     control={completeForm.control}
                                     render={({ field }) => (
-                                        <Select {...field} size="large" options={consumableOptions} showSearch optionFilterProp="label" style={{ width: '100%' }} placeholder="Resin/Masterbatch" />
+                                        <Select
+                                            {...field}
+                                            size="large"
+                                            options={consumableOptions}
+                                            showSearch
+                                            optionFilterProp="label"
+                                            style={{ width: '100%' }}
+                                            placeholder="Resin/Masterbatch"
+                                            optionRender={(opt) => {
+                                                const optionTag = addedLineWarning(opt.data.category);
+                                                return (
+                                                    <Space>
+                                                        <span>{opt.label}</span>
+                                                        {optionTag && <Tag color="warning">{optionTag}</Tag>}
+                                                    </Space>
+                                                );
+                                            }}
+                                        />
                                     )}
                                 />
+                                {addedLineTag && (
+                                    <Tag color="warning" style={{ marginTop: 4 }}>{addedLineTag}</Tag>
+                                )}
                             </Col>
                             <Col xs={12} sm={5}>
                                 <Controller
