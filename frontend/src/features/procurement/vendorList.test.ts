@@ -128,6 +128,15 @@ describe('the vendors table asks the server for one page at a time', () => {
         expect((requests[0].params as Record<string, unknown>).classification).toBeUndefined();
         expect((requests[0].params as Record<string, unknown>).unclassified).toBeUndefined();
     });
+
+    it('sends unclassified=1 alone, with no classification key, for the Unclassified-only choice — "unclassified alone = none"', async () => {
+        // The exact state a person produces by picking only the
+        // "Unclassified" chip in the Vendors tab filter — an empty
+        // classification list with the pseudo-option on.
+        await listVendors(1, 50, undefined, [], true);
+
+        expect(requests[0].params).toEqual({ page: 1, per_page: 50, unclassified: 1 });
+    });
 });
 
 describe('the picker list is untouched by the table\'s paging', () => {
