@@ -1826,9 +1826,12 @@ export default function ShiftProductionEntryPage() {
      * would strand a finished, packed batch.
      */
     const consumableOptions = useMemo(() => {
-        // category: null here — the fallback (list still in flight) carries no
-        // classification, same as an item the server hasn't classified yet.
-        if (consumableMaterials === undefined) return itemOptions.map((option) => ({ ...option, category: null as string | null }));
+        // category/is_expected: neutral here — the fallback (list still in
+        // flight) carries no classification and renders no warning tags,
+        // same as this dropdown looked before DEC-20260902-019 existed.
+        if (consumableMaterials === undefined) {
+            return itemOptions.map((option) => ({ ...option, category: null as string | null, is_expected: true }));
+        }
 
         return [...consumableMaterials.options]
             .sort((a, b) => Number(b.is_expected) - Number(a.is_expected) || a.name.localeCompare(b.name))
@@ -1836,6 +1839,7 @@ export default function ShiftProductionEntryPage() {
                 value: option.item_id,
                 label: option.sku ? `${option.name} (${option.sku})` : option.name,
                 category: option.category,
+                is_expected: option.is_expected,
             }));
         // itemOptions is rebuilt each render from `items`; keying the memo on
         // `items` rather than on it keeps this from recomputing every time.
@@ -8763,7 +8767,14 @@ export default function ShiftProductionEntryPage() {
                                             style={{ width: '100%' }}
                                             placeholder="Resin/Masterbatch"
                                             optionRender={(opt) => {
-                                                const optionTag = addedLineWarning(opt.data.category);
+                                                // Off-plan only — a planned raw/packing
+                                                // material sorted to the top of this
+                                                // list must not carry a tag that then
+                                                // disappears once the server's list
+                                                // lands (the pattern this file's own
+                                                // startItemOptions comment warns
+                                                // against for the same reason).
+                                                const optionTag = opt.data.is_expected ? null : addedLineWarning(opt.data.category);
                                                 return (
                                                     <Space>
                                                         <span>{opt.label}</span>
@@ -8774,9 +8785,6 @@ export default function ShiftProductionEntryPage() {
                                         />
                                     )}
                                 />
-                                {addedLineTag && (
-                                    <Tag color="warning" style={{ marginTop: 4 }}>{addedLineTag}</Tag>
-                                )}
                             </Col>
                             <Col xs={12} sm={5}>
                                 <Controller
@@ -8816,6 +8824,11 @@ export default function ShiftProductionEntryPage() {
                                             />
                                         )}
                                     />
+                                </Col>
+                            )}
+                            {addedLineTag && (
+                                <Col xs={24}>
+                                    <Tag color="warning">{addedLineTag}</Tag>
                                 </Col>
                             )}
                             <Col xs={24}>
