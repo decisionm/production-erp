@@ -44,4 +44,11 @@ class PurchaseRequisitionController extends Controller
             $this->requisitions->reject($purchaseRequisition, $request->user()?->id),
         );
     }
+
+    public function withdraw(Request $request, PurchaseRequisition $purchaseRequisition): PurchaseRequisitionResource
+    {
+        return PurchaseRequisitionResource::make(
+            $this->requisitions->withdraw($purchaseRequisition, (int) $request->user()->id),
+        );
+    }
 }

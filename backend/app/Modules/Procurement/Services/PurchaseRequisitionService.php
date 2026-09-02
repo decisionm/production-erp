@@ -3,6 +3,7 @@
 namespace App\Modules\Procurement\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
+use App\Modules\Procurement\Exceptions\NotTheRequesterException;
 use App\Modules\Procurement\Exceptions\SelfDecisionException;
 use App\Modules\Procurement\Models\Enums\PurchaseRequisitionStatus;
 use App\Modules\Procurement\Models\PurchaseRequisition;
@@ -22,7 +23,7 @@ class PurchaseRequisitionService
      * item_id and needs no item row; only the requisition's OWN lines print
      * an item.
      */
-    private const WITH = ['lines.item', 'requestedBy', 'approvedBy', 'rejectedBy', 'purchaseOrders.lines'];
+    private const WITH = ['lines.item', 'requestedBy', 'approvedBy', 'rejectedBy', 'withdrawnBy', 'purchaseOrders.lines'];
 
     public function __construct(
         private readonly ProcurementDocumentQuery $query,
@@ -202,6 +203,30 @@ class PurchaseRequisitionService
             }
 
             $locked->forceFill(['status' => $target, ...$stamps])->save();
+
+            return $this->decorate($locked);
+        });
+    }
+
+    /**
+     * DEC-20260902-025: the requester's own exit. Not a decision, so it is not
+     * `decide()`: no approver stamps, and the comparison runs the other way.
+     */
+    public function withdraw(PurchaseRequisition $requisition, int $userId): PurchaseRequisition
+    {
+        return DB::transaction(function () use ($requisition, $userId) {
+            $locked = PurchaseRequisition::query()->lockForUpdate()->findOrFail($requisition->id);
+            $this->guardStatus($locked, PurchaseRequisitionStatus::Draft, PurchaseRequisitionStatus::Withdrawn);
+
+            if ((int) $locked->requested_by !== $userId) {
+                throw new NotTheRequesterException('Only the person who raised a requisition can withdraw it.');
+            }
+
+            $locked->forceFill([
+                'status' => PurchaseRequisitionStatus::Withdrawn,
+                'withdrawn_by' => $userId,
+                'withdrawn_at' => now(),
+            ])->save();
 
             return $this->decorate($locked);
         });

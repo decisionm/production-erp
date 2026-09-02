@@ -567,6 +567,7 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('purchase-requisitions', PurchaseRequisitionController::class)->only(['index', 'store']);
             Route::post('purchase-requisitions/{purchase_requisition}/approve', [PurchaseRequisitionController::class, 'approve']);
             Route::post('purchase-requisitions/{purchase_requisition}/reject', [PurchaseRequisitionController::class, 'reject']);
+            Route::post('purchase-requisitions/{purchase_requisition}/withdraw', [PurchaseRequisitionController::class, 'withdraw']);
 
             // Phase 6: show carries lines, schedules, revisions, the receipts
             // summary and the Tally link; trace is the chain behind the order

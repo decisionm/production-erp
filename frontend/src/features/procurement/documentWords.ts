@@ -54,6 +54,7 @@ const REQUISITION_STATUS: Record<PurchaseRequisitionStatus, { color: string; lab
     draft: { color: 'default', label: 'Draft' },
     approved: { color: 'green', label: 'Approved' },
     rejected: { color: 'red', label: 'Rejected' },
+    withdrawn: { color: 'orange', label: 'Withdrawn' },
 };
 
 /** Sentence-case words, never the raw enum. An unknown status still renders. */
