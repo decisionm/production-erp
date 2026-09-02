@@ -12,7 +12,6 @@ use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\LazyCollection;
 use Illuminate\Validation\ValidationException;
@@ -326,7 +325,7 @@ class AttendanceImportService
      * month sheet — the file is produced from what was reviewed, never
      * from `attendances`.
      *
-     * @return LazyCollection<int, Collection<int, AttendanceImportLine>>
+     * @return LazyCollection<int, LazyCollection<int, AttendanceImportLine>>
      */
     public function linesByEmployee(AttendanceImport $import): LazyCollection
     {

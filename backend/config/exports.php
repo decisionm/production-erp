@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\HRMS\Exports\AttendanceMonthSheetExport;
 use App\Modules\Procurement\Exports\GoodsReceiptLinesExport;
 use App\Modules\Procurement\Exports\GoodsReceiptsExport;
 use App\Modules\Procurement\Exports\PurchaseOrderLinesExport;
@@ -83,6 +84,7 @@ return [
         PurchaseOrderLinesExport::class,
         GoodsReceiptsExport::class,
         GoodsReceiptLinesExport::class,
+        AttendanceMonthSheetExport::class,
     ],
 
 ];
