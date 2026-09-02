@@ -9,16 +9,41 @@ use App\Modules\HRMS\Models\LeaveBalance;
 use App\Modules\HRMS\Models\LeaveRequest;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 
 class LeaveRequestService
 {
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    public function __construct(private readonly HrmsListQuery $query) {}
+
+    /**
+     * The list page's read. Every filter is ListLeaveRequestsRequest's —
+     * `q` THROUGH the employee (code, name, department, designation),
+     * `status` and `employee_id` exact. Newest first, as it always was; id
+     * is unique so that order is already stable.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    public function paginate(int $perPage = HrmsListQuery::PER_PAGE_DEFAULT, array $filters = []): LengthAwarePaginator
     {
-        return LeaveRequest::query()
-            ->with(['employee', 'leaveType', 'approvedBy'])
+        $query = LeaveRequest::query()->with(['employee', 'leaveType', 'approvedBy']);
+
+        if (($term = $this->query->term($filters)) !== null) {
+            $query->whereHas('employee', fn (Builder $employee) => $this->query->whereEmployeeMatches($employee, $term));
+        }
+
+        if (! empty($filters['status'])) {
+            $query->where('status', $filters['status']);
+        }
+
+        if (! empty($filters['employee_id'])) {
+            $query->where('employee_id', (int) $filters['employee_id']);
+        }
+
+        return $query
             ->orderByDesc('id')
-            ->paginate($perPage);
+            ->paginate($perPage)
+            ->withQueryString();
     }
 
     public function pendingCount(): int

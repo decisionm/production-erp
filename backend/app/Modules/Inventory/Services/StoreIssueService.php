@@ -15,6 +15,7 @@ use App\Modules\Inventory\Models\StoreIssue;
 use App\Modules\Inventory\Models\StoreIssueBagScan;
 use App\Modules\Inventory\Models\StoreIssueLine;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Modules\Sales\Services\SalesDocumentQuery;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -61,6 +62,10 @@ class StoreIssueService
         private readonly MaterialBagIssueResolver $bags,
         private readonly MaterialRequestService $requests,
         private readonly IncomingQcHold $qcHold,
+        // The shared list grammar — how a typed "MR-12" names request 12 and
+        // the one LIKE escape — imported the way ProductionReturnService
+        // imports it, so a search means the same thing on every list here.
+        private readonly SalesDocumentQuery $search,
     ) {}
 
     /**
@@ -853,14 +858,33 @@ class StoreIssueService
      * film, because replenishment in this factory is consumption-driven,
      * not a daily round.
      */
+    /**
+     * The store-issue list, narrowed IN SQL over the whole table and ordered
+     * newest handover first with id as the tie-breaker, so two issues stamped
+     * the same second never swap places between two page loads.
+     *
+     * `q` is the list's search and matches on the row's IDENTITY only — what
+     * the screens print to name a handover — never on notes or a reason:
+     *   · the issue number, contains-match ("SI-000012", "000012", "12");
+     *   · the request it fulfils, when the term reads as a request number in
+     *     any spelling ("MR-12", "mr 12", "12" — SalesDocumentQuery's grammar,
+     *     so it means what it means on every other list);
+     *   · the material on any of its lines, by SKU, Tally name or display
+     *     name (an EXISTS, so a two-line issue is one row, not two).
+     * A bare "12" therefore finds both SI-000012 and every issue against
+     * MR-12, which is what a storekeeper quoting "12" across the yard means.
+     */
     public function paginate(
         ?string $status = null,
         ?int $materialRequestId = null,
         ?int $itemId = null,
         ?string $issuedFrom = null,
         ?string $issuedTo = null,
+        ?string $q = null,
         int $perPage = 20,
     ): LengthAwarePaginator {
+        $term = trim((string) $q);
+
         return StoreIssue::query()
             ->with(['lines.item', 'issuedBy', 'receivedBy'])
             ->when($status !== null, fn ($query) => $query->where('status', $status))
@@ -868,6 +892,22 @@ class StoreIssueService
             ->when($itemId !== null, fn ($query) => $query->whereHas('lines', fn ($line) => $line->where('item_id', $itemId)))
             ->when($issuedFrom !== null, fn ($query) => $query->where('issued_at', '>=', $issuedFrom))
             ->when($issuedTo !== null, fn ($query) => $query->where('issued_at', '<=', $issuedTo))
+            ->when($term !== '', fn ($query) => $query->where(function ($identity) use ($term) {
+                $this->search->whereLike($identity, 'issue_number', $term);
+
+                $requestId = $this->search->documentId($term, 'MR');
+                if ($requestId !== null) {
+                    $identity->orWhere('material_request_id', $requestId);
+                }
+
+                $identity->orWhereHas('lines.item', function ($item) use ($term) {
+                    $item->where(function ($either) use ($term) {
+                        $this->search->whereLike($either, 'sku', $term);
+                        $either->orWhere(fn ($name) => $this->search->whereLike($name, 'name', $term));
+                        $either->orWhere(fn ($shown) => $this->search->whereLike($shown, 'display_name', $term));
+                    });
+                });
+            }))
             ->orderByDesc('issued_at')
             ->orderByDesc('id')
             ->paginate($perPage);

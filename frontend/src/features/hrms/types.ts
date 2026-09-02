@@ -1,4 +1,5 @@
 import type { ConfigurationAbilities } from '@/components/configuration';
+import type { ListParams } from '@/lib/listParams';
 
 export type EmployeeStatus = 'active' | 'inactive' | 'terminated';
 
@@ -70,3 +71,20 @@ export interface Attendance {
     check_out: string | null;
     notes: string | null;
 }
+
+/**
+ * The three lists' query strings — exactly what the server's
+ * ListEmployeesRequest / ListLeaveRequestsRequest / ListAttendanceRequest
+ * validate. `q`, `page` and `per_page` come with ListParams; the rest is
+ * each list's own. `from` / `to` are Y-m-d on the attendance DATE.
+ */
+export type EmployeeListParams = ListParams & { status?: EmployeeStatus };
+
+export type LeaveRequestListParams = ListParams & { status?: LeaveRequestStatus; employee_id?: number };
+
+export type AttendanceListParams = ListParams & {
+    status?: AttendanceStatus;
+    employee_id?: number;
+    from?: string;
+    to?: string;
+};

@@ -1,9 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Col, Empty, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { listShifts, listWorkCenters, machineLabel } from '@/features/production/api';
 import { itemLabel } from '@/lib/itemLabel';
-import { ListEmpty } from '@/lib/ListEmpty';
+import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
+import { narrowingKeys } from '@/lib/listParams';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { useListParams } from '@/lib/useListParams';
 import {
     apiRefusalMessage,
     cancelMaterialRequest,
@@ -14,6 +17,16 @@ import {
     submitMaterialRequest,
 } from '../api';
 import RequestLinesTable from '../components/RequestLinesTable';
+import {
+    REQUESTS_LIST_SPEC,
+    type RequestStatusChoice,
+    type RequestsListParams,
+    noMatchLine,
+    pageRangeLine,
+    requestsQueryKey,
+    requestsServerFilters,
+    requestsStatusChoice,
+} from '../lists';
 import { netAgainstProduction } from '../productionNetting';
 import type { CreateMaterialRequestLinePayload, MaterialFlowMaterial, MaterialRequest, ProductionFloorStock } from '../types';
 import {
@@ -28,7 +41,6 @@ import {
     REQUEST_STATUS_TONE,
     TRANSITION_HELP,
     TRANSITION_LABEL,
-    type MaterialRequestStatus,
 } from '../words';
 
 /**
@@ -49,7 +61,7 @@ import {
  * (DEC-20260807-006) — and where the backend has not said, this screen names
  * no machine and guesses none.
  */
-const STATUS_FILTERS: { value: MaterialRequestStatus | 'all'; label: string }[] = [
+const STATUS_FILTERS: { value: RequestStatusChoice; label: string }[] = [
     { value: 'all', label: 'All requests' },
     { value: 'draft', label: REQUEST_STATUS_LABEL.draft },
     { value: 'submitted', label: REQUEST_STATUS_LABEL.submitted },
@@ -69,7 +81,17 @@ const emptyLine = (key: number): DraftLine => ({ key, item_id: null, quantity: n
 
 export default function MaterialRequestsPage() {
     const queryClient = useQueryClient();
-    const [statusFilter, setStatusFilter] = useState<MaterialRequestStatus | 'all'>('all');
+    // The search, the status, the page and the page size are the URL
+    // (useListParams): a refresh or a pasted link lands on the same view.
+    const { params, setParams, setPage, reset } = useListParams<RequestsListParams>(REQUESTS_LIST_SPEC);
+    const filters = useMemo(() => requestsServerFilters(params), [params]);
+    const statusChoice = requestsStatusChoice(params);
+    const term = params.q;
+    const filtersActive = narrowingKeys(params).length > 0;
+    const [qDraft, setQDraft] = useState(params.q ?? '');
+    useEffect(() => {
+        setQDraft(params.q ?? '');
+    }, [params.q]);
     const [createOpen, setCreateOpen] = useState(false);
     const [lines, setLines] = useState<DraftLine[]>([emptyLine(0)]);
     const [shiftId, setShiftId] = useState<number | null>(null);
@@ -79,15 +101,12 @@ export default function MaterialRequestsPage() {
     const [cancelReason, setCancelReason] = useState('');
 
     const requestsQuery = useQuery({
-        queryKey: ['material-flow', 'requests', statusFilter],
-        // The floor's own page, so it asks for its drafts. The store's queue
-        // does not send this and the server would refuse it there anyway.
-        queryFn: () =>
-            listMaterialRequests(
-                statusFilter === 'all'
-                    ? { include_unsubmitted: 1 }
-                    : { status: statusFilter, include_unsubmitted: 1 },
-            ),
+        queryKey: requestsQueryKey(filters),
+        // The floor's own page, so `filters` always asks for its drafts
+        // (requestsServerFilters). The store's queue does not send that and
+        // the server would refuse it there anyway.
+        queryFn: () => listMaterialRequests(filters),
+        placeholderData: (previous) => previous,
     });
     // Live Production/WIP stock — the second half of the page.
     const floorQuery = useQuery({ queryKey: ['material-flow', 'production-floor-stock'], queryFn: listProductionFloorStock });
@@ -171,6 +190,25 @@ export default function MaterialRequestsPage() {
 
     const validDraftLines = lines.filter((line) => line.item_id !== null && (line.quantity ?? 0) > 0);
 
+    // Three different empty tables: a term that matched nothing names the
+    // term; a status that holds nothing offers the filter back; only the
+    // bare page may say there are no requests at all.
+    const emptyText = term ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={noMatchLine('material requests', term)}>
+            <Button size="small" onClick={() => setParams({ q: undefined })}>
+                Clear search
+            </Button>
+        </Empty>
+    ) : filtersActive ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No requests match these filters.">
+            <Button size="small" onClick={reset}>
+                Clear filters
+            </Button>
+        </Empty>
+    ) : (
+        'No material requests yet. Raise one to ask the store for material.'
+    );
+
     return (
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }} wrap>
@@ -178,9 +216,17 @@ export default function MaterialRequestsPage() {
                     Material Requests
                 </Typography.Title>
                 <Space wrap>
-                    <Select
-                        value={statusFilter}
-                        onChange={setStatusFilter}
+                    <Input.Search
+                        allowClear
+                        placeholder="Request no."
+                        style={{ width: 200 }}
+                        value={qDraft}
+                        onChange={(event) => setQDraft(event.target.value)}
+                        onSearch={(value) => setParams({ q: value.trim() || undefined })}
+                    />
+                    <Select<RequestStatusChoice>
+                        value={statusChoice}
+                        onChange={(value) => setParams({ status: value })}
                         options={STATUS_FILTERS}
                         style={{ width: 200 }}
                     />
@@ -192,21 +238,25 @@ export default function MaterialRequestsPage() {
 
             <Alert type="info" showIcon style={{ marginBottom: 16 }} message={ISSUE_IS_NOT_CONSUMPTION} />
 
+            <Space style={{ marginBottom: 8 }} wrap>
+                <Typography.Text type="secondary">{pageRangeLine(requestsQuery.data?.meta, 'requests')}</Typography.Text>
+                {filtersActive ? (
+                    <Button size="small" onClick={reset}>
+                        Clear
+                    </Button>
+                ) : null}
+            </Space>
+
+            <ListReadAlert state={requestsQuery} entity="material requests" />
+
             <Table<MaterialRequest>
                 rowKey="id"
-                loading={requestsQuery.isLoading}
-                dataSource={requestsQuery.data?.data}
-                pagination={false}
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
-                locale={{
-                    emptyText: (
-                        <ListEmpty
-                            state={requestsQuery}
-                            entity="material requests"
-                            empty="No material requests yet. Raise one to ask the store for material."
-                        />
-                    ),
-                }}
+                loading={requestsQuery.isFetching}
+                dataSource={requestsQuery.data?.data}
+                pagination={serverPagination(requestsQuery.data?.meta, setPage, 'requests')}
+                locale={{ emptyText: <ListEmpty state={requestsQuery} entity="material requests" empty={emptyText} /> }}
                 expandable={{
                     expandedRowRender: (request) => <RequestLinesTable lines={request.lines} />,
                 }}

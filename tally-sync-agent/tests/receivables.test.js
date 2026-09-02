@@ -37,14 +37,14 @@ function billsDoc(wrapper) {
             <BILLREF>INV-001</BILLREF>
             <BILLDATE>20260801</BILLDATE>
             <BILLDUEDATE>20260901</BILLDUEDATE>
-            <BILLCL>10000.00</BILLCL>
-            <BILLOP>10000.00</BILLOP>
+            <BILLCL>-10000.00</BILLCL>
+            <BILLOP>-10000.00</BILLOP>
         </BILLFIXED>
         <BILLFIXED>
             <LEDGERNAME>Southgate Polymers</LEDGERNAME>
             <BILLREF>INV-002</BILLREF>
             <BILLDATE>20260810</BILLDATE>
-            <BILLCL>-2500.00</BILLCL>
+            <BILLCL>2500.00</BILLCL>
         </BILLFIXED>
     </REQUESTDATA></${wrapper}></BODY></ENVELOPE>`;
 }
@@ -64,12 +64,47 @@ test('bills are found in a SAVED export and a LIVE export alike', () => {
     }
 });
 
-test('a credit keeps its negative sign', () => {
+test('Tally debit and credit signs are normalised to the page contract', () => {
     const bills = parseBillsReceivable(billsDoc('EXPORTDATA'));
 
-    // Taking an absolute value here would turn a client the factory OWES into
-    // one of its debtors.
+    // Tally states receivable debit balances as negative. The page contract is
+    // the opposite: positive means the client owes us; negative is a credit.
+    assert.strictEqual(bills[0].closing_amount, 10000);
     assert.strictEqual(bills[1].closing_amount, -2500);
+});
+
+test('the factory party-summary shape becomes honest balance-only rows', () => {
+    const xml = `<ENVELOPE>
+        <DSPACCNAME><DSPDISPNAME>Northwind Traders</DSPDISPNAME></DSPACCNAME>
+        <DSPACCINFO>
+            <DSPCLDRAMT><DSPCLDRAMTA>-10000.000</DSPCLDRAMTA></DSPCLDRAMT>
+            <DSPCLCRAMT><DSPCLCRAMTA>1500.000</DSPCLCRAMTA></DSPCLCRAMT>
+        </DSPACCINFO>
+        <DSPACCNAME><DSPDISPNAME>Southgate Polymers</DSPDISPNAME></DSPACCNAME>
+        <DSPACCINFO>
+            <DSPCLDRAMT><DSPCLDRAMTA></DSPCLDRAMTA></DSPCLDRAMT>
+            <DSPCLCRAMT><DSPCLCRAMTA>2500.000</DSPCLCRAMTA></DSPCLCRAMT>
+        </DSPACCINFO>
+    </ENVELOPE>`;
+
+    const bills = parseBillsReceivable(xml);
+
+    assert.strictEqual(bills.length, 2);
+    assert.strictEqual(bills[0].party_ledger_name, 'Northwind Traders');
+    assert.strictEqual(bills[0].closing_amount, 8500);
+    assert.strictEqual(bills[0].bill_reference, null);
+    assert.strictEqual(bills[0].due_date, null);
+    assert.strictEqual(bills[1].closing_amount, -2500);
+});
+
+test('an unpaired party-summary response is refused rather than misjoined', () => {
+    const xml = `<ENVELOPE>
+        <DSPACCNAME><DSPDISPNAME>Northwind Traders</DSPDISPNAME></DSPACCNAME>
+        <DSPACCNAME><DSPDISPNAME>Southgate Polymers</DSPDISPNAME></DSPACCNAME>
+        <DSPACCINFO><DSPCLDRAMT><DSPCLDRAMTA>-1000</DSPCLDRAMTA></DSPCLDRAMT></DSPACCINFO>
+    </ENVELOPE>`;
+
+    assert.deepStrictEqual(parseBillsReceivable(xml), []);
 });
 
 test('a bill with no due date is read, with a null due date', () => {

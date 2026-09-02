@@ -1,11 +1,17 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { Button, DatePicker, Empty, Form, Input, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import dayjs from 'dayjs';
+import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { listAttendance, listAllEmployees, markAttendance } from '@/features/hrms/api';
-import type { Attendance, AttendanceStatus } from '@/features/hrms/types';
+import { ATTENDANCE_LIST_SPEC, noMatchLine, pageRangeLine } from '@/features/hrms/list';
+import type { Attendance, AttendanceListParams, AttendanceStatus } from '@/features/hrms/types';
+import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
+import { compactParams, narrowingKeys } from '@/lib/listParams';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { useListParams } from '@/lib/useListParams';
 
 const attendanceSchema = z.object({
     employee_id: z.number({ error: 'Employee is required' }),
@@ -29,15 +35,38 @@ const statusOptions: { value: AttendanceStatus; label: string }[] = [
     { value: 'on_leave', label: 'On Leave' },
 ];
 
+const STATUS_FILTER: { value: AttendanceStatus | ''; label: string }[] = [{ value: '', label: 'All statuses' }, ...statusOptions];
+
+/**
+ * THE ATTENDANCE LIST. Search, status, employee, date range, page and page
+ * size live in the URL (useListParams) and the SERVER does the narrowing
+ * (ListAttendanceRequest): `q` goes THROUGH the employee — code, name,
+ * department, designation; the range is on the attendance DATE. The pager
+ * is wired to the server's meta, so a day older than the newest screen is
+ * reachable — a month's marks were not, from this page, until it was.
+ */
 export default function AttendancePage() {
     const [modalOpen, setModalOpen] = useState(false);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['hrms', 'attendance'], queryFn: listAttendance });
+    const { params, setParams, setPage, reset } = useListParams<AttendanceListParams>(ATTENDANCE_LIST_SPEC);
+    const listParams = useMemo(() => compactParams(params), [params]);
+    const narrowed = narrowingKeys(params).length > 0;
+
+    // The box's text as typed; it becomes `q` on Enter / the search button,
+    // never per keystroke. Re-seeded when the URL's q changes under it.
+    const [qDraft, setQDraft] = useState(params.q ?? '');
+    useEffect(() => setQDraft(params.q ?? ''), [params.q]);
+
+    const query = useQuery({
+        queryKey: ['hrms', 'attendance', 'list', listParams],
+        queryFn: () => listAttendance(listParams),
+        placeholderData: (previous) => previous,
+    });
     const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
     const employeeOptions = employees?.data.map((e) => ({ value: e.id, label: `${e.employee_code} — ${e.name}` })) ?? [];
 
-    const { control, handleSubmit, reset, formState: { errors } } = useForm<AttendanceFormValues>({
+    const { control, handleSubmit, reset: resetForm, formState: { errors } } = useForm<AttendanceFormValues>({
         resolver: zodResolver(attendanceSchema),
         defaultValues: { status: 'present', notes: '' },
     });
@@ -47,26 +76,93 @@ export default function AttendancePage() {
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['hrms', 'attendance'] });
             setModalOpen(false);
-            reset({ status: 'present', notes: '' });
+            resetForm({ status: 'present', notes: '' });
         },
         onError: (error: any) => {
             Modal.error({ title: 'Could not mark attendance', content: error?.response?.data?.message ?? 'Unknown error' });
         },
     });
 
+    // Three different empty tables: a term that matched nothing names the
+    // term; a filter that holds nothing offers it back; only the bare page
+    // may say nothing has been marked at all.
+    const emptyText = params.q ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={noMatchLine('attendance records', params.q)}>
+            <Button size="small" onClick={() => setParams({ q: undefined })}>
+                Clear search
+            </Button>
+        </Empty>
+    ) : narrowed ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No attendance records match these filters.">
+            <Button size="small" onClick={reset}>
+                Clear filters
+            </Button>
+        </Empty>
+    ) : (
+        'No attendance recorded yet.'
+    );
+
     return (
         <>
-            <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
+            <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }} wrap>
                 <Typography.Title level={3} style={{ margin: 0 }}>Attendance</Typography.Title>
-                <Button type="primary" onClick={() => setModalOpen(true)}>Mark Attendance</Button>
+                <Space wrap>
+                    <Input.Search
+                        allowClear
+                        placeholder="Employee code, name, department"
+                        style={{ width: 260 }}
+                        value={qDraft}
+                        onChange={(event) => setQDraft(event.target.value)}
+                        onSearch={(value) => setParams({ q: value.trim() || undefined })}
+                    />
+                    <Select<AttendanceStatus | ''>
+                        value={params.status ?? ''}
+                        style={{ width: 150 }}
+                        options={STATUS_FILTER}
+                        onChange={(value) => setParams({ status: value || undefined })}
+                    />
+                    <Select<number>
+                        allowClear
+                        showSearch
+                        optionFilterProp="label"
+                        placeholder="Employee"
+                        style={{ width: 220 }}
+                        value={params.employee_id}
+                        options={employeeOptions}
+                        onChange={(value) => setParams({ employee_id: value ?? undefined })}
+                    />
+                    <DatePicker.RangePicker
+                        allowEmpty={[true, true]}
+                        value={[params.from ? dayjs(params.from) : null, params.to ? dayjs(params.to) : null]}
+                        onChange={(_, dateStrings) =>
+                            setParams({ from: dateStrings[0] || undefined, to: dateStrings[1] || undefined })
+                        }
+                    />
+                    <Button type="primary" onClick={() => setModalOpen(true)}>Mark Attendance</Button>
+                </Space>
             </Space>
 
+            <Space style={{ marginBottom: 8 }} wrap>
+                <Typography.Text type="secondary">{pageRangeLine(query.data?.meta, 'attendance records')}</Typography.Text>
+                {narrowed ? (
+                    <Button size="small" onClick={reset}>
+                        Clear
+                    </Button>
+                ) : null}
+            </Space>
+
+            {/* placeholderData keeps stale rows on a failed refetch, so
+                emptyText never shows the failure — this line does. */}
+            <ListReadAlert state={query} entity="attendance records" />
+
             <Table<Attendance>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
-                loading={isLoading}
-                dataSource={data?.data}
-                pagination={false}
+                loading={query.isFetching}
+                dataSource={query.data?.data}
+                pagination={serverPagination(query.data?.meta, setPage, 'attendance records')}
+                locale={{ emptyText: <ListEmpty state={query} entity="attendance records" empty={emptyText} /> }}
                 columns={[
                     { title: 'Employee', render: (_, row) => row.employee?.name },
                     { title: 'Date', dataIndex: 'date' },

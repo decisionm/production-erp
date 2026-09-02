@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+    ledgerNoMatchLine,
     movementPurposeLabel,
     PURPOSE_TEXT,
     PURPOSE_TONE,
@@ -26,16 +27,36 @@ describe('what the ledger asks the server for', () => {
         expect(stockLedgerParams({ page: 4 })).toEqual({ page: 4 });
     });
 
+    it('trims the reference needle and drops an empty one', () => {
+        expect(stockLedgerParams({ q: '  ' })).toEqual({});
+        expect(stockLedgerParams({ q: null })).toEqual({});
+        expect(stockLedgerParams({ q: ' PO-4 ' })).toEqual({ q: 'PO-4' });
+    });
+
+    it('sends the page size only when one was chosen', () => {
+        expect(stockLedgerParams({ perPage: 50 })).toEqual({ per_page: 50 });
+        expect(stockLedgerParams({ perPage: 0 })).toEqual({});
+    });
+
     /**
      * The guard on the filters this endpoint does NOT have. A type or date
      * control over a server-paged list filters the page on screen and hides
      * every match on every other page — so nothing of the sort may leave here
-     * until StockMovementController::index reads it.
+     * until StockMovementController::index reads it. `q` joined when
+     * ListStockMovementsRequest began reading it (02-Sep-2026).
      */
     it('sends no key the movements endpoint cannot read', () => {
-        const params = stockLedgerParams({ itemId: 7, warehouseId: 3, page: 2 });
+        const params = stockLedgerParams({ itemId: 7, warehouseId: 3, q: 'PO-4', page: 2, perPage: 50 });
 
-        expect(Object.keys(params).sort()).toEqual(['item_id', 'page', 'warehouse_id']);
+        expect(Object.keys(params).sort()).toEqual(['item_id', 'page', 'per_page', 'q', 'warehouse_id']);
+    });
+});
+
+describe('what an empty narrowed ledger says', () => {
+    it('repeats the term, and says when the pickers narrowed it too', () => {
+        expect(ledgerNoMatchLine('PO-4', false)).toBe('No movements match “PO-4”.');
+        expect(ledgerNoMatchLine('PO-4', true)).toBe('No movements match “PO-4” for this item and warehouse.');
+        expect(ledgerNoMatchLine(undefined, true)).toBe('No movements match these filters.');
     });
 });
 

@@ -2646,3 +2646,37 @@ The rule this protects is FC-04 (the shape of a production Stock Journal) and
 FC-02 (scrap is produced stock, booked inward) — 114/116 book scrap inward
 with no production behind it, which is the one case FC-02's evidence does not
 cover.
+
+## Q93 · Should the ten workbook "Factory Rules" be enforced by the software, and which ones?
+
+The Factory Rules tab of Production Configuration lists ten rows loaded from
+the workbook's System Config sheet on 29-Jul: the global cycle-time minimum
+and maximum, default shift hours, the two material-variance thresholds, the
+two Start Batch override permissions (cycle time, cavities), "require a
+reason for every override", and the two downtime-timing allowances. Their
+confirmation column still carries the workbook's own words — six
+"Discussion Confirmed", two "To Confirm", one "Recommended".
+
+**What is known:** no screen and no rule reads any of the ten. The only
+`factory_settings` key the code consults is `masterbatch_colour_map`
+(DEC-20260806-004). The cycle-time bounds the floor actually enforces are the
+per-machine and per-configuration ones on the machine master and the product
+standard; override reasons are recorded on the entry when given but are not
+demanded on the strength of this row. Since 02-Sep the tab says so on each
+row ("Not in use"), and a save is typed and validated, so a value can no
+longer be saved in a form the server would mis-read. Editing a "Not in use"
+row still changes nothing on the floor.
+
+**What is asked:** for each of the ten, should the software ENFORCE it — for
+example refuse a Start Batch cycle time outside the global bounds unless a
+configuration widens them, or refuse an override without a reason when the
+row says one is required — or should the row stay a recorded reference
+value? Enforcing "To Confirm" and "Recommended" rows would turn a workbook
+suggestion into a floor refusal in the owner's absence, so nothing is wired
+until this is answered.
+
+**Blocks:** nothing that works today. Each answer is a bounded change: one
+reader added next to `FactorySetting::READ_BY_SOFTWARE` (which
+FactorySettingsTest pins) and the refusal it drives.
+*Open since 2026-09-02.* Number assigned on this branch; re-number at merge if
+another branch has claimed Q93.

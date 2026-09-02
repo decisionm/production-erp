@@ -1,12 +1,23 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, InputNumber, Modal, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { Button, Empty, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { z } from 'zod';
 import { createPayrollRun, listPayrollRuns, markPayrollRunPaid, processPayrollRun } from '@/features/payroll/api';
-import type { PayrollRun, PayrollRunStatus } from '@/features/payroll/types';
+import {
+    RUNS_LIST_SPEC,
+    RUN_STATUS_CHOICES,
+    periodLabel,
+    runsQueryKey,
+    runsServerFilters,
+} from '@/features/payroll/lists';
+import type { PayrollRun, PayrollRunListFilters, PayrollRunStatus } from '@/features/payroll/types';
+import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
+import { narrowingKeys } from '@/lib/listParams';
+import { TABLE_STICKY, noMatchLine, pageRangeLine, serverPagination } from '@/lib/tableProps';
+import { useListParams } from '@/lib/useListParams';
 
 const currentYear = new Date().getFullYear();
 
@@ -22,23 +33,50 @@ const statusColor: Record<PayrollRunStatus, string> = {
     paid: 'green',
 };
 
-const monthNames = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December',
-];
+const statusOptions = RUN_STATUS_CHOICES.map((status) => ({
+    value: status,
+    label: status.charAt(0).toUpperCase() + status.slice(1),
+}));
 
+/**
+ * THE PAYROLL RUNS LIST. The search, the status and the page live in the
+ * URL (useListParams) and the SERVER does the narrowing over every run —
+ * this table used to draw the server's first page with the pager off, so
+ * the 21st run existed and nothing on screen said so. The run's actions
+ * (Process, Mark Paid, View Payslips) and the New Payroll Run modal are
+ * exactly as they were.
+ */
 export default function PayrollRunsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const queryClient = useQueryClient();
     const navigate = useNavigate();
 
-    const { data, isLoading } = useQuery({ queryKey: ['payroll', 'runs'], queryFn: listPayrollRuns });
+    const { params, setParams, setPage, reset } = useListParams<PayrollRunListFilters>(RUNS_LIST_SPEC);
+    const filters = useMemo(() => runsServerFilters(params), [params]);
+    const term = params.q;
+    const filtersActive = narrowingKeys(params).length > 0;
+    // What is typed; the URL (and the server) hear it on Enter or the button.
+    const [qDraft, setQDraft] = useState(params.q ?? '');
+    useEffect(() => {
+        setQDraft(params.q ?? '');
+    }, [params.q]);
 
-    const { control, handleSubmit, reset, formState: { errors } } = useForm<RunFormValues>({
+    const runsQuery = useQuery({
+        queryKey: runsQueryKey(filters),
+        queryFn: () => listPayrollRuns(filters),
+        // Turning a page keeps the last page on screen until the next one
+        // lands; a refetch that fails then has rows in front of it, which
+        // is why ListReadAlert sits above the table.
+        placeholderData: (previous) => previous,
+    });
+    const { data, isLoading } = runsQuery;
+
+    const { control, handleSubmit, reset: resetForm, formState: { errors } } = useForm<RunFormValues>({
         resolver: zodResolver(runSchema),
         defaultValues: { year: currentYear, month: new Date().getMonth() + 1 },
     });
 
+    // The prefix reaches every page of this list and the payslip page's run picker.
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['payroll', 'runs'] });
 
     const createMutation = useMutation({
@@ -46,7 +84,7 @@ export default function PayrollRunsPage() {
         onSuccess: () => {
             invalidate();
             setModalOpen(false);
-            reset({ year: currentYear, month: new Date().getMonth() + 1 });
+            resetForm({ year: currentYear, month: new Date().getMonth() + 1 });
         },
         onError: (error: any) => {
             Modal.error({ title: 'Could not create payroll run', content: error?.response?.data?.message ?? 'Unknown error' });
@@ -84,6 +122,25 @@ export default function PayrollRunsPage() {
         },
     });
 
+    // What an EMPTY table says is judged on the query's state (ListEmpty);
+    // these are only the wordings for a read that genuinely returned nothing,
+    // and a search that missed must name the term it missed with.
+    const emptyText = term ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={noMatchLine('payroll runs', term)}>
+            <Button size="small" onClick={() => setParams({ q: undefined })}>
+                Clear search
+            </Button>
+        </Empty>
+    ) : filtersActive ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No payroll runs match these filters.">
+            <Button size="small" onClick={reset}>
+                Clear filters
+            </Button>
+        </Empty>
+    ) : (
+        'No payroll runs yet.'
+    );
+
     return (
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
@@ -91,14 +148,45 @@ export default function PayrollRunsPage() {
                 <Button type="primary" onClick={() => setModalOpen(true)}>New Payroll Run</Button>
             </Space>
 
+            <Space style={{ marginBottom: 12 }} wrap>
+                <Input.Search
+                    allowClear
+                    placeholder="Period, e.g. Aug 2026"
+                    style={{ width: 240 }}
+                    value={qDraft}
+                    onChange={(event) => setQDraft(event.target.value)}
+                    onSearch={(value) => setParams({ q: value.trim() || undefined })}
+                />
+                <Select<PayrollRunStatus>
+                    allowClear
+                    placeholder="Status"
+                    style={{ width: 140 }}
+                    value={params.status}
+                    onChange={(value) => setParams({ status: value ?? undefined })}
+                    options={statusOptions}
+                />
+                <Typography.Text type="secondary">{pageRangeLine(data?.meta, 'payroll runs')}</Typography.Text>
+                {filtersActive ? (
+                    <Button size="small" onClick={reset}>
+                        Clear
+                    </Button>
+                ) : null}
+            </Space>
+
+            {/* placeholderData keeps stale rows on a failed refetch, so
+                emptyText never shows the failure — this line does. */}
+            <ListReadAlert state={runsQuery} entity="payroll runs" />
+
             <Table<PayrollRun>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
-                dataSource={data?.data}
-                pagination={false}
+                dataSource={data?.data ?? []}
+                locale={{ emptyText: <ListEmpty state={runsQuery} entity="payroll runs" empty={emptyText} /> }}
+                pagination={serverPagination(data?.meta, setPage, 'payroll runs')}
                 columns={[
-                    { title: 'Period', render: (_, row) => `${monthNames[row.month - 1]} ${row.year}` },
+                    { title: 'Period', render: (_, row) => <strong>{periodLabel(row)}</strong> },
                     {
                         title: 'Status',
                         dataIndex: 'status',
@@ -114,7 +202,7 @@ export default function PayrollRunsPage() {
                                     <Button
                                         size="small"
                                         onClick={() => processMutation.mutate(row.id)}
-                                        loading={processMutation.isPending}
+                                        loading={processMutation.isPending && processMutation.variables === row.id}
                                     >
                                         Process
                                     </Button>
@@ -123,7 +211,7 @@ export default function PayrollRunsPage() {
                                     <Button
                                         size="small"
                                         onClick={() => markPaidMutation.mutate(row.id)}
-                                        loading={markPaidMutation.isPending}
+                                        loading={markPaidMutation.isPending && markPaidMutation.variables === row.id}
                                     >
                                         Mark Paid
                                     </Button>

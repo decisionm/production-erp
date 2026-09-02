@@ -10,6 +10,7 @@ use App\Modules\Quality\Exceptions\InvalidInspectionQuantityException;
 use App\Modules\Quality\Models\Enums\InspectionResult;
 use App\Modules\Quality\Models\IncomingInspection;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -24,12 +25,62 @@ class IncomingInspectionService
 {
     public function __construct(private readonly StockMovementService $stock) {}
 
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /**
+     * The register, newest first, searched and filtered on the server so a
+     * page and its total are the matching set — not the first twenty rows
+     * of everything.
+     *
+     * `$q` matches what a row shows: the product's sku or name (an archived
+     * product's inspections stay findable), the arrival's GRN tracking
+     * number and the Rejections Out reference — case-insensitive substrings,
+     * with `%` and `_` taken literally ('!' escapes). A bare number is an
+     * INSPECTION or GRN id ("12", "#12"); "GRN-12" / "grn 12" is the GRN
+     * alone. Notes are deliberately not searched. The id is the tie-breaker
+     * and the whole order, so two reads of one page agree.
+     */
+    public function paginate(int $perPage = 20, ?string $q = null, ?InspectionResult $result = null): LengthAwarePaginator
     {
+        $term = trim((string) $q);
+
         return IncomingInspection::query()
             ->with(['goodsReceiptNoteLine.goodsReceiptNote', 'item', 'inspectedBy'])
+            ->when($result, fn ($query) => $query->where('result', $result->value))
+            ->when($term !== '', fn ($query) => $this->whereMatchesTerm($query, $term))
             ->orderByDesc('id')
             ->paginate($perPage);
+    }
+
+    /**
+     * @param  Builder<IncomingInspection>  $query
+     */
+    private function whereMatchesTerm($query, string $term): void
+    {
+        $needle = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_strtolower($term)).'%';
+        $like = fn (string $column) => "lower({$column}) like ? escape '!'";
+
+        // "GRN-12", "grn 12", "grn#12" name a receipt; "#12" an inspection;
+        // a bare "12" could be either and matches both.
+        $grnId = preg_match('/^grn[\s\-#]*(\d+)$/i', $term, $m) ? (int) $m[1] : null;
+        $inspectionId = preg_match('/^#\s*(\d+)$/', $term, $m) ? (int) $m[1] : null;
+        if (preg_match('/^\d+$/', $term)) {
+            $grnId = $inspectionId = (int) $term;
+        }
+
+        $query->where(function ($any) use ($needle, $like, $grnId, $inspectionId) {
+            $any->whereRaw($like('incoming_inspections.rejections_out_reference'), [$needle])
+                ->orWhereHas('item', fn ($item) => $item->withTrashed()->where(function ($either) use ($needle, $like) {
+                    $either->whereRaw($like('items.sku'), [$needle])->orWhereRaw($like('items.name'), [$needle]);
+                }))
+                ->orWhereHas('goodsReceiptNoteLine.goodsReceiptNote', function ($grn) use ($needle, $like, $grnId) {
+                    $grn->whereRaw($like('goods_receipt_notes.tracking_number'), [$needle]);
+                    if ($grnId !== null) {
+                        $grn->orWhere('goods_receipt_notes.id', $grnId);
+                    }
+                });
+            if ($inspectionId !== null) {
+                $any->orWhere('incoming_inspections.id', $inspectionId);
+            }
+        });
     }
 
     /**

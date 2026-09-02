@@ -21,7 +21,7 @@ import {
     WalletOutlined,
 } from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
-import { Avatar, Dropdown, Layout, Menu, type MenuProps, Space, Typography } from 'antd';
+import { Avatar, Breadcrumb, Button, Dropdown, Layout, Menu, type MenuProps, Space, Typography } from 'antd';
 import { type PropsWithChildren, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { logout } from '@/features/auth/api';
@@ -540,6 +540,25 @@ export function buildNavItems(user: User | null) {
         .filter((item): item is NavGroup => item !== null);
 }
 
+/**
+ * Turn the selected route into a short, permission-aware location trail.
+ *
+ * This deliberately reads the already-filtered navigation rather than the
+ * full route table: the header must never reveal the name of a module that
+ * the current login cannot see. Unknown/direct-only routes get no invented
+ * label and simply leave the trail empty.
+ */
+export function navTrailForPath(items: readonly NavGroup[], pathname: string): string[] {
+    for (const item of items) {
+        if (item.key === pathname) return [item.label];
+
+        const child = item.children?.find((candidate) => candidate.key === pathname);
+        if (child) return [item.label, child.label];
+    }
+
+    return [];
+}
+
 export default function AppLayout({ children }: PropsWithChildren) {
     const navigate = useNavigate();
     const location = useLocation();
@@ -557,6 +576,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
     });
 
     const navItems = useMemo(() => buildNavItems(user), [user]);
+    const navTrail = useMemo(() => navTrailForPath(navItems, location.pathname), [location.pathname, navItems]);
     const openKey = navItems.find((item) => item.children?.some((child) => child.key === location.pathname))?.key;
     const rootSubmenuKeys = useMemo(() => navItems.filter((item) => item.children).map((item) => item.key), [navItems]);
 
@@ -568,6 +588,19 @@ export default function AppLayout({ children }: PropsWithChildren) {
     useEffect(() => {
         setOpenKeys(openKey ? [openKey] : []);
     }, [openKey]);
+
+    // A mobile sidebar is a temporary drawer. Escape gives keyboard users the
+    // same reliable exit as tapping the backdrop.
+    useEffect(() => {
+        if (!isMobile || collapsed) return undefined;
+
+        const closeOnEscape = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') setCollapsed(true);
+        };
+
+        window.addEventListener('keydown', closeOnEscape);
+        return () => window.removeEventListener('keydown', closeOnEscape);
+    }, [collapsed, isMobile]);
 
     const menuItems = useMemo(() => {
         const items: unknown[] = [];
@@ -582,6 +615,9 @@ export default function AppLayout({ children }: PropsWithChildren) {
 
     return (
         <Layout style={{ minHeight: '100vh' }}>
+            <a className="skip-to-content" href="#main-content">
+                Skip to page content
+            </a>
             <Layout.Sider
                 theme="dark"
                 collapsible
@@ -658,6 +694,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
                     </div>
                 </div>
                 <Menu
+                    aria-label="Primary navigation"
                     theme="dark"
                     mode="inline"
                     selectedKeys={[location.pathname]}
@@ -674,12 +711,16 @@ export default function AppLayout({ children }: PropsWithChildren) {
                 />
             </Layout.Sider>
             {isMobile && !collapsed && (
-                <div
+                <button
+                    type="button"
+                    aria-label="Close navigation"
                     onClick={() => setCollapsed(true)}
                     style={{
                         position: 'fixed',
                         inset: 0,
                         background: 'rgba(0,0,0,0.45)',
+                        border: 0,
+                        padding: 0,
                         zIndex: 90,
                     }}
                 />
@@ -691,6 +732,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
                 }}
             >
                 <Layout.Header
+                    className="app-header"
                     style={{
                         display: 'flex',
                         alignItems: 'center',
@@ -703,16 +745,28 @@ export default function AppLayout({ children }: PropsWithChildren) {
                         zIndex: 9,
                     }}
                 >
-                    {collapsed ? (
-                        <MenuUnfoldOutlined style={{ fontSize: 18, cursor: 'pointer' }} onClick={() => setCollapsed(false)} />
-                    ) : (
-                        <MenuFoldOutlined style={{ fontSize: 18, cursor: 'pointer' }} onClick={() => setCollapsed(true)} />
-                    )}
+                    <div className="app-header-leading">
+                        <Button
+                            type="text"
+                            icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                            aria-label={collapsed ? 'Open navigation' : 'Close navigation'}
+                            title={collapsed ? 'Open navigation' : 'Close navigation'}
+                            onClick={() => setCollapsed((value) => !value)}
+                        />
+                        {!isMobile && navTrail.length > 0 && (
+                            <Breadcrumb
+                                className="app-breadcrumb"
+                                aria-label="Current page"
+                                items={navTrail.map((label) => ({ title: label }))}
+                            />
+                        )}
+                    </div>
                     {/* On a phone the sider is off-canvas at width 0, so the logo
                         above is unreachable until the drawer is opened. This is
                         the same mark shown there, never both at once. */}
                     {isMobile && (
                         <img
+                            className="app-mobile-logo"
                             src={`${import.meta.env.BASE_URL}swaashpet-logo.png`}
                             alt="SWAASHPET POLYMERS"
                             style={{ height: 26, width: 'auto', display: 'block' }}
@@ -738,15 +792,29 @@ export default function AppLayout({ children }: PropsWithChildren) {
                         }}
                         trigger={['click']}
                     >
-                        <Space style={{ cursor: 'pointer' }}>
-                            <Avatar style={{ backgroundColor: '#1677ff' }}>
-                                {user?.name?.charAt(0).toUpperCase() ?? '?'}
-                            </Avatar>
-                            <Typography.Text>{user?.name}</Typography.Text>
-                        </Space>
+                        <Button
+                            className="account-menu-button"
+                            type="text"
+                            aria-label={`Account menu for ${user?.name ?? 'user'}`}
+                            title="Open account menu"
+                        >
+                            <Space>
+                                <Avatar size="small" style={{ backgroundColor: '#1677ff' }}>
+                                    {user?.name?.charAt(0).toUpperCase() ?? '?'}
+                                </Avatar>
+                                <Typography.Text className="account-user-name" ellipsis={{ tooltip: user?.name }}>
+                                    {user?.name}
+                                </Typography.Text>
+                            </Space>
+                        </Button>
                     </Dropdown>
                 </Layout.Header>
-                <Layout.Content className="app-content" style={{ padding: 24, minHeight: 0 }}>
+                <Layout.Content
+                    id="main-content"
+                    tabIndex={-1}
+                    className="app-content"
+                    style={{ padding: 24, minHeight: 0 }}
+                >
                     <div style={{ maxWidth: 1400, margin: '0 auto' }}>{children}</div>
                 </Layout.Content>
             </Layout>

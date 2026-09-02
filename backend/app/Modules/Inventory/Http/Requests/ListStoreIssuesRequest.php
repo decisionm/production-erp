@@ -20,6 +20,11 @@ use Illuminate\Validation\Rule;
  * Deliberately PERMISSIVE about meaning and strict only about shape: an
  * unknown status was silently ignored before and is refused now, but nothing
  * that a working screen sends today changes behaviour.
+ *
+ * `q` is the list's search, applied in SQL over the whole collection (never
+ * over one page): the issue number, the request number in any spelling
+ * ("MR-12", "mr 12", "12"), and the material on any line by SKU, Tally name
+ * or display name. See StoreIssueService::paginate for the exact clauses.
  */
 class ListStoreIssuesRequest extends FormRequest
 {
@@ -39,7 +44,9 @@ class ListStoreIssuesRequest extends FormRequest
             'item_id' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'issued_from' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
             'issued_to' => ['sometimes', 'nullable', 'date_format:Y-m-d', 'after_or_equal:issued_from'],
+            'q' => ['sometimes', 'nullable', 'string', 'max:100'],
             'per_page' => ['sometimes', 'nullable', 'integer', 'between:1,'.self::PER_PAGE_MAX],
+            'page' => ['sometimes', 'nullable', 'integer', 'min:1'],
         ];
     }
 }

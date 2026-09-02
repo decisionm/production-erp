@@ -1,5 +1,6 @@
 import { api } from '@/lib/api';
 import type { StockMovement } from '@/features/inventory/types';
+import { compactParams } from '@/lib/listParams';
 import type { Paginated } from '@/lib/types';
 import type {
     BagScanPayload,
@@ -14,6 +15,7 @@ import type {
     ReturnToStorePayload,
     StoreIssue,
     StoreIssueBagScan,
+    StoreIssueListParams,
 } from './types';
 
 /**
@@ -26,10 +28,16 @@ export const MATERIAL_FLOW_BASE = '/inventory';
 
 /* ------------------------------- requests ------------------------------- */
 
-/** The STORE'S QUEUE. Every filter is passed to the server; none is applied here. */
+/**
+ * The STORE'S QUEUE (and the floor's own list). Every filter, the search,
+ * the page and the page size are passed to the server; none is applied
+ * here. No page size is defaulted any more: the server's own default
+ * stands and the pager reaches every page — a hardcoded 100 was a list
+ * silently cut at row 100 with nothing on screen to say so.
+ */
 export async function listMaterialRequests(filters: MaterialRequestFilters = {}): Promise<Paginated<MaterialRequest>> {
     const { data } = await api.get<Paginated<MaterialRequest>>(`${MATERIAL_FLOW_BASE}/material-requests`, {
-        params: { per_page: 100, ...filters },
+        params: compactParams(filters),
     });
     return data;
 }
@@ -90,11 +98,10 @@ export async function issueToProduction(payload: IssueToProductionPayload): Prom
     return data.data;
 }
 
-export async function listStoreIssues(
-    params: { material_request_id?: number; status?: string; item_id?: number } = {},
-): Promise<Paginated<StoreIssue>> {
+/** The handovers, narrowed and paged by the server — see StoreIssueListParams. */
+export async function listStoreIssues(params: StoreIssueListParams = {}): Promise<Paginated<StoreIssue>> {
     const { data } = await api.get<Paginated<StoreIssue>>(`${MATERIAL_FLOW_BASE}/store-issues`, {
-        params: { per_page: 100, ...params },
+        params: compactParams(params),
     });
     return data;
 }

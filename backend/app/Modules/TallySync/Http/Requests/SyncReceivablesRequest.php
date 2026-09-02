@@ -52,9 +52,10 @@ class SyncReceivablesRequest extends FormRequest
             'bills.*.bill_reference' => ['nullable', 'string', 'max:255'],
             'bills.*.bill_date' => ['nullable', 'date_format:Y-m-d'],
             'bills.*.due_date' => ['nullable', 'date_format:Y-m-d'],
-            // Signed on purpose: a credit note or an advance is negative in
-            // Tally and must stay negative, or a client in credit reads as a
-            // debtor. No `min:0` here, ever.
+            // Signed on purpose. At the agent boundary the payload is
+            // normalised to the page contract: positive means the client owes
+            // us; negative means a client credit or advance. No `min:0` here,
+            // ever, or a client in credit reads as a debtor.
             'bills.*.closing_amount' => ['required', 'numeric'],
             'bills.*.opening_amount' => ['nullable', 'numeric'],
 

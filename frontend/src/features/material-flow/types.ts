@@ -1,3 +1,4 @@
+import type { ListParams } from '@/lib/listParams';
 import type { MaterialRequestStatus, StoreIssueStatus } from './words';
 
 /**
@@ -191,8 +192,13 @@ export interface StoreIssue {
     bag_scans?: StoreIssueBagScan[];
 }
 
-/** The store queue's filters — every one of them applied in SQL, not here. */
-export interface MaterialRequestFilters {
+/**
+ * The store queue's filters — every one of them applied in SQL, not here.
+ * `q`, `page` and `per_page` come with ListParams; `q` is the request NUMBER
+ * in any spelling ("MR-12", "mr 12", "12") and nothing else, by the
+ * server's own rule (MaterialRequestService::applyFilters).
+ */
+export interface MaterialRequestFilters extends ListParams {
     status?: MaterialRequestStatus | MaterialRequestStatus[];
     shift_id?: number;
     work_center_id?: number;
@@ -214,6 +220,17 @@ export interface MaterialRequestFilters {
      * The literal makes that a compile error instead.
      */
     include_unsubmitted?: 1;
+}
+
+/**
+ * The store-issue list's query — every key applied in SQL. `q` is the
+ * handover's IDENTITY: its issue number, the request it fulfils in any
+ * spelling, or a material on any of its lines by SKU or name; never notes.
+ */
+export interface StoreIssueListParams extends ListParams {
+    material_request_id?: number;
+    status?: StoreIssueStatus;
+    item_id?: number;
 }
 
 export interface CreateMaterialRequestLinePayload {

@@ -1,4 +1,4 @@
-import { Popover, Space, Tag, Typography } from 'antd';
+import { Button, Popover, Space, Tag, Typography } from 'antd';
 import { Link } from 'react-router-dom';
 import { itemDisplayName } from '@/features/inventory/itemIdentity';
 import type { Item, ItemRow } from '@/features/inventory/types';
@@ -42,7 +42,14 @@ export function VariantCell({
                         content={<VariantList items={siblings} />}
                         title="Other packs of this product"
                     >
-                        <Tag style={{ cursor: 'pointer', marginInlineEnd: 0 }}>+{siblings.length}</Tag>
+                        <Button
+                            type="link"
+                            size="small"
+                            aria-label={`Show ${siblings.length} other ${siblings.length === 1 ? 'pack' : 'packs'}`}
+                            style={{ padding: 0, height: 'auto' }}
+                        >
+                            <Tag style={{ marginInlineEnd: 0 }}>+{siblings.length}</Tag>
+                        </Button>
                     </Popover>
                 ) : null}
             </Space>
@@ -58,9 +65,16 @@ export function VariantCell({
             content={<VariantList items={variants} />}
             title="Packs of this product"
         >
-            <Tag color="geekblue" style={{ cursor: 'pointer', marginInlineEnd: 0 }}>
-                {variants.length} {variants.length === 1 ? 'pack' : 'packs'}
-            </Tag>
+            <Button
+                type="link"
+                size="small"
+                aria-label={`Show ${variants.length} ${variants.length === 1 ? 'pack' : 'packs'}`}
+                style={{ padding: 0, height: 'auto' }}
+            >
+                <Tag color="geekblue" style={{ marginInlineEnd: 0 }}>
+                    {variants.length} {variants.length === 1 ? 'pack' : 'packs'}
+                </Tag>
+            </Button>
         </Popover>
     );
 }

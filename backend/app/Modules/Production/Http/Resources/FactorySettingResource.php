@@ -18,6 +18,9 @@ class FactorySettingResource extends JsonResource
             'label' => $this->label,
             'description' => $this->description,
             'confirmation_status' => $this->confirmation_status,
+            // Whether any screen or rule reads this value. The UI marks the
+            // rest "Not in use" instead of offering a control that does nothing.
+            'applied' => $this->isReadBySoftware(),
             'is_active' => $this->is_active,
             'effective_from' => $this->effective_from?->toDateString(),
             'change_reason' => $this->change_reason,

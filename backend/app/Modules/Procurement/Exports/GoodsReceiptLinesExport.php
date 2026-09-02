@@ -39,7 +39,9 @@ class GoodsReceiptLinesExport extends ProcurementExportKind
 
     public function filterRules(): array
     {
-        return $this->listRules(new ListGoodsReceiptsRequest);
+        // The same one-receipt deep-link filter as the header export: not
+        // an export control, dropped with the paging keys.
+        return $this->listRules(new ListGoodsReceiptsRequest, ['page', 'per_page', 'id']);
     }
 
     public function columns(?Authenticatable $reader): array

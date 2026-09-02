@@ -136,7 +136,7 @@ export default function ClientOutstandingPage() {
             <Alert
                 type="error"
                 showIcon
-                message="Could not load the outstanding position"
+                title="Could not load the outstanding position"
                 description={
                     fetchStatus === 'paused'
                         ? `The request is paused and is not being retried, so this page is not showing the factory's position — do not read it as "nothing is owed". ${reason?.message ?? 'Check the connection and reload.'}`
@@ -147,6 +147,8 @@ export default function ClientOutstandingPage() {
     }
 
     const totals = data?.totals;
+    const hasBalanceOnly = (data?.clients ?? []).some((client) => client.balance_only);
+    const allBalancesOnly = (data?.clients.length ?? 0) > 0 && (data?.clients ?? []).every((client) => client.balance_only);
 
     /*
      * ONLY A SUCCESSFUL READ MAY SAY "nothing has been pulled".
@@ -250,7 +252,7 @@ export default function ClientOutstandingPage() {
                 ),
         },
         ...(Object.keys(BUCKET_LABELS) as AgeingBucket[]).map((bucket) => ({
-            title: BUCKET_LABELS[bucket],
+            title: bucket === 'no_due_date' && hasBalanceOnly ? 'No bill detail' : BUCKET_LABELS[bucket],
             key: bucket,
             align: 'right' as const,
             width: 120,
@@ -264,7 +266,11 @@ export default function ClientOutstandingPage() {
             dataIndex: 'bill_count',
             key: 'bill_count',
             align: 'right' as const,
-            width: 80,
+            width: 110,
+            render: (count: number, row: ClientOutstanding) =>
+                row.balance_only && count === 0
+                    ? <Tag style={{ marginInlineEnd: 0 }}>Balance only</Tag>
+                    : count,
         },
     ];
 
@@ -284,7 +290,7 @@ export default function ClientOutstandingPage() {
                 <Alert
                     type="info"
                     showIcon
-                    message={`Position as at ${data.as_of}${data.company ? ` — ${data.company}` : ''}`}
+                    title={`Position as at ${data.as_of}${data.company ? ` — ${data.company}` : ''}`}
                     description={
                         data.synced_at
                             ? `Pulled from Tally on ${new Date(data.synced_at).toLocaleString()}. Figures change only when the Tally Sync Agent is asked to read again.`
@@ -293,12 +299,21 @@ export default function ClientOutstandingPage() {
                 />
             )}
 
+            {hasBalanceOnly && (
+                <Alert
+                    type="warning"
+                    showIcon
+                    title="Tally supplied client balances without invoice detail"
+                    description="The outstanding totals are available, but Tally did not include bill references or due dates in this pull. Bill counts, overdue totals and ageing are therefore not claimed for balance-only clients."
+                />
+            )}
+
             {nothingPulled && (
                 <Alert
                     type="warning"
                     showIcon
-                    message="No outstanding position has been pulled from Tally yet"
-                    description="Ask the operator to press “Read outstandings” in the Tally Sync Agent tray on the factory PC. Until then this page has nothing to show — it does not fall back to the ERP's own invoices, which would report a fraction of the real position as the whole of it."
+                    title="No outstanding position has been pulled from Tally yet"
+                    description="Ask the operator to press “Pull Outstandings from Tally” in the Tally Sync Agent tray on the factory PC. Until then this page has nothing to show — it does not fall back to the ERP's own invoices, which would report a fraction of the real position as the whole of it."
                 />
             )}
 
@@ -307,7 +322,14 @@ export default function ClientOutstandingPage() {
                     <Card><Statistic title="Total outstanding" value={money(totals?.outstanding_amount ?? null)} loading={isPending} /></Card>
                 </Col>
                 <Col xs={24} sm={12} lg={6}>
-                    <Card><Statistic title="Overdue" value={money(totals?.overdue_amount ?? null)} loading={isPending} valueStyle={{ color: num(totals?.overdue_amount ?? '0') > 0 ? '#cf1322' : undefined }} /></Card>
+                    <Card>
+                        <Statistic
+                            title="Overdue"
+                            value={hasBalanceOnly ? (allBalancesOnly ? 'Not available' : 'Partial') : money(totals?.overdue_amount ?? null)}
+                            loading={isPending}
+                            valueStyle={{ color: !hasBalanceOnly && num(totals?.overdue_amount ?? '0') > 0 ? '#cf1322' : undefined }}
+                        />
+                    </Card>
                 </Col>
                 <Col xs={24} sm={12} lg={6}>
                     <Card><Statistic title="Pending purchases" value={money(totals?.pending_order_amount ?? null)} loading={isPending} /></Card>
@@ -330,7 +352,7 @@ export default function ClientOutstandingPage() {
                     onChange={(v) => setFocus(v as Focus)}
                     options={[
                         { label: 'All clients', value: 'all' },
-                        { label: 'Overdue only', value: 'overdue' },
+                        { label: 'Overdue only', value: 'overdue', disabled: hasBalanceOnly },
                         { label: 'Has pending orders', value: 'pending' },
                     ]}
                 />
@@ -405,6 +427,7 @@ export default function ClientOutstandingPage() {
                             />
                         </Space>
                     ),
+                    rowExpandable: (row) => row.bills.length > 0 || row.pending_orders.length > 0,
                 }}
                 summary={() =>
                     totals == null ? null : (
@@ -432,7 +455,9 @@ export default function ClientOutstandingPage() {
                                         <Text strong>{money(totals.ageing[bucket])}</Text>
                                     </Table.Summary.Cell>
                                 ))}
-                                <Table.Summary.Cell index={12} align="right"><Text strong>{totals.bill_count}</Text></Table.Summary.Cell>
+                                <Table.Summary.Cell index={12} align="right">
+                                    <Text strong>{hasBalanceOnly ? 'Partial' : totals.bill_count}</Text>
+                                </Table.Summary.Cell>
                             </Table.Summary.Row>
                         </Table.Summary>
                     )

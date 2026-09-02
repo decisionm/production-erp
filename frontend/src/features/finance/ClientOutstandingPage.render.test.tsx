@@ -46,6 +46,7 @@ const report: ClientOutstandingReport = {
             party_ledger_name: 'Northwind Traders',
             party_ledger_guid: 'ledger-guid-northwind',
             is_linked: false,
+            balance_only: false,
             outstanding_amount: '10000.0000',
             overdue_amount: '10000.0000',
             pending_order_amount: '26960.0000',
@@ -83,10 +84,10 @@ const report: ClientOutstandingReport = {
     },
 };
 
-function renderPage(): string {
+function renderPage(data: ClientOutstandingReport = report): string {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     // Seeded, not fetched: a server render resolves no promise.
-    queryClient.setQueryData(['finance', 'client-outstanding'], report);
+    queryClient.setQueryData(['finance', 'client-outstanding'], data);
 
     return renderToString(
         <QueryClientProvider client={queryClient}>
@@ -135,5 +136,20 @@ describe('ClientOutstandingPage', () => {
         // React separates adjacent interpolated text nodes with an HTML
         // comment on a server render, so the tag reads `29<!-- --> days`.
         expect(renderPage()).toMatch(/29(<!-- -->)?\s*days/);
+    });
+
+    it('names a balance-only pull instead of inventing bill detail', () => {
+        const balanceOnly: ClientOutstandingReport = {
+            ...report,
+            clients: [{ ...report.clients[0], balance_only: true, bill_count: 0, bills: [] }],
+            totals: { ...report.totals, bill_count: 0 },
+        };
+
+        const html = renderPage(balanceOnly);
+
+        expect(html).toContain('Tally supplied client balances without invoice detail');
+        expect(html).toContain('Balance only');
+        expect(html).toContain('Not available');
+        expect(html).toContain('No bill detail');
     });
 });

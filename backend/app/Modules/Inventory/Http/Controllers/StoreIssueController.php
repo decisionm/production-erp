@@ -37,6 +37,7 @@ class StoreIssueController extends Controller
             itemId: $request->integer('item_id') ?: null,
             issuedFrom: $request->string('issued_from')->toString() ?: null,
             issuedTo: $request->string('issued_to')->toString() ?: null,
+            q: $request->string('q')->toString() ?: null,
             perPage: $request->integer('per_page') ?: 20,
         ));
     }

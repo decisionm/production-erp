@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Descriptions, Drawer, Input, InputNumber, Space, Table, Tag, Typography } from 'antd';
-import dayjs from 'dayjs';
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/features/auth/store';
 import { hasManageAccess, hasModuleAccess } from '@/features/auth/permissions';
@@ -11,8 +10,13 @@ import {
     returnBatchToProduction,
     RETURN_REASON_MIN_LENGTH,
 } from '@/features/quality/api';
+import { ListNoMatch } from '@/features/quality/components/ListNoMatch';
 import { grossProducedPieces, readQuantity } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
+import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
+import { type ListParamsSpec, compactParams } from '@/lib/listParams';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { useListParams } from '@/lib/useListParams';
 
 /**
  * Production QC — the queue the owner asked for: "all the machines will go to
@@ -45,19 +49,12 @@ const fmtKg = (raw: string | null | undefined): string => {
 };
 
 /**
- * Oldest first — the queue is worked front to back. The server orders newest
- * first (production_date desc, id desc) for the approval screens, so this is a
- * deliberate re-sort, not a coincidence of the payload.
+ * The queue's URL keys are only q / page / per_page: its MEMBERSHIP and its
+ * ORDER (oldest first, id breaking the tie) are the server's contract, not
+ * something a query string may widen or re-sort. Module-level: useListParams
+ * memoises on it.
  */
-function oldestFirst(rows: BatchQualityQueueRow[]): BatchQualityQueueRow[] {
-    const at = (row: BatchQualityQueueRow): number => {
-        const byDate = row.production_date ? dayjs(row.production_date).valueOf() : NaN;
-        return Number.isFinite(byDate) ? byDate : 0;
-    };
-    // Same production date is the common case (a day's batches), so the id
-    // breaks the tie — it is monotonic in creation order.
-    return [...rows].sort((a, b) => at(a) - at(b) || a.id - b.id);
-}
+const QUEUE_LIST_SPEC: ListParamsSpec = {};
 
 export default function ProductionQcPage() {
     const user = useAuthStore((s) => s.user);
@@ -86,20 +83,29 @@ export default function ProductionQcPage() {
         queryClient.invalidateQueries({ queryKey: ['production', 'shift-production-entries'] });
     };
 
-    const { data, isLoading, error } = useQuery({
-        queryKey: ['quality', 'batch-quality-queue'],
-        queryFn: listBatchQualityQueue,
+    // THE URL IS THE QUEUE'S STATE (search, page, page size) and the SERVER
+    // cuts the page: this screen used to walk every page of the production
+    // list and filter and re-sort in the browser.
+    const { params, setParams, setPage, reset } = useListParams(QUEUE_LIST_SPEC);
+    const request = compactParams(params);
+
+    const { data, isLoading, isPending, isError, error, refetch } = useQuery({
+        queryKey: ['quality', 'batch-quality-queue', request],
+        queryFn: () => listBatchQualityQueue(params),
         enabled: canView && canReadQueue,
         retry: false,
+        placeholderData: (previous) => previous,
     });
 
     const status = (error as { response?: { status?: number } } | null)?.response?.status;
-    const rows = oldestFirst(data?.rows ?? []);
-    // Pending batches exist, but not one of them carries the gate: the factory
-    // has stood the quality stage down (PROD_QUALITY_STAGE_ENABLED=false).
-    // Saying so is the difference between "nothing to do" and "this screen is
-    // not in use" — and the second is not something to leave anyone guessing at.
-    const stageStoodDown = data?.stageEnabled === false;
+    const forbidden = status === 403;
+    // The server's order IS the queue's order — oldest first, id breaking the
+    // tie — so a page is a slice of the queue, never a re-sort of one.
+    const rows = data?.data ?? [];
+    // The factory has stood the quality stage down (PROD_QUALITY_STAGE_ENABLED
+    // =false). The server says so in meta, because no row can; saying it is
+    // the difference between "nothing to do" and "this screen is not in use".
+    const stageStoodDown = data?.meta.stage_enabled === false;
 
     if (!canView) {
         return (
@@ -129,17 +135,13 @@ export default function ProductionQcPage() {
                 />
             )}
 
-            {error && (
+            {forbidden && (
                 <Alert
-                    type={status === 403 ? 'warning' : 'error'}
+                    type="warning"
                     showIcon
                     style={{ marginBottom: 16 }}
-                    message={status === 403 ? 'Not allowed to read the batch list' : 'Could not load the quality queue'}
-                    description={
-                        status === 403
-                            ? 'Reading the waiting batches needs Production view permission alongside Quality.'
-                            : 'Refresh the page. If it keeps failing the batches are still safe — they simply are not listed here.'
-                    }
+                    message="Not allowed to read the batch list"
+                    description="Reading the waiting batches needs Production view permission alongside Quality."
                 />
             )}
 
@@ -149,24 +151,63 @@ export default function ProductionQcPage() {
                     showIcon
                     style={{ marginBottom: 16 }}
                     message="The quality stage is switched off"
-                    description={`Completed batches are going straight to the Plant Manager, as they did before this stage existed — ${data?.pendingCount ?? 0} are waiting for approval right now. Nothing needs checking here until the stage is switched back on.`}
+                    description={`Completed batches are going straight to the Plant Manager, as they did before this stage existed — ${data?.meta.pending_count ?? 0} are waiting for approval right now. Nothing needs checking here until the stage is switched back on.`}
                 />
             )}
 
-            {/* No table at all when the queue could not be read — whether that
-                is a permission or a failed request. An empty grid saying "no
-                batches waiting" underneath a banner explaining that the list
-                could not be fetched reads as "nothing is waiting", which is
-                the opposite of what is known. */}
-            {canReadQueue && !stageStoodDown && !error && (
+            {/* No table at all on a 403 — an empty grid under a banner saying
+                the list may not be read would read as "nothing is waiting".
+                Every OTHER read state is the table's own: a failed first
+                read shows the failure and Try again where the rows would be
+                (ListEmpty), and a failed REFETCH keeps the stale rows and
+                says so above them (ListReadAlert) — "no batches waiting" is
+                shown only when the server actually said so. */}
+            {canReadQueue && !stageStoodDown && !forbidden && (
+            <>
+            <Space wrap style={{ marginBottom: 12 }}>
+                {/* Keyed on the term so Clear (reset) empties the box; submits
+                    on Enter, the button, or its own clear cross. */}
+                <Input.Search
+                    key={params.q ?? ''}
+                    allowClear
+                    defaultValue={params.q}
+                    placeholder="Search batch, product, machine"
+                    onSearch={(value) => setParams({ q: value.trim() || undefined })}
+                    style={{ width: 280 }}
+                />
+                {params.q && data?.meta && (
+                    <>
+                        <Typography.Text type="secondary">{`${data.meta.total} match`}</Typography.Text>
+                        <Button size="small" type="link" style={{ padding: 0 }} onClick={reset}>
+                            Clear
+                        </Button>
+                    </>
+                )}
+            </Space>
+
+            <ListReadAlert state={{ isPending, isError, error, refetch }} entity="the quality queue" />
+
             <Table<BatchQualityQueueRow>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 size="small"
                 rowKey="id"
                 loading={isLoading}
-                pagination={false}
+                pagination={serverPagination(data?.meta, setPage, 'batches')}
                 dataSource={rows}
-                locale={{ emptyText: 'No batches waiting for a quality check.' }}
+                locale={{
+                    emptyText: (
+                        <ListEmpty
+                            state={{ isPending, isError, error, refetch }}
+                            entity="the quality queue"
+                            empty={
+                                params.q
+                                    ? <ListNoMatch entity="batches" term={params.q} onClear={reset} />
+                                    : 'No batches waiting for a quality check.'
+                            }
+                        />
+                    ),
+                }}
                 columns={[
                     { title: 'Batch #', dataIndex: 'batch_number', render: (v: string | null) => v ?? '—' },
                     { title: 'Machine', render: (_, row) => row.work_center?.code ?? row.work_center?.name ?? '—' },
@@ -213,6 +254,7 @@ export default function ProductionQcPage() {
                     },
                 ]}
             />
+            </>
             )}
 
             <QualityCheckDrawer
@@ -234,8 +276,9 @@ export default function ProductionQcPage() {
                 onDone={() => {
                     setReturningRow(null);
                     // The batch has to LEAVE this queue on the next read — it is
-                    // production's now. `listBatchQualityQueue` drops it on the
-                    // server's `correction.awaiting_correction` flag.
+                    // production's now, and the server's queue predicate drops
+                    // it the same way its `correction.awaiting_correction` flag
+                    // would (whereAwaitingQualityCheck).
                     refreshQueues();
                 }}
             />

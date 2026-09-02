@@ -80,7 +80,7 @@ export default function PlanningDashboardPage() {
                         ),
                     },
                     { title: 'Needed', align: 'right', render: (_, row) => <span style={numeric}>{formatQuantity(row.needed)}</span> },
-                    { title: 'Free', align: 'right', render: (_, row) => <span style={numeric}>{formatQuantity(row.free)}</span> },
+                    { title: 'Free to issue', align: 'right', render: (_, row) => <span style={numeric}>{formatQuantity(row.free)}</span> },
                     {
                         // The honest "why is my order not first" figure, and
                         // one that stays knowable even when nothing behind an

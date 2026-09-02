@@ -1,7 +1,10 @@
 import { api } from '@/lib/api';
+import { type ListParamsSpec, compactParams } from '@/lib/listParams';
 import type { Paginated } from '@/lib/types';
 import { buildPurchaseOrderQuery, unwrapTraceResponse } from './purchaseOrders';
 import type {
+    GoodsReceiptListFilters,
+    GoodsReceiptListParams,
     GoodsReceiptNote,
     PurchaseOrder,
     PurchaseOrderListFilters,
@@ -224,22 +227,39 @@ export async function cancelPurchaseOrder(id: number, reason: string): Promise<P
     return data.data;
 }
 
-/** Same reason as listPurchaseOrders: links point at one specific receipt. */
 /**
- * The receipt register, plus whether THIS DEPLOYMENT captures lots and bags.
- *
- * The flag rides here because the receiving screen needs it and used to read it
- * from the production module's settings — which a storekeeper holding only
- * procurement cannot reach, so the page read the 403 as "traceability off" and
- * booked receipts with no bags and therefore no incoming-QC hold. Deployment
- * config, not a per-reader value, so the answer is the same for everyone.
+ * THE REGISTER PAGE'S URL STATE (useListParams): `q`, `page`, `per_page`
+ * are every list's; `po` and `grn` are this page's own deep links. Module-
+ * level, as the hook requires. The key builder and the URL→wire mapping sit
+ * beside the read they feed, so the render test can seed the exact key the
+ * page derives from its URL.
+ */
+export const GOODS_RECEIPT_LIST_SPEC: ListParamsSpec = { numbers: ['po', 'grn'] };
+
+/** The page's URL → the request the server gets. Compacted: `{}` and `{ q: '' }` are one key. */
+export function goodsReceiptServerFilters(params: GoodsReceiptListParams): GoodsReceiptListFilters {
+    const { po, grn, ...rest } = params;
+
+    return compactParams({ ...rest, purchase_order_id: po, id: grn });
+}
+
+/** Under the ['procurement', 'goods-receipts'] prefix every receipt-side mutation already invalidates. */
+export function goodsReceiptsQueryKey(filters: GoodsReceiptListFilters) {
+    return ['procurement', 'goods-receipts', 'list', filters] as const;
+}
+
+/**
+ * ONE page of the register, narrowed and paged on the SERVER
+ * (GoodsReceiptService through ListGoodsReceiptsRequest). No argument is
+ * the unfiltered first page every earlier caller still gets; a picker that
+ * needs the whole register asks for `per_page` at the server's ceiling.
  */
 export async function listGoodsReceipts(
-    params?: { page?: number; per_page?: number; purchase_order_id?: number },
+    params: GoodsReceiptListFilters = {},
 ): Promise<Paginated<GoodsReceiptNote> & { traceability_enabled?: boolean }> {
     const { data } = await api.get<Paginated<GoodsReceiptNote> & { traceability_enabled?: boolean }>(
         '/procurement/goods-receipts',
-        { params },
+        { params: compactParams(params) },
     );
     return data;
 }

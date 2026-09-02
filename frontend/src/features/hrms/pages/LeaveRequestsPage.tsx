@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { Button, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
@@ -13,7 +13,12 @@ import {
     listLeaveRequests,
     rejectLeaveRequest,
 } from '@/features/hrms/api';
-import type { LeaveRequest, LeaveRequestStatus } from '@/features/hrms/types';
+import { LEAVE_REQUEST_LIST_SPEC, noMatchLine, pageRangeLine } from '@/features/hrms/list';
+import type { LeaveRequest, LeaveRequestListParams, LeaveRequestStatus } from '@/features/hrms/types';
+import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
+import { compactParams, narrowingKeys } from '@/lib/listParams';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { useListParams } from '@/lib/useListParams';
 
 const requestSchema = z.object({
     employee_id: z.number({ error: 'Employee is required' }),
@@ -31,12 +36,40 @@ const statusColor: Record<LeaveRequestStatus, string> = {
     rejected: 'red',
 };
 
+const STATUS_FILTER: { value: LeaveRequestStatus | ''; label: string }[] = [
+    { value: '', label: 'All statuses' },
+    { value: 'pending', label: 'Pending' },
+    { value: 'approved', label: 'Approved' },
+    { value: 'rejected', label: 'Rejected' },
+];
+
+/**
+ * THE LEAVE REQUEST LIST. Search, status, employee, page and page size
+ * live in the URL (useListParams) and the SERVER does the narrowing
+ * (ListLeaveRequestsRequest): `q` goes THROUGH the employee — code, name,
+ * department, designation — because a leave request has no number anyone
+ * types. The pager is wired to the server's meta, so a request older than
+ * the newest screen is reachable.
+ */
 export default function LeaveRequestsPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [detailRow, setDetailRow] = useState<LeaveRequest | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['hrms', 'leave-requests'], queryFn: listLeaveRequests });
+    const { params, setParams, setPage, reset } = useListParams<LeaveRequestListParams>(LEAVE_REQUEST_LIST_SPEC);
+    const listParams = useMemo(() => compactParams(params), [params]);
+    const narrowed = narrowingKeys(params).length > 0;
+
+    // The box's text as typed; it becomes `q` on Enter / the search button,
+    // never per keystroke. Re-seeded when the URL's q changes under it.
+    const [qDraft, setQDraft] = useState(params.q ?? '');
+    useEffect(() => setQDraft(params.q ?? ''), [params.q]);
+
+    const query = useQuery({
+        queryKey: ['hrms', 'leave-requests', 'list', listParams],
+        queryFn: () => listLeaveRequests(listParams),
+        placeholderData: (previous) => previous,
+    });
     const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
     const { data: leaveTypes } = useQuery({ queryKey: ['hrms', 'leave-types', 'all'], queryFn: listAllLeaveTypes });
 
@@ -48,7 +81,7 @@ export default function LeaveRequestsPage() {
         option: (t) => ({ value: t.id, label: `${t.code} — ${t.name}` }),
     });
 
-    const { control, handleSubmit, reset, formState: { errors } } = useForm<RequestFormValues>({
+    const { control, handleSubmit, reset: resetForm, formState: { errors } } = useForm<RequestFormValues>({
         resolver: zodResolver(requestSchema),
     });
 
@@ -62,7 +95,7 @@ export default function LeaveRequestsPage() {
         onSuccess: () => {
             invalidate();
             setModalOpen(false);
-            reset();
+            resetForm();
         },
         onError: (error: any) => {
             Modal.error({ title: 'Could not submit leave request', content: error?.response?.data?.message ?? 'Unknown error' });
@@ -78,19 +111,79 @@ export default function LeaveRequestsPage() {
     });
     const rejectMutation = useMutation({ mutationFn: rejectLeaveRequest, onSuccess: invalidate });
 
+    // Three different empty tables: a term that matched nothing names the
+    // term; a filter that holds nothing offers it back; only the bare page
+    // may say there are no requests at all.
+    const emptyText = params.q ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={noMatchLine('leave requests', params.q)}>
+            <Button size="small" onClick={() => setParams({ q: undefined })}>
+                Clear search
+            </Button>
+        </Empty>
+    ) : narrowed ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No leave requests match these filters.">
+            <Button size="small" onClick={reset}>
+                Clear filters
+            </Button>
+        </Empty>
+    ) : (
+        'No leave requests yet.'
+    );
+
     return (
         <>
-            <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
+            <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }} wrap>
                 <Typography.Title level={3} style={{ margin: 0 }}>Leave Requests</Typography.Title>
-                <Button type="primary" onClick={() => setModalOpen(true)}>New Leave Request</Button>
+                <Space wrap>
+                    <Input.Search
+                        allowClear
+                        placeholder="Employee code, name, department"
+                        style={{ width: 260 }}
+                        value={qDraft}
+                        onChange={(event) => setQDraft(event.target.value)}
+                        onSearch={(value) => setParams({ q: value.trim() || undefined })}
+                    />
+                    <Select<LeaveRequestStatus | ''>
+                        value={params.status ?? ''}
+                        style={{ width: 150 }}
+                        options={STATUS_FILTER}
+                        onChange={(value) => setParams({ status: value || undefined })}
+                    />
+                    <Select<number>
+                        allowClear
+                        showSearch
+                        optionFilterProp="label"
+                        placeholder="Employee"
+                        style={{ width: 220 }}
+                        value={params.employee_id}
+                        options={employeeOptions}
+                        onChange={(value) => setParams({ employee_id: value ?? undefined })}
+                    />
+                    <Button type="primary" onClick={() => setModalOpen(true)}>New Leave Request</Button>
+                </Space>
             </Space>
 
+            <Space style={{ marginBottom: 8 }} wrap>
+                <Typography.Text type="secondary">{pageRangeLine(query.data?.meta, 'leave requests')}</Typography.Text>
+                {narrowed ? (
+                    <Button size="small" onClick={reset}>
+                        Clear
+                    </Button>
+                ) : null}
+            </Space>
+
+            {/* placeholderData keeps stale rows on a failed refetch, so
+                emptyText never shows the failure — this line does. */}
+            <ListReadAlert state={query} entity="leave requests" />
+
             <Table<LeaveRequest>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
-                loading={isLoading}
-                dataSource={data?.data}
-                pagination={false}
+                loading={query.isFetching}
+                dataSource={query.data?.data}
+                pagination={serverPagination(query.data?.meta, setPage, 'leave requests')}
+                locale={{ emptyText: <ListEmpty state={query} entity="leave requests" empty={emptyText} /> }}
                 columns={[
                     { title: 'Employee', render: (_, row) => row.employee?.name },
                     { title: 'Leave Type', render: (_, row) => row.leave_type.name },

@@ -21,7 +21,7 @@ import {
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
-import { listAllWarehouses } from '@/features/inventory/api';
+import FactoryRulesTab from '@/features/production/components/FactoryRulesTab';
 import PackingMaterialsTab from '@/features/production/components/PackingMaterialsTab';
 import MoldsPage from '@/features/production/pages/MoldsPage';
 import ProductStandardsPage from '@/features/production/pages/ProductStandardsPage';
@@ -34,15 +34,11 @@ import {
     createWorkCenter,
     importProductionConfigurations,
     listDowntimeReasons,
-    listFactorySettings,
     listWorkCenters,
     saveDowntimeReason,
-    saveFactorySetting,
-    getFactoryWarehouseSettings,
-    setFactoryWarehouse,
     updateWorkCenter,
 } from '@/features/production/api';
-import type { FactoryWarehouseRole, WorkCenterWritePayload } from '@/features/production/api';
+import type { WorkCenterWritePayload } from '@/features/production/api';
 import type { DowntimeReason, ImportResult, WorkCenter } from '@/features/production/types';
 
 /**
@@ -113,7 +109,7 @@ export const PRODUCTION_CONFIG_TABS = [
     { key: 'downtime', label: 'Downtime Reasons', render: () => <DowntimeReasonsTab /> },
     { key: 'scrap', label: 'Scrap Reasons', render: () => <ScrapReasonsPage embedded /> },
     { key: 'shifts', label: 'Shifts', render: () => <ShiftsPage embedded /> },
-    { key: 'settings', label: 'Factory Rules', render: () => <SettingsTab /> },
+    { key: 'settings', label: 'Factory Rules', render: () => <FactoryRulesTab /> },
     { key: 'import', label: 'Import from Workbook', render: () => <ImportTab /> },
 ] as const;
 
@@ -645,198 +641,6 @@ function DowntimeReasonsTab() {
                     ] as never
                 }
             />
-        </>
-    );
-}
-
-/**
- * The warehouse ROLES the floor resolves silently. This card exists because
- * its absence blocked the factory's first real batch: Start Batch refused
- * (correctly) to guess where finished goods land, and its error said "name one
- * in Production settings" — a place that, until this card, had no control to
- * do so. The backend endpoint predates the screen.
- *
- * THE PACKING MATERIAL STORE IS THE ODD ONE OUT, and the card says so rather
- * than reusing the other rows' warning. The other two roles fall back to the
- * single Tally-linked warehouse, which is safe on a one-godown factory: the
- * resin and the bottles are both in the one place Tally knows. Packing
- * material is exactly the case where that stops being true — a Packing
- * Material Store is a SECOND named location, named separately because cartons
- * do not come out of the resin store. So it has no fallback, an unset value
- * blocks nothing on the floor, and what waits for it is the Tally POST.
- */
-function FactoryWarehousesCard() {
-    const queryClient = useQueryClient();
-    const { data: settings } = useQuery({
-        queryKey: ['production', 'factory-warehouse-settings'],
-        queryFn: getFactoryWarehouseSettings,
-    });
-    const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
-
-    const mutation = useMutation({
-        mutationFn: ({ role, warehouseId }: { role: FactoryWarehouseRole; warehouseId: number | null }) =>
-            setFactoryWarehouse(role, warehouseId),
-        onSuccess: () => {
-            // The preview/readiness reads resolve through these settings, so
-            // stale caches would keep showing the refusal after it is fixed.
-            queryClient.invalidateQueries({ queryKey: ['production', 'factory-warehouse-settings'] });
-            queryClient.invalidateQueries({ queryKey: ['production', 'settings'] });
-            message.success('Saved — the floor uses this from the next action.');
-        },
-        onError: (error: any) =>
-            Modal.error({ title: 'Could not save', content: error?.response?.data?.message ?? 'Unexpected error.' }),
-    });
-
-    const options = (warehouses?.data ?? [])
-        .filter((w) => w.is_active)
-        .map((w) => ({ value: w.id, label: `${w.code} — ${w.name}` }));
-
-    /**
-     * `unsetText` is per role, not shared. The default sentence names the
-     * consequence of leaving a role blank — and for packing material that
-     * consequence is a different one: nothing on the floor is refused, the
-     * VOUCHER is. Saying "Start Batch is REFUSED" there would be a threat the
-     * software does not carry out, which is how a warning stops being read.
-     */
-    const describe = (
-        stored: number | null | undefined,
-        resolved: number | null | undefined,
-        unsetText = 'Nothing set and nothing resolvable — Start Batch is REFUSED until this is chosen.',
-    ): string => {
-        if (stored != null) return '';
-        if (resolved != null) {
-            const w = (warehouses?.data ?? []).find((x) => x.id === resolved);
-            return `Nothing set — currently resolving to ${w ? w.name : `warehouse #${resolved}`}.`;
-        }
-        return unsetText;
-    };
-
-    const row = (
-        label: string,
-        help: string,
-        role: FactoryWarehouseRole,
-        stored: number | null | undefined,
-        resolved: number | null | undefined,
-        unsetText?: string,
-    ) => (
-        <div style={{ marginBottom: 12 }}>
-            <Typography.Text strong style={{ display: 'block' }}>{label}</Typography.Text>
-            <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>{help}</Typography.Text>
-            <Select
-                style={{ width: 360, maxWidth: '100%' }}
-                placeholder="Choose a warehouse…"
-                showSearch
-                optionFilterProp="label"
-                allowClear
-                value={stored ?? undefined}
-                options={options}
-                onChange={(v) => mutation.mutate({ role, warehouseId: v ?? null })}
-            />
-            {describe(stored, resolved, unsetText) && (
-                <Typography.Text
-                    type={resolved == null && stored == null ? 'danger' : 'secondary'}
-                    style={{ fontSize: 12, display: 'block', marginTop: 4 }}
-                >
-                    {describe(stored, resolved, unsetText)}
-                </Typography.Text>
-            )}
-        </div>
-    );
-
-    return (
-        <Card size="small" title="Factory warehouses" style={{ marginBottom: 16 }}>
-            {row(
-                'Finished-goods warehouse',
-                'Where produced bottles are booked when a batch completes. Start Batch is refused until this resolves.',
-                'finished_goods_warehouse_id',
-                settings?.finished_goods_warehouse_id,
-                settings?.finished_goods_resolved_warehouse_id,
-            )}
-            {row(
-                'Raw-material store',
-                'The store that material is issued from. It is the source of every issue to production — RM Store → Production/WIP → FG Store.',
-                'raw_material_warehouse_id',
-                settings?.raw_material_warehouse_id,
-                settings?.raw_material_resolved_warehouse_id,
-            )}
-            {row(
-                'Packing Material Store',
-                'Where cartons, trays, pouches and tape are issued from on the Tally voucher. No fallback: cartons must not come out of the resin store, so this one is never guessed.',
-                'packing_material_warehouse_id',
-                settings?.packing_material_warehouse_id,
-                settings?.packing_material_resolved_warehouse_id,
-                // The truthful consequence. Nothing on the floor is blocked —
-                // the shift is real and gets recorded either way; it is the
-                // Tally post that waits for this.
-                'Nothing set — packing lines have no store to issue from, so the Tally voucher will not post until this is chosen. Production itself is unaffected.',
-            )}
-        </Card>
-    );
-}
-
-function SettingsTab() {
-    const queryClient = useQueryClient();
-    const { data, isFetching } = useQuery({ queryKey: ['production', 'factory-settings'], queryFn: listFactorySettings });
-    const [edits, setEdits] = useState<Record<string, string>>({});
-
-    const mutation = useMutation({
-        mutationFn: saveFactorySetting,
-        onSuccess: () => queryClient.invalidateQueries({ queryKey: ['production', 'factory-settings'] }),
-    });
-
-    return (
-        <>
-        <FactoryWarehousesCard />
-        <Table
-            scroll={{ x: 'max-content' }}
-            rowKey="id"
-            size="small"
-            loading={isFetching}
-            dataSource={data?.data ?? []}
-            pagination={false}
-            columns={
-                [
-                    {
-                        title: 'Setting',
-                        render: (_: unknown, row: any) => (
-                            <>
-                                <div>{row.label ?? row.key}</div>
-                                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                    {row.description}
-                                </Typography.Text>
-                            </>
-                        ),
-                    },
-                    {
-                        title: 'Value',
-                        width: 220,
-                        render: (_: unknown, row: any) => (
-                            <Space.Compact style={{ width: '100%' }}>
-                                <Input
-                                    size="small"
-                                    value={edits[row.key] ?? row.value ?? ''}
-                                    onChange={(e) => setEdits((s) => ({ ...s, [row.key]: e.target.value }))}
-                                />
-                                <Button
-                                    size="small"
-                                    type="primary"
-                                    disabled={edits[row.key] === undefined || edits[row.key] === row.value}
-                                    loading={mutation.isPending}
-                                    onClick={() => mutation.mutate({ key: row.key, value: edits[row.key] })}
-                                >
-                                    Save
-                                </Button>
-                            </Space.Compact>
-                        ),
-                    },
-                    {
-                        title: 'Status',
-                        render: (_: unknown, row: any) =>
-                            row.confirmation_status ? <Tag>{row.confirmation_status}</Tag> : '—',
-                    },
-                ] as never
-            }
-        />
         </>
     );
 }

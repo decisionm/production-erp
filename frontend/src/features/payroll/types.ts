@@ -1,3 +1,5 @@
+import type { ListParams } from '@/lib/listParams';
+
 export type SalaryComponentKind = 'earning' | 'deduction';
 export type SalaryCalculationType = 'fixed_amount' | 'percentage_of_basic';
 
@@ -60,4 +62,25 @@ export interface PayrollRun {
 export interface SkippedEmployee {
     employee_id: number;
     employee_name: string;
+}
+
+/**
+ * GET /payroll/runs — what ListPayrollRunsRequest accepts: `q` names a
+ * PERIOD ("aug", "August 2026", "2026-08", "08/2026", "2026") or a status
+ * word; `status` narrows to one; paging. Every field optional. This is both
+ * the page's URL state and what the server is asked for — the two are the
+ * same here, so one type serves.
+ */
+export interface PayrollRunListFilters extends ListParams {
+    status?: PayrollRunStatus;
+}
+
+/**
+ * GET /payroll/payslips — ListPayslipsRequest: the run (the filter this
+ * page has always carried on its URL), the employee, `q` over the
+ * employee's name or code, paging.
+ */
+export interface PayslipListFilters extends ListParams {
+    payroll_run_id?: number;
+    employee_id?: number;
 }

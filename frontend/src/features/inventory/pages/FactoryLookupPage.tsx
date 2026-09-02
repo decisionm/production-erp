@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Card, Input, List, Space, Tag, Typography } from 'antd';
 import { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { factoryLookup, type FactoryLookupKind, type FactoryLookupMatch } from '../api';
 import { ListEmpty } from '@/lib/ListEmpty';
 
@@ -152,21 +152,24 @@ export default function FactoryLookupPage() {
                         ),
                     }}
                     renderItem={(match) => (
-                        <List.Item
-                            style={{ cursor: 'pointer' }}
-                            onClick={() => navigate(routeFor(match))}
-                        >
-                            <List.Item.Meta
-                                title={
-                                    <Space>
-                                        <Tag>{KIND_LABEL[match.kind]}</Tag>
-                                        <strong>{match.identifier}</strong>
-                                        {match.exact && <Tag color="blue">exact</Tag>}
-                                        {match.retired && <Tag>Retired</Tag>}
-                                    </Space>
-                                }
-                                description={[match.label, match.detail].filter(Boolean).join(' · ')}
-                            />
+                        <List.Item>
+                            <Link
+                                to={routeFor(match)}
+                                aria-label={`Open ${KIND_LABEL[match.kind]} ${match.identifier ?? match.label}`}
+                                style={{ display: 'block', width: '100%', color: 'inherit' }}
+                            >
+                                <List.Item.Meta
+                                    title={
+                                        <Space>
+                                            <Tag>{KIND_LABEL[match.kind]}</Tag>
+                                            <strong>{match.identifier}</strong>
+                                            {match.exact && <Tag color="blue">exact</Tag>}
+                                            {match.retired && <Tag>Retired</Tag>}
+                                        </Space>
+                                    }
+                                    description={[match.label, match.detail].filter(Boolean).join(' · ')}
+                                />
+                            </Link>
                         </List.Item>
                     )}
                 />

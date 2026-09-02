@@ -172,14 +172,21 @@ class GoodsReceiptService
      * Every filter of ListGoodsReceiptsRequest. The vendor is the ORDER's
      * vendor (a receipt names no vendor of its own). `q` matches the
      * receipt number in any spelling ("GRN-7", "grn 7", "7"), the receipt's
-     * reference (as a delivery's is matched), or the order's vendor by name
-     * or code — never notes. The date range is FACTORY days on
-     * received_date (a datetime), exactly as a delivery's delivered_date.
+     * reference (as a delivery's is matched), the order's vendor by name or
+     * code, the ORDER's number when it is spelled as one ("PO-12", "po 12"
+     * — a bare number has always meant the receipt and still does), or an
+     * item on the receipt by SKU or name — never notes. The date range is
+     * FACTORY days on received_date (a datetime), exactly as a delivery's
+     * delivered_date. `id` is one receipt (the `?grn=` deep link).
      *
      * @param  array<string, mixed>  $filters
      */
     private function applyFilters(Builder $query, array $filters): void
     {
+        if (! empty($filters['id'])) {
+            $query->where('goods_receipt_notes.id', (int) $filters['id']);
+        }
+
         if (! empty($filters['vendor_id'])) {
             $query->whereHas('purchaseOrder', fn (Builder $order) => $order->where('vendor_id', (int) $filters['vendor_id']));
         }
@@ -198,12 +205,25 @@ class GoodsReceiptService
             $term = trim((string) $filters['q']);
             $id = $this->query->documentId($term, 'GRN');
 
-            $query->where(function (Builder $any) use ($term, $id) {
+            // The order's number only when SPELLED as one: "7" is GRN-7, as
+            // it has always been, and never also every receipt on PO-7.
+            $orderId = preg_match('/^\s*po/i', $term) === 1 ? $this->query->documentId($term, 'PO') : null;
+
+            $query->where(function (Builder $any) use ($term, $id, $orderId) {
                 if ($id !== null) {
                     $any->orWhere('goods_receipt_notes.id', $id);
                 }
+                if ($orderId !== null) {
+                    $any->orWhere('goods_receipt_notes.purchase_order_id', $orderId);
+                }
                 $any->orWhere(fn (Builder $reference) => $this->query->whereLike($reference, 'reference', $term));
                 $any->orWhereHas('purchaseOrder.vendor', fn (Builder $vendor) => $this->query->whereVendorMatches($vendor, $term));
+                $any->orWhereHas('lines.item', function (Builder $item) use ($term) {
+                    $item->where(function (Builder $either) use ($term) {
+                        $this->query->whereLike($either, 'sku', $term);
+                        $either->orWhere(fn (Builder $name) => $this->query->whereLike($name, 'name', $term));
+                    });
+                });
             });
         }
     }

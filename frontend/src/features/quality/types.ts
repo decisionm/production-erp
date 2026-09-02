@@ -5,6 +5,8 @@ export type InspectionResult = 'pass' | 'fail' | 'partial';
 export interface IncomingInspection {
     id: number;
     goods_receipt_note_line_id: number;
+    /** The arrival this inspected, named as the receipts register names it. Absent on an older server. */
+    goods_receipt_note?: { id: number; document_number: string; tracking_number: string | null } | null;
     item: Item;
     inspected_quantity: string;
     accepted_quantity: string;

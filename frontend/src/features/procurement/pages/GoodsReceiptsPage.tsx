@@ -1,10 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, DatePicker, Descriptions, Drawer, Empty, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Controller, useFieldArray, useForm, useWatch, type Control, type FieldPath } from 'react-hook-form';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { z } from 'zod';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
 import { lotIsSubmittable, lotScanState } from '../lotScan';
@@ -12,16 +12,26 @@ import { hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
 import { listAllWarehouses } from '@/features/inventory/api';
-import { createGoodsReceipt, listGoodsReceipts, listPurchaseOrders } from '@/features/procurement/api';
+import {
+    GOODS_RECEIPT_LIST_SPEC,
+    createGoodsReceipt,
+    goodsReceiptServerFilters,
+    goodsReceiptsQueryKey,
+    listGoodsReceipts,
+    listPurchaseOrders,
+} from '@/features/procurement/api';
 import GoodsReceiptTallyCell from '@/features/procurement/components/GoodsReceiptTallyCell';
 import { bagLabelsDrawerTitle, grnDrawerTitle, grnNumber } from '@/features/procurement/documentWords';
 import { lineQcLine, receiptQcLine } from '@/features/procurement/grnQc';
 import { RECEIVABLE_PO_FILTERS, isReceivableOrder, receivableOrderLabel } from '@/features/procurement/purchaseOrders';
 import { fromScaled, toScaled, trimQuantity } from '@/lib/scaledDecimal';
-import type { GoodsReceiptNote, GoodsReceiptNoteLine, PurchaseOrderSchedule } from '@/features/procurement/types';
+import type { GoodsReceiptListParams, GoodsReceiptNote, GoodsReceiptNoteLine, PurchaseOrderSchedule } from '@/features/procurement/types';
 import { useProductionSettings } from '@/features/production/packing';
 import { formatDateTime } from '@/lib/datetime';
-import { ListEmpty } from '@/lib/ListEmpty';
+import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
+import { narrowingKeys } from '@/lib/listParams';
+import { TABLE_STICKY, noMatchLine, pageRangeLine, serverPagination } from '@/lib/tableProps';
+import { useListParams } from '@/lib/useListParams';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { itemLabel } from '@/lib/itemLabel';
 
@@ -511,27 +521,36 @@ export default function GoodsReceiptsPage() {
     const user = useAuthStore((s) => s.user);
     const financeAccess = hasModuleAccess(user, 'finance');
 
-    // Deep links into this page: ?grn=7 from the material-lot register (that
-    // one receipt), ?po=3 from an item's movement history (every receipt on
-    // that order). With neither param the page behaves exactly as before.
-    const [searchParams, setSearchParams] = useSearchParams();
-    const focusGrnId = Number(searchParams.get('grn')) || null;
-    const focusPoId = Number(searchParams.get('po')) || null;
+    // THE REGISTER'S VIEW IS ITS URL (useListParams): the search, the page
+    // and the page size, plus the two deep links every movement, lot and PO
+    // screen writes — ?grn=7 from the material-lot register (that one
+    // receipt), ?po=3 from an item's movement history (every receipt on that
+    // order). All of it is narrowed on the SERVER, over the whole register:
+    // a linked view used to read the entire register (per_page 1000) and
+    // filter it here, which the server's own purchase_order_id and id
+    // filters now do. With no param the page is the plain first page.
+    const { params, setParams, setPage, reset: resetList } = useListParams<GoodsReceiptListParams>(GOODS_RECEIPT_LIST_SPEC);
+    const filters = useMemo(() => goodsReceiptServerFilters(params), [params]);
+    const focusGrnId = params.grn ?? null;
+    const focusPoId = params.po ?? null;
     const isDeepLinked = focusGrnId !== null || focusPoId !== null;
-    const [page, setPage] = useState(1);
-    const [perPage, setPerPage] = useState(50);
+    const term = params.q;
+    const filtersActive = narrowingKeys(params).length > 0;
+    // What is typed; the URL (and the server) hear it on Enter or the button.
+    const [qDraft, setQDraft] = useState(params.q ?? '');
+    useEffect(() => {
+        setQDraft(params.q ?? '');
+    }, [params.q]);
 
-    // A link may point at a receipt older than the newest 20, so a linked view
-    // asks for the whole register rather than the default first page.
-    const { data, isLoading, isPending, isError, error, refetch } = useQuery({
-        // Following a ?grn= or ?po= link reads the WHOLE register and filters it
-        // here, because the row being linked to may be anywhere in it. The
-        // ordinary view pages the server instead: it used to take the default
-        // page and render it with the pager off, so the register showed the
-        // newest 20 and said nothing about the rest.
-        queryKey: ['procurement', 'goods-receipts', ...(isDeepLinked ? ['all'] : [page, perPage])],
-        queryFn: () => listGoodsReceipts(isDeepLinked ? { per_page: 1000 } : { page, per_page: perPage }),
+    const listQuery = useQuery({
+        queryKey: goodsReceiptsQueryKey(filters),
+        queryFn: () => listGoodsReceipts(filters),
+        // Turning a page keeps the last page on screen until the next one
+        // lands; a refetch that fails then has rows in front of it, which is
+        // why ListReadAlert sits above the table.
+        placeholderData: (previous) => previous,
     });
+    const { data, isLoading } = listQuery;
     // The picker's orders are narrowed SERVER-side (RECEIVABLE_PO_FILTERS) and
     // asked for at the list's ceiling, not one page. Asked unfiltered, this
     // list answers the newest 20 — and 21 newer draft or closed orders are
@@ -602,16 +621,6 @@ export default function GoodsReceiptsPage() {
      */
     const showsRates =
         financeAccess && receipts.some((receipt) => receipt.lines.some((line) => line.unit_cost !== undefined));
-    const visibleReceipts = useMemo(
-        () =>
-            receipts.filter(
-                (receipt) =>
-                    (focusGrnId === null || receipt.id === focusGrnId) &&
-                    (focusPoId === null || receipt.purchase_order_id === focusPoId),
-            ),
-        [receipts, focusGrnId, focusPoId],
-    );
-
     // Following a ?grn= link opens that receipt straight away — once, so
     // closing the drawer doesn't reopen it.
     const openedGrnRef = useRef<number | null>(null);
@@ -887,6 +896,25 @@ export default function GoodsReceiptsPage() {
         setModalOpen(true);
     };
 
+    // What an EMPTY table says is judged on the query's state (ListEmpty);
+    // these are only the wordings for a read that genuinely returned nothing,
+    // and a search that missed must name the term it missed with.
+    const emptyText = term ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={noMatchLine('goods receipts', term)}>
+            <Button size="small" onClick={() => setParams({ q: undefined })}>
+                Clear search
+            </Button>
+        </Empty>
+    ) : filtersActive ? (
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No goods receipts match these filters.">
+            <Button size="small" onClick={resetList}>
+                Clear filters
+            </Button>
+        </Empty>
+    ) : (
+        'No goods receipts yet.'
+    );
+
     return (
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
@@ -905,44 +933,42 @@ export default function GoodsReceiptsPage() {
                             : `Showing the goods receipts for PO #${focusPoId} only`
                     }
                     action={
-                        <Button size="small" onClick={() => setSearchParams({})}>
+                        <Button size="small" onClick={() => setParams({ grn: undefined, po: undefined })}>
                             Show all receipts
                         </Button>
                     }
                 />
             )}
 
+            <Space style={{ marginBottom: 12 }} wrap>
+                <Input.Search
+                    allowClear
+                    placeholder="GRN no., PO no., vendor, item"
+                    style={{ width: 300 }}
+                    value={qDraft}
+                    onChange={(event) => setQDraft(event.target.value)}
+                    onSearch={(value) => setParams({ q: value.trim() || undefined })}
+                />
+                <Typography.Text type="secondary">{pageRangeLine(data?.meta, 'goods receipts')}</Typography.Text>
+                {filtersActive ? (
+                    <Button size="small" onClick={resetList}>
+                        Clear
+                    </Button>
+                ) : null}
+            </Space>
+
+            {/* placeholderData keeps stale rows on a failed refetch, so
+                emptyText never shows the failure — this line does. */}
+            <ListReadAlert state={listQuery} entity="goods receipts" />
+
             <Table<GoodsReceiptNote>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
-                dataSource={visibleReceipts}
-                locale={{
-                    emptyText: (
-                        <ListEmpty
-                            state={{ isPending, isError, error, refetch }}
-                            entity="goods receipts"
-                            empty="No goods receipts yet."
-                        />
-                    ),
-                }}
-                pagination={
-                    isDeepLinked
-                        ? false
-                        : {
-                              current: page,
-                              pageSize: perPage,
-                              // The server's count, never this page's length.
-                              total: data?.meta?.total ?? visibleReceipts.length,
-                              showSizeChanger: true,
-                              pageSizeOptions: [20, 50, 100, 200],
-                              showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} receipts`,
-                              onChange: (nextPage, nextSize) => {
-                                  setPage(nextPage);
-                                  setPerPage(nextSize);
-                              },
-                          }
-                }
+                dataSource={receipts}
+                locale={{ emptyText: <ListEmpty state={listQuery} entity="goods receipts" empty={emptyText} /> }}
+                pagination={serverPagination(data?.meta, setPage, 'goods receipts')}
                 columns={[
                     { title: 'Receipt', render: (_, row) => grnNumber(row) },
                     {
