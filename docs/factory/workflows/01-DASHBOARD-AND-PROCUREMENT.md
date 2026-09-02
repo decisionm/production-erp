@@ -194,8 +194,13 @@ releases it.
 
 ### Result
 
-The main workflow is wired. The detailed Incoming Quality checklist and counted
-packaging identity are separate verification work for the next chapter.
+The main workflow is wired. The Incoming Quality checklist, whole-bag rejection,
+the counted-material hold and handling units are recorded in Chapter 2 §5
+(DEC-20260902-011 to -015).
+
+**VERIFIED as a decision (02-Sep-2026):** DEC-20260902-034 — every purchase is
+PO-first; the GRN screen never offers "receive without order"; a direct purchase
+gets a short PO at the gate first. Q64 closed.
 
 ## 6. Supplier Bills — clear explanation
 

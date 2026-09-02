@@ -1716,7 +1716,12 @@ block ERP-side goods receipts, quality holds, or barcode issue at
 acceptance, which carry on regardless of what Tally is later told.
 *Open since 2026-08-26.*
 
-## Q64 · May material be purchased without a purchase order?
+## Q64 · May material be purchased without a purchase order? — RESOLVED
+
+**Resolved 2026-09-02 by DEC-20260902-034:** no. Every purchase is PO-first;
+the GRN screen never offers receive-without-order; a direct purchase gets a
+short PO at the gate first; incoming Quality applies to every arrival as
+before. The original entry follows.
 
 The Testing-company books say direct purchases are normal practice: of the
 17 purchase invoices in the 26-Aug export, most carry NO order reference —
