@@ -554,9 +554,11 @@ Verdict: no record is wrong in rule and every supersession is declared; merge
 PR #80 with the narrowings and gaps above added, which they now are. What it
 raises for the OWNER before any code, none of which an agent may answer:
 
-1. A damaged bin material has no door: DEC-20260902-003 forbids returning bin
-   material, and the damaged path to Quality (DEC-20260901-003) is reached only
-   through a return. A torn PET resin bag on the floor today can go nowhere.
+1. ~~A damaged bin material has no door~~ — **answered, DEC-20260902-036:** a
+   damaged PET resin bag not yet tipped in and still identifiable by its barcode
+   goes to Quality hold through the return, its remaining kg leaving
+   Production/WIP and the resin pool together; Quality scraps or releases it.
+   A declared narrowing of -003 and -004. Material in the bin has no door.
 2. DEC-20260902-005 says resin provenance is "read from the bags the Store
    scanned at issue", while DEC-20260810-001 fixes the carton-trace wording as
    "the day bin held loads from these lots" and Q54(d) is open. What the
