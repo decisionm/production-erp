@@ -284,3 +284,38 @@ h5.ant-typography {
     outline-offset: -2px;
     border-radius: 6px;
 }
+
+/* ------------------------------------------------------------------ */
+/* Production Queue (03-Sep-2026): one flat grid of the real queue.      */
+/* ------------------------------------------------------------------ */
+
+.queue-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 24px;
+    margin-bottom: 16px;
+}
+
+.queue-count {
+    font-size: 14px;
+}
+
+/* The queue position is the one figure that means "how soon": wide, heavy, navy. */
+.queue-position {
+    display: inline-block;
+    min-width: 28px;
+    font-size: 20px;
+    font-weight: 800;
+    font-stretch: 112%;
+    line-height: 1;
+    color: var(--brand-navy);
+    font-variant-numeric: tabular-nums;
+}
+
+/* A product run's merged cell sits on the glass tint so the run reads as one. */
+.queue-table .ant-table-tbody > tr > td[rowspan] {
+    background: var(--brand-glass);
+    vertical-align: top;
+}

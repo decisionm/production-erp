@@ -14,11 +14,13 @@ import {
     startProductionRequest,
 } from '@/features/production/api';
 import { queueEmptyText } from '@/features/production/queueEmptyText';
-import { type ProductionQueueGroup, groupQueueByProduct } from '@/features/production/queueGroups';
+import { type ProductionQueueGroup, groupQueueByProduct, sumQuantities } from '@/features/production/queueGroups';
 import type { ProductionQueueRow, ProductionRequestStatus } from '@/features/production/types';
 import { formatDate } from '@/lib/datetime';
 import { itemDisplayName } from '@/features/inventory/itemIdentity';
 import { itemLabel } from '@/lib/itemLabel';
+import { ListReadAlert } from '@/lib/ListEmpty';
+import { TABLE_STICKY } from '@/lib/tableProps';
 
 /**
  * THE FLOOR'S WORKLIST — what the store has asked the factory to make, in the
@@ -85,6 +87,9 @@ const statusLabel: Record<ProductionRequestStatus, string> = {
 
 const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
 const caption = { fontSize: 12, display: 'block' } as const;
+
+/** A queue row as the table draws it: its position in the flat queue and the product run it belongs to. */
+type QueueTableRow = ProductionQueueRow & { position: number; group: ProductionQueueGroup; firstInGroup: boolean };
 
 /**
  * The whole queue's ids with one row moved a place — what reorder() is sent.
@@ -155,7 +160,7 @@ export default function ProductionQueuePage() {
      * same queue. A key of its own would leave this page stale after a hold
      * was placed or a request withdrawn somewhere else.
      */
-    const { data, isLoading, isError, error } = useQuery({
+    const { data, isLoading, isPending, isError, error, refetch } = useQuery({
         queryKey: ['production', 'requests', 'queue'],
         queryFn: readProductionQueue,
         enabled: canView,
@@ -204,8 +209,8 @@ export default function ProductionQueuePage() {
 
     const rows = data?.data ?? [];
     const groups = groupQueueByProduct(rows);
-    // THE FLAT ORDER, for reorder. The sub-rows are the real queue; the
-    // grouping above them is only how it is being read.
+    // THE FLAT ORDER, for reorder. The rows are the real queue; the product
+    // run above each row is only how it is being read.
     const ids = rows.map((row) => row.id);
 
     // The floor-visibility owner question: what this login may read, decided ONCE from the payload's shape.
@@ -213,209 +218,111 @@ export default function ProductionQueuePage() {
     const showsDemand = rows.some((row) => row.ordered !== undefined);
     const showsExpected = rows.some((row) => row.sales_order !== null && 'expected_date' in row.sales_order);
 
+    /*
+     * ONE table, not a table per product (03-Sep-2026). The previous shape
+     * nested a full sub-table under every product row: a navy header
+     * repeated per product, inner and outer columns that never lined up, and
+     * Start/Cancel pushed off the right edge. Now each request is one row in
+     * the server's order, and the product run it belongs to is a single
+     * merged cell spanning its rows — the same grouping, read in one grid.
+     */
+    const tableRows: QueueTableRow[] = groups.flatMap((group) =>
+        group.rows.map((row, index) => ({
+            ...row,
+            position: ids.indexOf(row.id) + 1,
+            group,
+            firstInGroup: index === 0,
+        })),
+    );
+
+    const productCell = (group: ProductionQueueGroup) => (
+        <Space direction="vertical" size={0}>
+            {/* The ERP's own label when the factory set one — that is what
+                display_name is for — with Tally's wire name as the fallback. */}
+            <strong>
+                {itemLabel(
+                    group.item === null
+                        ? null
+                        : {
+                            sku: group.item.sku,
+                            name: itemDisplayName({
+                                name: group.item.name ?? '',
+                                display_name: group.item.display_name ?? null,
+                            }),
+                        },
+                )}
+            </strong>
+            <Typography.Text type="secondary" style={caption}>
+                {group.rows.length} order{group.rows.length === 1 ? '' : 's'} · <span style={numeric}>{formatQuantity(group.quantity)}</span> to make
+            </Typography.Text>
+            {showsPlanning && (
+                // ITEM-level, taken once. Summing it across the rows would
+                // multiply the factory's real finished stock by the number
+                // of customers.
+                <Typography.Text type="secondary" style={caption}>
+                    <span style={numeric}>{formatQuantity(group.free)}</span> free in FG
+                </Typography.Text>
+            )}
+            {/* The run's date when every job in it has one; a refusal is said once, on the job. */}
+            {showsPlanning && !group.cannot_estimate && group.estimated_ready_date !== null && (
+                <Typography.Text type="secondary" style={caption}>
+                    Could be ready <span style={numeric}>{formatDate(group.estimated_ready_date)}</span>
+                </Typography.Text>
+            )}
+        </Space>
+    );
+
     return (
         <>
-            <Typography.Title level={3} style={{ marginTop: 0 }}>Production Queue</Typography.Title>
+            <div className="queue-head">
+                <Typography.Title level={3} style={{ margin: 0 }}>
+                    Production Queue
+                </Typography.Title>
+                {rows.length > 0 && (
+                    <Typography.Text type="secondary" className="queue-count" style={numeric}>
+                        {rows.length} job{rows.length === 1 ? '' : 's'} · {groups.length} product{groups.length === 1 ? '' : 's'} ·{' '}
+                        {formatQuantity(sumQuantities(rows.map((row) => row.quantity)))} to make
+                    </Typography.Text>
+                )}
+            </div>
 
-            <Table<ProductionQueueGroup>
+            {/* A refused read is said as a refusal, never as an empty queue. */}
+            <ListReadAlert state={{ isPending, isError, error, refetch }} entity="the production queue" />
+
+            <Table<QueueTableRow>
+                className="queue-table"
                 scroll={{ x: 'max-content' }}
-                rowKey="key"
+                sticky={TABLE_STICKY}
+                rowKey="id"
                 loading={isLoading}
-                dataSource={groups}
+                dataSource={tableRows}
                 // The server's order IS the queue. No sorter on any column:
                 // one would let a reader rearrange the thing the reorder
                 // buttons write, and then write back what they were looking at.
                 pagination={false}
                 locale={{ emptyText: queueEmptyText(isError, error) }}
-                expandable={{
-                    /*
-                     * CONTROLLED, and `defaultExpandAllRows` would not do.
-                     * That prop seeds the table's expanded keys at MOUNT, and
-                     * at mount this list is empty because the read is still in
-                     * flight — the rows would arrive collapsed and stay that
-                     * way. Start, Cancel and the reorder arrows live in the
-                     * sub-rows, so collapsed-by-default is a queue with no
-                     * buttons on it.
-                     *
-                     * Expanded is the default and a COLLAPSE is what is
-                     * remembered, so a refresh (or a request started
-                     * elsewhere) re-expands new products without reopening the
-                     * ones this reader deliberately shut.
-                     */
-                    expandedRowKeys: groups.map((group) => group.key).filter((key) => !collapsed.has(key)),
-                    onExpand: (expanded, group) =>
-                        setCollapsed((previous) => {
-                            const next = new Set(previous);
-                            if (expanded) next.delete(group.key);
-                            else next.add(group.key);
-
-                            return next;
-                        }),
-                    rowExpandable: () => true,
-                    expandedRowRender: (group) => (
-                        <Table<ProductionQueueRow>
-                            rowKey="id"
-                            size="small"
-                            pagination={false}
-                            dataSource={group.rows}
-                            columns={[
-                                {
-                                    title: 'Request',
-                                    render: (_, row) => (
-                                        <Space direction="vertical" size={0}>
-                                            <strong>{row.request_number}</strong>
-                                            <Typography.Text type="secondary" style={caption}>
-                                                {row.sales_order
-                                                    ? `${row.sales_order.document_number} · ${row.sales_order.customer_name ?? '—'}`
-                                                    : '—'}
-                                            </Typography.Text>
-                                        </Space>
-                                    ),
-                                },
-                                {
-                                    title: 'To make',
-                                    align: 'right',
-                                    render: (_, row) => <span style={numeric}>{formatQuantity(row.quantity)}</span>,
-                                },
-                                ...(showsDemand
-                                    ? [
-                                          {
-                                              title: 'Ordered',
-                                              align: 'right' as const,
-                                              render: (_: unknown, row: ProductionQueueRow) => (
-                                                  <Space direction="vertical" size={0}>
-                                                      <span style={numeric}>{formatQuantity(row.ordered)}</span>
-                                                      <Typography.Text type="secondary" style={caption}>
-                                                          {formatQuantity(row.delivered)} delivered
-                                                      </Typography.Text>
-                                                  </Space>
-                                              ),
-                                          },
-                                      ]
-                                    : []),
-                                ...(showsExpected
-                                    ? [
-                                          {
-                                              // Called what Sales calls it. Whether it is a
-                                              // promise to the customer has never been
-                                              // recorded (the floor-visibility owner question), so this screen does not say so.
-                                              title: 'Expected',
-                                              render: (_: unknown, row: ProductionQueueRow) => (
-                                                  <span style={numeric}>{formatDate(row.sales_order?.expected_date)}</span>
-                                              ),
-                                          },
-                                      ]
-                                    : []),
-                                ...(showsPlanning
-                                    ? [
-                                          {
-                                              title: 'Could be ready',
-                                              render: (_: unknown, row: ProductionQueueRow) => <EtaCell planning={row.planning} />,
-                                          },
-                                          {
-                                              title: 'Jobs ahead',
-                                              align: 'right' as const,
-                                              render: (_: unknown, row: ProductionQueueRow) => (
-                                                  <span style={numeric}>{row.planning?.queued_ahead ?? '—'}</span>
-                                              ),
-                                          },
-                                      ]
-                                    : []),
-                                {
-                                    title: 'Status',
-                                    render: (_, row) => <Tag color={statusColor[row.status]}>{statusLabel[row.status] ?? row.status}</Tag>,
-                                },
-                                {
-                                    // The arrows move a row through the FLAT queue, so the
-                                    // index is its position in the server's list — not its
-                                    // position inside this product's sub-table.
-                                    title: 'Order',
-                                    render: (_, row) => {
-                                        if (!canRunQueue) return <Typography.Text type="secondary">—</Typography.Text>;
-
-                                        const index = ids.indexOf(row.id);
-
-                                        return (
-                                            <Space size={4}>
-                                                <Button
-                                                    size="small"
-                                                    icon={<UpOutlined />}
-                                                    aria-label="Move up"
-                                                    disabled={index <= 0 || !row.can.reorder || reorderMutation.isPending}
-                                                    onClick={() => reorderMutation.mutate(movedOrder(ids, index, -1))}
-                                                />
-                                                <Button
-                                                    size="small"
-                                                    icon={<DownOutlined />}
-                                                    aria-label="Move down"
-                                                    disabled={
-                                                        index === -1 ||
-                                                        index === ids.length - 1 ||
-                                                        !row.can.reorder ||
-                                                        reorderMutation.isPending
-                                                    }
-                                                    onClick={() => reorderMutation.mutate(movedOrder(ids, index, 1))}
-                                                />
-                                            </Space>
-                                        );
-                                    },
-                                },
-                                {
-                                    title: 'Actions',
-                                    render: (_, row) => (
-                                        <Space>
-                                            {canRunQueue && row.can.start && (
-                                                <Button size="small" type="primary" loading={startMutation.isPending} onClick={() => startMutation.mutate(row.id)}>
-                                                    Start
-                                                </Button>
-                                            )}
-                                            {canCancel && row.can.cancel && (
-                                                <Button
-                                                    size="small"
-                                                    danger
-                                                    onClick={() => {
-                                                        setCancelling(row);
-                                                        setReason('');
-                                                    }}
-                                                >
-                                                    Cancel
-                                                </Button>
-                                            )}
-                                        </Space>
-                                    ),
-                                },
-                            ]}
-                        />
-                    ),
-                }}
                 columns={[
                     {
+                        // The queue position: a true sequence, so it is numbered.
                         title: '#',
                         align: 'right',
-                        render: (_, group) => <span style={numeric}>{group.priority}</span>,
+                        width: 64,
+                        render: (_, row) => <span className="queue-position">{row.position}</span>,
                     },
                     {
                         title: 'Product',
-                        render: (_, group) => (
+                        onCell: (row) => ({ rowSpan: row.firstInGroup ? row.group.rows.length : 0 }),
+                        render: (_, row) => productCell(row.group),
+                    },
+                    {
+                        title: 'Request',
+                        render: (_, row) => (
                             <Space direction="vertical" size={0}>
-                                {/* The ERP's own label when the factory set
-                                    one — that is what display_name is for —
-                                    with Tally's wire name as the fallback. */}
-                                <strong>
-                                    {itemLabel(
-                                        group.item === null
-                                            ? null
-                                            : {
-                                                sku: group.item.sku,
-                                                name: itemDisplayName({
-                                                    name: group.item.name ?? '',
-                                                    display_name: group.item.display_name ?? null,
-                                                }),
-                                            },
-                                    )}
-                                </strong>
+                                <strong>{row.request_number}</strong>
                                 <Typography.Text type="secondary" style={caption}>
-                                    {group.rows.length} order{group.rows.length === 1 ? '' : 's'}
+                                    {row.sales_order
+                                        ? `${row.sales_order.document_number} · ${row.sales_order.customer_name ?? '—'}`
+                                        : '—'}
                                 </Typography.Text>
                             </Space>
                         ),
@@ -423,43 +330,114 @@ export default function ProductionQueuePage() {
                     {
                         title: 'To make',
                         align: 'right',
-                        render: (_, group) => <span style={numeric}>{formatQuantity(group.quantity)}</span>,
+                        render: (_, row) => <span style={numeric}>{formatQuantity(row.quantity)}</span>,
                     },
+                    ...(showsDemand
+                        ? [
+                              {
+                                  title: 'Ordered',
+                                  align: 'right' as const,
+                                  render: (_: unknown, row: QueueTableRow) => (
+                                      <Space direction="vertical" size={0}>
+                                          <span style={numeric}>{formatQuantity(row.ordered)}</span>
+                                          <Typography.Text type="secondary" style={caption}>
+                                              <span style={numeric}>{formatQuantity(row.delivered)}</span> delivered
+                                          </Typography.Text>
+                                      </Space>
+                                  ),
+                              },
+                          ]
+                        : []),
+                    ...(showsExpected
+                        ? [
+                              {
+                                  // Called what Sales calls it. Whether it is a
+                                  // promise to the customer has never been
+                                  // recorded (the floor-visibility owner question), so this screen does not say so.
+                                  title: 'Expected',
+                                  render: (_: unknown, row: QueueTableRow) => (
+                                      <span style={numeric}>{formatDate(row.sales_order?.expected_date)}</span>
+                                  ),
+                              },
+                          ]
+                        : []),
                     ...(showsPlanning
                         ? [
                               {
-                                  // ITEM-level, taken once. Summing it across the
-                                  // sub-rows would multiply the factory's real
-                                  // finished stock by the number of customers.
-                                  title: 'Free in FG',
-                                  align: 'right' as const,
-                                  render: (_: unknown, group: ProductionQueueGroup) => (
-                                      <span style={numeric}>{formatQuantity(group.free)}</span>
-                                  ),
+                                  title: 'Could be ready',
+                                  render: (_: unknown, row: QueueTableRow) => <EtaCell planning={row.planning} />,
                               },
                               {
-                                  title: 'Could be ready',
-                                  render: (_: unknown, group: ProductionQueueGroup) =>
-                                      group.cannot_estimate ? (
-                                          <Typography.Text type="warning">
-                                              {planningEtaCell({
-                                                  cannot_estimate: true,
-                                                  estimated_ready_date: null,
-                                                  shifts_needed: null,
-                                                  reason: group.reason,
-                                              }).refusal}
-                                          </Typography.Text>
-                                      ) : (
-                                          <span style={numeric}>{formatDate(group.estimated_ready_date)}</span>
-                                      ),
+                                  title: 'Jobs ahead',
+                                  align: 'right' as const,
+                                  render: (_: unknown, row: QueueTableRow) => (
+                                      <span style={numeric}>{row.planning?.queued_ahead ?? '—'}</span>
+                                  ),
                               },
                           ]
                         : []),
                     {
-                        // NO MACHINE IS KNOWN before a batch is started, and no
-                        // column pretends otherwise. See the header note.
-                        title: 'Machine',
-                        render: () => <Typography.Text type="secondary">—</Typography.Text>,
+                        title: 'Status',
+                        render: (_, row) => <Tag color={statusColor[row.status]}>{statusLabel[row.status] ?? row.status}</Tag>,
+                    },
+                    {
+                        // The arrows move a row through the FLAT queue, so the
+                        // index is its position in the server's list.
+                        title: 'Order',
+                        render: (_, row) => {
+                            if (!canRunQueue) return <Typography.Text type="secondary">—</Typography.Text>;
+
+                            const index = ids.indexOf(row.id);
+
+                            return (
+                                <Space size={4}>
+                                    <Button
+                                        size="small"
+                                        icon={<UpOutlined />}
+                                        aria-label="Move up"
+                                        disabled={index <= 0 || !row.can.reorder || reorderMutation.isPending}
+                                        onClick={() => reorderMutation.mutate(movedOrder(ids, index, -1))}
+                                    />
+                                    <Button
+                                        size="small"
+                                        icon={<DownOutlined />}
+                                        aria-label="Move down"
+                                        disabled={
+                                            index === -1 ||
+                                            index === ids.length - 1 ||
+                                            !row.can.reorder ||
+                                            reorderMutation.isPending
+                                        }
+                                        onClick={() => reorderMutation.mutate(movedOrder(ids, index, 1))}
+                                    />
+                                </Space>
+                            );
+                        },
+                    },
+                    {
+                        title: 'Actions',
+                        fixed: 'right',
+                        render: (_, row) => (
+                            <Space>
+                                {canRunQueue && row.can.start && (
+                                    <Button size="small" type="primary" loading={startMutation.isPending} onClick={() => startMutation.mutate(row.id)}>
+                                        Start
+                                    </Button>
+                                )}
+                                {canCancel && row.can.cancel && (
+                                    <Button
+                                        size="small"
+                                        danger
+                                        onClick={() => {
+                                            setCancelling(row);
+                                            setReason('');
+                                        }}
+                                    >
+                                        Cancel
+                                    </Button>
+                                )}
+                            </Space>
+                        ),
                     },
                 ]}
             />
