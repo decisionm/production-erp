@@ -262,12 +262,17 @@ purchase rates."
   bags, sample weight or observation fields; the build removes the typed
   inspected figure, adds the evidence fields, and keeps the quantities' stock
   effect exactly as it is.
+- **VERIFIED as a decision:** DEC-20260902-012, whole bags only. The inspector
+  selects the rejected bag barcodes; the ERP computes the rejected kilograms and
+  the accepted remainder. No typed rejected figure, no split bag, no bag left on
+  hold after inspection. Counted materials keep typed quantities until Q87.
+- **GAP:** the screen today takes a typed rejected quantity and leaves a bag the
+  figure ends inside on hold; the build replaces the figure with bag selection.
+  Any bag already stuck on hold on live is counted before the build, never
+  assumed.
 - **OPEN (asked one at a time):**
-  1. May QC split one bag's kilograms between accepted and rejected, or is a bag
-     always accepted or rejected whole? Today a bag the rejection ends inside
-     stays on hold with a note.
-  2. Counted packaging: Q87.
-  3. The Tally rejection voucher: Accounts, not the floor.
+  1. Counted packaging: Q87.
+  2. The Tally rejection voucher: Accounts, not the floor.
 
 ## Sections still to capture
 
