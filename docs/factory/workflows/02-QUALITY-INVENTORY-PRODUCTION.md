@@ -499,8 +499,15 @@ record's source.
   plus held, never double-counted; a queued request retires when its line is
   covered; a started job is never retired by paperwork. Confirms the shipped
   formula.
-- **OPEN:** Q62(f) parallel lines for planning dates.
+- **VERIFIED as a decision:** DEC-20260902-033, Q62(f). One line per product;
+  the quoted date is a ceiling, labelled in a few words with quantity, cycle
+  time, cavities and shift hours shown as figures; no machine count recorded
+  or guessed. Q62 closed in full.
+- **GAP:** the planning page prints its basis in the payload; the build puts
+  the short ceiling label and the figures on the screen.
 
-## Sections still to capture
+## Status
 
-- None. Chapter 2 is complete once Q62(b)–(f) are answered or deferred.
+Chapter 2 is complete. Every owner question raised in it is recorded
+(DEC-20260902-002 to -033) or expressly deferred to Accounts (Q48, Q68).
+Still open elsewhere: Q59(c) sales-order categories, Q64 purchase without a PO.

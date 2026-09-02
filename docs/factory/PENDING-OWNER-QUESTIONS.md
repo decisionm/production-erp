@@ -1611,7 +1611,7 @@ recorded and displayed only.
 fulfilment queue, reservations, the production queue or the planning read —
 none of those touch Tally. *Open since 2026-08-26.*
 
-## Q62 · Contested stock — who wins when two orders want the same bottles? — PARTLY RESOLVED
+## Q62 · Contested stock — who wins when two orders want the same bottles? — RESOLVED
 
 **(a) resolved 2026-09-02 by DEC-20260902-028:** the ERP never moves a hold on
 its own; the first hold placed keeps the stock; only a Store user re-points it,
@@ -1623,7 +1623,9 @@ DEC-20260902-031:** pending requests sort by promised date, earliest first, as
 a queue order only; manual positions stick; started jobs never reorder; a
 re-sort is flagged. **(e) resolved 2026-09-02 by DEC-20260902-032:** covered
 is delivered plus held; a queued request retires when covered; a started job
-is never retired by paperwork. (f) still open. The original entry follows.
+is never retired by paperwork. **(f) resolved 2026-09-02 by DEC-20260902-033:**
+one line per product; the date is a labelled ceiling with its assumptions shown
+as figures; no machine count is recorded or guessed. The original entry follows.
 
 Store fulfilment lets the store hold FG stock against a confirmed sales-order
 line. The build refuses to hold more than exists, but it does not decide WHOSE
