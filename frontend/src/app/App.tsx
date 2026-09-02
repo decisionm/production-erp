@@ -75,6 +75,8 @@ const GstRegistrationsPage = lazyPage(() => import('@/features/compliance/pages/
 const GstReportsPage = lazyPage(() => import('@/features/compliance/pages/GstReportsPage'));
 const HelpPage = lazyPage(() => import('@/features/help/pages/HelpPage'));
 const AttendancePage = lazyPage(() => import('@/features/hrms/pages/AttendancePage'));
+const AttendanceImportsPage = lazyPage(() => import('@/features/hrms/pages/AttendanceImportsPage'));
+const AttendanceImportPage = lazyPage(() => import('@/features/hrms/pages/AttendanceImportPage'));
 const EmployeesPage = lazyPage(() => import('@/features/hrms/pages/EmployeesPage'));
 const LeaveBalancesPage = lazyPage(() => import('@/features/hrms/pages/LeaveBalancesPage'));
 const LeaveRequestsPage = lazyPage(() => import('@/features/hrms/pages/LeaveRequestsPage'));
@@ -338,6 +340,8 @@ export default function App() {
                                     <Route path="/hrms/leave-balances" element={<LeaveBalancesPage />} />
                                     <Route path="/hrms/leave-requests" element={<LeaveRequestsPage />} />
                                     <Route path="/hrms/attendance" element={<AttendancePage />} />
+                                    <Route path="/hrms/attendance-imports" element={<AttendanceImportsPage />} />
+                                    <Route path="/hrms/attendance-imports/:id" element={<AttendanceImportPage />} />
                                     <Route path="/payroll/salary-components" element={<SalaryComponentsPage />} />
                                     <Route path="/payroll/salary-structures" element={<SalaryStructuresPage />} />
                                     <Route path="/payroll/runs" element={<PayrollRunsPage />} />

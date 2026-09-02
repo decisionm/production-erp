@@ -105,6 +105,9 @@ const ROUTE_TABLE = [
     '/hrms/leave-balances',
     '/hrms/leave-requests',
     '/hrms/attendance',
+    // The punch-report import: the runs, and one run's review (03-Sep).
+    '/hrms/attendance-imports',
+    '/hrms/attendance-imports/:id',
     '/payroll/salary-components',
     '/payroll/salary-structures',
     '/payroll/runs',

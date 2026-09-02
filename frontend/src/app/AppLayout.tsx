@@ -406,6 +406,7 @@ export const allNavItems: readonly NavGroup[] = [
             { key: '/hrms/leave-balances', label: 'Leave Balances' },
             { key: '/hrms/leave-requests', label: 'Leave Requests' },
             { key: '/hrms/attendance', label: 'Attendance' },
+            { key: '/hrms/attendance-imports', label: 'Attendance Import' },
         ],
     },
     {

@@ -1,8 +1,14 @@
 import { api } from '@/lib/api';
 import { compactParams } from '@/lib/listParams';
 import type { Paginated } from '@/lib/types';
+import type { PunchEmployee } from './punchReport';
 import type {
     Attendance,
+    AttendanceImport,
+    AttendanceImportLine,
+    AttendanceImportLineListParams,
+    AttendanceImportListParams,
+    AttendanceImportResolution,
     AttendanceListParams,
     Employee,
     EmployeeListParams,
@@ -147,5 +153,66 @@ export interface MarkAttendancePayload {
 
 export async function markAttendance(payload: MarkAttendancePayload): Promise<Attendance> {
     const { data } = await api.post<{ data: Attendance }>('/hrms/attendance/mark', payload);
+    return data.data;
+}
+
+// ---- the punch-report import (03-Sep design, Track 2) --------------------
+
+/** One page of import runs, newest first, narrowed and paged by the server. */
+export async function listAttendanceImports(params: AttendanceImportListParams = {}): Promise<Paginated<AttendanceImport>> {
+    const { data } = await api.get<Paginated<AttendanceImport>>('/hrms/attendance-imports', { params: compactParams(params) });
+    return data;
+}
+
+export async function getAttendanceImport(id: number): Promise<AttendanceImport> {
+    const { data } = await api.get<{ data: AttendanceImport }>(`/hrms/attendance-imports/${id}`);
+    return data.data;
+}
+
+export interface CreateAttendanceImportPayload {
+    period_from: string;
+    period_to: string;
+    source: 'pooja';
+    file_name?: string | null;
+    employees: PunchEmployee[];
+}
+
+/** The parsed workbook, as rows — no file leaves the browser. */
+export async function createAttendanceImport(payload: CreateAttendanceImportPayload): Promise<AttendanceImport> {
+    const { data } = await api.post<{ data: AttendanceImport }>('/hrms/attendance-imports', payload);
+    return data.data;
+}
+
+/** One page of a run's lines, open issues first, narrowed and paged by the server. */
+export async function listAttendanceImportLines(
+    id: number,
+    params: AttendanceImportLineListParams = {},
+): Promise<Paginated<AttendanceImportLine>> {
+    const { data } = await api.get<Paginated<AttendanceImportLine>>(`/hrms/attendance-imports/${id}/lines`, {
+        params: compactParams(params),
+    });
+    return data;
+}
+
+export interface ResolveAttendanceImportLinePayload {
+    resolution: AttendanceImportResolution;
+    check_in?: string | null;
+    check_out?: string | null;
+    notes?: string | null;
+}
+
+/** The reviewer's answer for one employee-day; the server writes attendances at once. */
+export async function resolveAttendanceImportLine(
+    id: number,
+    lineId: number,
+    payload: ResolveAttendanceImportLinePayload,
+): Promise<AttendanceImportLine> {
+    const { data } = await api.patch<{ data: AttendanceImportLine }>(`/hrms/attendance-imports/${id}/lines/${lineId}`, payload);
+    return data.data;
+}
+
+/** Every clean and answered line into attendances; a 422 with the open count otherwise. */
+export async function applyAttendanceImport(id: number): Promise<AttendanceImport> {
+    const { data } = await api.post<{ data: AttendanceImport }>(`/hrms/attendance-imports/${id}/apply`);
     return data.data;
 }

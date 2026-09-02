@@ -247,6 +247,10 @@ export const HELP_BY_ROUTE: Record<string, HelpEntry> = {
         what: 'Mark and read daily attendance for employees.',
         actions: ['Mark Attendance'],
     },
+    '/hrms/attendance-imports': {
+        what: 'Upload the Pooja punch report, correct the days it could not decide, apply the month to attendance, and download the month sheet.',
+        actions: ['Upload punch report', 'Correct', 'Apply', 'Download month sheet'],
+    },
 
     // Payroll
     '/payroll/salary-components': {
