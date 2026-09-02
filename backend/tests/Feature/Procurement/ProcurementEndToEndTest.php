@@ -11,6 +11,7 @@ use App\Modules\Procurement\Models\GoodsReceiptNote;
 use App\Modules\Procurement\Models\PurchaseOrder;
 use App\Modules\Procurement\Models\Vendor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Tests\TestCase;
@@ -50,6 +51,8 @@ class ProcurementEndToEndTest extends TestCase
 
     private User $desk;
 
+    private User $approver;
+
     private Vendor $vendor;
 
     private Item $resin;
@@ -63,12 +66,16 @@ class ProcurementEndToEndTest extends TestCase
         config(['production.traceability_enabled' => true]);
 
         $this->desk = User::factory()->create(['name' => 'Procurement Desk', 'is_active' => true]);
+        // DEC-20260902-025: the desk raises every requisition in this flow,
+        // so a second user is needed to approve one — the requester cannot.
+        $this->approver = User::factory()->create(['name' => 'Procurement Approver', 'is_active' => true]);
         foreach ([
             'procurement.view', 'procurement.manage',
             'inventory.view', 'inventory.manage',
         ] as $permission) {
             Permission::findOrCreate($permission, 'web');
             $this->desk->givePermissionTo($permission);
+            $this->approver->givePermissionTo($permission);
         }
         Sanctum::actingAs($this->desk);
 
@@ -95,7 +102,7 @@ class ProcurementEndToEndTest extends TestCase
             'lines' => [['item_id' => $this->resin->id, 'quantity' => '1000.0000']],
         ])->assertSuccessful()->json('data');
 
-        $this->postJson("/api/v1/procurement/purchase-requisitions/{$requisition['id']}/approve")
+        $this->approve($requisition['id'])
             ->assertSuccessful()
             ->assertJsonPath('data.status', PurchaseRequisitionStatus::Approved->value);
 
@@ -276,10 +283,23 @@ class ProcurementEndToEndTest extends TestCase
             'lines' => [['item_id' => $this->resin->id, 'quantity' => $quantity]],
         ])->assertSuccessful()->json('data');
 
-        $this->postJson("/api/v1/procurement/purchase-requisitions/{$requisition['id']}/approve")
-            ->assertSuccessful();
+        $this->approve($requisition['id'])->assertSuccessful();
 
         return $requisition['id'];
+    }
+
+    /**
+     * DEC-20260902-025: the requester cannot decide their own requisition,
+     * so approval switches to a second procurement user and switches back
+     * to the desk — every other step in this flow is still $this->desk.
+     */
+    private function approve(int $requisitionId): TestResponse
+    {
+        Sanctum::actingAs($this->approver);
+        $response = $this->postJson("/api/v1/procurement/purchase-requisitions/{$requisitionId}/approve");
+        Sanctum::actingAs($this->desk);
+
+        return $response;
     }
 
     /** @return array{0: int, 1: int} [order id, order line id] */
