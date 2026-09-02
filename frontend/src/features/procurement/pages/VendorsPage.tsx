@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, Modal, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
+import { Button, Empty, Form, Input, Modal, Select, Space, Table, Tabs, Tag, Typography } from 'antd';
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Controller, useForm } from 'react-hook-form';
@@ -244,7 +244,31 @@ export default function VendorsPage() {
                         <ListEmpty
                             state={{ isPending, isError, error, refetch }}
                             entity="vendors"
-                            empty={search ? 'No vendors match this search.' : 'No vendors yet.'}
+                            empty={
+                                // I3 / DEC-20260902-026: every vendor is
+                                // UNCLASSIFIED until a person reviews them, so
+                                // on day one the three-class default matches
+                                // NOTHING and this screen would falsely claim
+                                // the master is empty. No sentence — just the
+                                // existing label plus a button that widens
+                                // the filter, exactly like Select's own
+                                // Unclassified option does.
+                                !unclassifiedFilter ? (
+                                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={search ? 'No vendors match this search.' : 'No vendors yet.'}>
+                                        <Button
+                                            size="small"
+                                            onClick={() => {
+                                                setPage(1);
+                                                setListParams({ classification: [...selectedClassification, UNCLASSIFIED_FILTER_VALUE] });
+                                            }}
+                                        >
+                                            Show unclassified
+                                        </Button>
+                                    </Empty>
+                                ) : (
+                                    search ? 'No vendors match this search.' : 'No vendors yet.'
+                                )
+                            }
                         />
                     ),
                 }}

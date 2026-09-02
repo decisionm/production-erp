@@ -24,7 +24,7 @@ import {
     tallyStateLine,
 } from '@/features/procurement/purchaseOrders';
 import { isUnclassified } from '@/features/procurement/purchasePicker';
-import { vendorPickerOptions } from '@/features/procurement/vendorClassification';
+import { vendorPickerOptionsWithFallback } from '@/features/procurement/vendorClassification';
 import type { PurchaseOrder } from '@/features/procurement/types';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { usePurchaseOrderListParams } from '@/features/procurement/usePurchaseOrderListParams';
@@ -91,8 +91,13 @@ export default function PurchaseOrdersPage() {
     // vendors only behind "Show all vendors" — vendorPickerOptions
     // (vendorClassification.ts) is the shared rule the Vendors tab uses too.
     const [showAllVendors, setShowAllVendors] = useState(false);
-    const vendorOptions = useMemo(
-        () => vendorPickerOptions(vendors?.data, showAllVendors),
+    // I3: on day one every vendor is unclassified (DEC-20260902-026), so the
+    // default view above matches nothing and the picker would open on Ant's
+    // bare "No data". The fallback keeps the picker usable and the checkbox
+    // reflects that it happened — the effective state stays visible rather
+    // than the screen quietly substituting a different filter.
+    const { options: vendorOptions, showAll: effectiveShowAllVendors } = useMemo(
+        () => vendorPickerOptionsWithFallback(vendors?.data, showAllVendors),
         [vendors, showAllVendors],
     );
     // DEC-20260902-023: the picker offers Raw and Packing material by
@@ -286,7 +291,7 @@ export default function PurchaseOrdersPage() {
                 vendorOptions={vendorOptions}
                 itemOptions={itemOptions}
                 raiseFrom={raiseFrom}
-                showAllVendors={showAllVendors}
+                showAllVendors={effectiveShowAllVendors}
                 onShowAllVendorsChange={setShowAllVendors}
                 showAdditional={showAdditional}
                 onShowAdditionalChange={setShowAdditional}
