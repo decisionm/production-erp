@@ -25,6 +25,7 @@ class PurchaseRequisition extends Model
             'needed_by_date' => 'date',
             'approved_at' => 'datetime',
             'rejected_at' => 'datetime',
+            'withdrawn_at' => 'datetime',
         ];
     }
 
@@ -47,6 +48,12 @@ class PurchaseRequisition extends Model
     public function rejectedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'rejected_by');
+    }
+
+    /** Deliberately NOT fillable — written only by the service at the moment of withdrawal. */
+    public function withdrawnBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'withdrawn_by');
     }
 
     /** The orders raised FROM this requisition (purchase_orders.purchase_requisition_id). */

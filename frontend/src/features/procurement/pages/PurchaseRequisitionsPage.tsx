@@ -6,11 +6,13 @@ import { Controller, useFieldArray, useForm, useWatch } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { listAllItems } from '@/features/inventory/api';
+import { useAuthStore } from '@/features/auth/store';
 import {
     approvePurchaseRequisition,
     createPurchaseRequisition,
     listPurchaseRequisitions,
     rejectPurchaseRequisition,
+    withdrawPurchaseRequisition,
 } from '@/features/procurement/api';
 import type { PurchaseRequisition, PurchaseRequisitionStatus } from '@/features/procurement/types';
 import { apiMessage } from '@/features/procurement/components/apiMessage';
@@ -20,6 +22,7 @@ import { poNumber } from '@/features/procurement/purchaseOrders';
 import { instant } from '@/features/tally-sync/drawer';
 import { itemLabel } from '@/lib/itemLabel';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
+import { showApiError } from '@/lib/showApiError';
 import { requisitionItemsLabel } from '@/features/procurement/requisitionItems';
 
 const requisitionSchema = z.object({
@@ -42,6 +45,7 @@ const STATUS_OPTIONS: { value: PurchaseRequisitionStatus | ''; label: string }[]
     { value: 'draft', label: 'Awaiting approval' },
     { value: 'approved', label: 'Approved' },
     { value: 'rejected', label: 'Rejected' },
+    { value: 'withdrawn', label: 'Withdrawn' },
 ];
 
 /**
@@ -59,6 +63,9 @@ function decisionLine(row: PurchaseRequisition): string {
         return row.rejected_by
             ? `Rejected by ${row.rejected_by}${row.rejected_at ? ` · ${instant(row.rejected_at)}` : ''}`
             : 'Rejected (decider not recorded — predates the trail)';
+    }
+    if (row.status === 'withdrawn') {
+        return row.withdrawn_by ? `Withdrawn by ${row.withdrawn_by}` : 'Withdrawn';
     }
 
     return 'Awaiting approval';
@@ -79,6 +86,7 @@ function decisionLine(row: PurchaseRequisition): string {
  * a requisition ride the row as links.
  */
 export default function PurchaseRequisitionsPage() {
+    const me = useAuthStore((s) => s.user);
     const [modalOpen, setModalOpen] = useState(false);
     const [detailRequisition, setDetailRequisition] = useState<PurchaseRequisition | null>(null);
     const [page, setPage] = useState(1);
@@ -154,6 +162,11 @@ export default function PurchaseRequisitionsPage() {
         mutationFn: rejectPurchaseRequisition,
         onSuccess: invalidate,
         onError: refused('Could not reject the requisition'),
+    });
+    const withdrawMutation = useMutation({
+        mutationFn: withdrawPurchaseRequisition,
+        onSuccess: invalidate,
+        onError: (error: unknown) => showApiError(error, 'Could not withdraw the requisition'),
     });
 
     /**
@@ -303,49 +316,65 @@ export default function PurchaseRequisitionsPage() {
                     },
                     {
                         title: 'Actions',
-                        render: (_, row) => (
-                            <Space>
-                                <Button size="small" onClick={() => setDetailRequisition(row)}>
-                                    View
-                                </Button>
-                                {row.status === 'draft' && (
-                                    <>
-                                        <Button
-                                            size="small"
-                                            onClick={() => approveMutation.mutate(row.id)}
-                                            loading={approveMutation.isPending}
-                                        >
-                                            Approve
-                                        </Button>
-                                        <Button
-                                            size="small"
-                                            danger
-                                            onClick={() =>
-                                                // Rejecting is irreversible and sat one
-                                                // mis-tap from Approve. The confirm names
-                                                // the requisition so the dialog is about a
-                                                // row rather than about a verb.
-                                                Modal.confirm({
-                                                    title: `Reject requisition PR-${row.id}?`,
-                                                    content: 'This cannot be undone.',
-                                                    okText: 'Reject',
-                                                    okButtonProps: { danger: true },
-                                                    onOk: () => rejectMutation.mutate(row.id),
-                                                })
-                                            }
-                                            loading={rejectMutation.isPending}
-                                        >
-                                            Reject
-                                        </Button>
-                                    </>
-                                )}
-                                {row.status === 'approved' && (
-                                    <Button size="small" type="primary" ghost onClick={() => raisePurchaseOrder(row)}>
-                                        Raise PO
+                        render: (_, row) => {
+                            // DEC-20260902-025: no Administrator exemption — the
+                            // server refuses a self-decision outright, so a row
+                            // the viewer raised never offers Approve/Reject.
+                            const isOwnRequisition = me != null && row.requested_by_id === me.id;
+
+                            return (
+                                <Space>
+                                    <Button size="small" onClick={() => setDetailRequisition(row)}>
+                                        View
                                     </Button>
-                                )}
-                            </Space>
-                        ),
+                                    {row.status === 'draft' && !isOwnRequisition && (
+                                        <>
+                                            <Button
+                                                size="small"
+                                                onClick={() => approveMutation.mutate(row.id)}
+                                                loading={approveMutation.isPending}
+                                            >
+                                                Approve
+                                            </Button>
+                                            <Button
+                                                size="small"
+                                                danger
+                                                onClick={() =>
+                                                    // Rejecting is irreversible and sat one
+                                                    // mis-tap from Approve. The confirm names
+                                                    // the requisition so the dialog is about a
+                                                    // row rather than about a verb.
+                                                    Modal.confirm({
+                                                        title: `Reject requisition PR-${row.id}?`,
+                                                        content: 'This cannot be undone.',
+                                                        okText: 'Reject',
+                                                        okButtonProps: { danger: true },
+                                                        onOk: () => rejectMutation.mutate(row.id),
+                                                    })
+                                                }
+                                                loading={rejectMutation.isPending}
+                                            >
+                                                Reject
+                                            </Button>
+                                        </>
+                                    )}
+                                    {row.status === 'draft' && isOwnRequisition && (
+                                        <Button
+                                            size="small"
+                                            onClick={() => withdrawMutation.mutate(row.id)}
+                                            loading={withdrawMutation.isPending}
+                                        >
+                                            Withdraw
+                                        </Button>
+                                    )}
+                                    {row.status === 'approved' && (
+                                        <Button size="small" type="primary" ghost onClick={() => raisePurchaseOrder(row)}>
+                                            Raise PO
+                                        </Button>
+                                    )}
+                                </Space>
+                            );
+                        },
                     },
                 ]}
             />

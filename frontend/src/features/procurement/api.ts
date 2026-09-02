@@ -132,6 +132,12 @@ export async function rejectPurchaseRequisition(id: number): Promise<PurchaseReq
     return data.data;
 }
 
+/** DEC-20260902-025: the requester's own withdrawal of their still-draft requisition. */
+export async function withdrawPurchaseRequisition(id: number): Promise<PurchaseRequisition> {
+    const { data } = await api.post<{ data: PurchaseRequisition }>(`/procurement/purchase-requisitions/${id}/withdraw`);
+    return data.data;
+}
+
 /**
  * The list, narrowed SERVER-SIDE by ListPurchaseOrdersRequest's filters
  * (status — one or several —, vendor, item, order-date range, `q`, sort,

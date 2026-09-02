@@ -44,7 +44,7 @@ export interface Vendor {
     created_at: string;
 }
 
-export type PurchaseRequisitionStatus = 'draft' | 'approved' | 'rejected';
+export type PurchaseRequisitionStatus = 'draft' | 'approved' | 'rejected' | 'withdrawn';
 
 /**
  * How much of a requisition line has been ordered, in one word — the
@@ -86,11 +86,16 @@ export interface PurchaseRequisition {
     document_number?: string;
     status: PurchaseRequisitionStatus;
     requested_by: string | null;
+    /** The id behind `requested_by` — the current user's own requisitions are found by comparing against it. */
+    requested_by_id: number | null;
     /** The decision trail — null on a requisition decided before the stamps existed. */
     approved_by?: string | null;
     approved_at?: string | null;
     rejected_by?: string | null;
     rejected_at?: string | null;
+    /** DEC-20260902-025: the requester's own withdrawal — not a decision, so no approver stamp. */
+    withdrawn_by?: string | null;
+    withdrawn_at?: string | null;
     needed_by_date: string | null;
     notes: string | null;
     lines: PurchaseRequisitionLine[];

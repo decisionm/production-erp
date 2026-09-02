@@ -19,6 +19,7 @@ class PurchaseRequisitionResource extends JsonResource
             'document_number' => $requisition->documentNumber(),
             'status' => $this->status->value,
             'requested_by' => $this->whenLoaded('requestedBy', fn () => $this->requestedBy?->name),
+            'requested_by_id' => $this->requested_by,
             // The decision trail (28-Aug audit finding 8). NULL name + NULL
             // instant on a requisition decided before the stamps existed —
             // the page words that honestly rather than inventing an approver.
@@ -26,6 +27,8 @@ class PurchaseRequisitionResource extends JsonResource
             'approved_at' => $this->approved_at?->toIso8601String(),
             'rejected_by' => $this->whenLoaded('rejectedBy', fn () => $this->rejectedBy?->name),
             'rejected_at' => $this->rejected_at?->toIso8601String(),
+            'withdrawn_by' => $this->whenLoaded('withdrawnBy', fn () => $this->withdrawnBy?->name),
+            'withdrawn_at' => $this->withdrawn_at?->toIso8601String(),
             'needed_by_date' => $this->needed_by_date?->toDateString(),
             'notes' => $this->notes,
             'lines' => PurchaseRequisitionLineResource::collection($this->whenLoaded('lines')),
