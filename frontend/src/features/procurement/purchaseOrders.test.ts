@@ -22,6 +22,7 @@ import {
     isPurchasableItem,
     poNumber,
     purchasableItemOptions,
+    purchaseOrderItemOptions,
     rateCell,
     nextDueDate,
     quantitiesByUom,
@@ -958,6 +959,49 @@ describe('purchasableItemOptions', () => {
     it('survives a picker whose list has not loaded yet', () => {
         expect(purchasableItemOptions(undefined)).toEqual([]);
         expect(purchasableItemOptions(null, [1])).toEqual([]);
+    });
+});
+
+/**
+ * DEC-20260902-023 composed onto `purchasableItemOptions`. What broke once
+ * and is pinned here: composing on a category-narrowed item list (instead
+ * of the full one) makes `purchasableItemOptions`'s own `keepIds` branch
+ * unreachable, because an archived item never survives to be seen by that
+ * call — a kept, since-archived line on an amended draft would render
+ * blank instead of "(Retired)". `purchaseOrderItemOptions` must give
+ * `purchasableItemOptions` the FULL list and narrow only the OFFERED set
+ * afterward.
+ */
+describe('purchaseOrderItemOptions (DEC-20260902-023, composed with purchasableItemOptions)', () => {
+    const RESIN = { id: 1, sku: 'RESIN', name: 'Relpet', is_active: true, category: 'raw_material' } as Item;
+    const ARCHIVED_RESIN = { id: 2, sku: 'OLD-RESIN', name: 'Old Relpet', is_active: false, category: 'raw_material' } as Item;
+    const FINISHED_GOOD = { id: 3, sku: 'BTL', name: 'Bottle', is_active: true, category: 'finished_good' } as Item;
+    const UNCLASSIFIED = { id: 4, sku: 'MYST', name: 'Mystery Item', is_active: true, category: null } as Item;
+
+    it('keeps an archived raw-material item the order being amended already names, marked (Retired)', () => {
+        const options = purchaseOrderItemOptions([RESIN, ARCHIVED_RESIN], false, [2]);
+
+        expect(options.map((o) => o.value)).toEqual([1, 2]);
+        expect(options.find((o) => o.value === 2)?.disabled).toBe(true);
+        expect(options.find((o) => o.value === 2)?.label).toContain('(Retired)');
+    });
+
+    it('drops the same archived item once it is not on the order being amended', () => {
+        expect(purchaseOrderItemOptions([RESIN, ARCHIVED_RESIN], false, []).map((o) => o.value)).toEqual([1]);
+    });
+
+    it('never offers a finished good for a NEW selection, whatever the choice — but keeps one already on the amended order', () => {
+        expect(purchaseOrderItemOptions([RESIN, FINISHED_GOOD], false, []).some((o) => o.value === 3)).toBe(false);
+        expect(purchaseOrderItemOptions([RESIN, FINISHED_GOOD], true, []).some((o) => o.value === 3)).toBe(false);
+        expect(purchaseOrderItemOptions([RESIN, FINISHED_GOOD], false, [3]).some((o) => o.value === 3)).toBe(true);
+    });
+
+    it('flags an offered unclassified item, and leaves a kept archived item\'s (Retired) label alone', () => {
+        const options = purchaseOrderItemOptions([RESIN, UNCLASSIFIED, ARCHIVED_RESIN], true, [2]);
+
+        expect(options.find((o) => o.value === 4)?.label).toContain('Unclassified — reason required');
+        expect(options.find((o) => o.value === 2)?.label).not.toContain('Unclassified');
+        expect(options.find((o) => o.value === 2)?.label).toContain('(Retired)');
     });
 });
 

@@ -18,7 +18,7 @@ import {
     canLabels,
     hasActiveFilters,
     poNumber,
-    purchasableItemOptions,
+    purchaseOrderItemOptions,
     reconcileReceipts,
     uomPhrase,
     statusTag,
@@ -90,33 +90,24 @@ export default function PurchaseOrdersPage() {
     });
     // DEC-20260902-023: the picker offers Raw and Packing material by
     // default; Other and unclassified items only behind "Show additional
-    // purchasable items", and a finished good never at all, whatever the
-    // choice (purchasePickerItems). `purchasableItemOptions` still supplies
-    // the option shape — but it is composed on the ALREADY category-filtered
-    // list, so its archived-item `keepIds` branch can no longer fire: an
-    // item `purchasePickerItems` dropped for being inactive never reaches
-    // that call to be kept as "(Retired)". An amended draft naming a
-    // since-archived item now renders that line blank instead — a known gap
-    // of this composition, not new drift in `purchasableItemOptions` itself.
-    // The FILTER bar builds its own options and is deliberately left alone:
-    // past orders must stay findable.
+    // purchasable items", and a finished good never at all UNLESS it is
+    // already on the order being amended — `purchaseOrderItemOptions`
+    // (purchaseOrders.ts) is the composition with `purchasableItemOptions`,
+    // and its docblock says why the FULL item list has to reach that call
+    // for a kept archived item to still render "(Retired)".
     //
-    // `amendedItemIds` is what tolerates a line the payload served without an
-    // item — see its docblock. `purchasableItemOptions` builds its label from
-    // `itemLabel` alone and knows nothing of `warning`, so the "· Unclassified
-    // — reason required" suffix is joined back on afterward from `pickerItems`.
+    // `amendedItemIds` is what tolerates a line the payload served without
+    // an item — see its docblock. The FILTER bar builds its own options and
+    // is deliberately left alone: past orders must stay findable.
     const [showAdditional, setShowAdditional] = useState(false);
-    const pickerItems = useMemo(() => purchasePickerItems(items?.data, showAdditional), [items, showAdditional]);
     const unclassifiedItemIds = useMemo(
-        () => new Set(pickerItems.filter((p) => p.warning).map((p) => p.id)),
-        [pickerItems],
+        () => new Set(purchasePickerItems(items?.data, showAdditional).filter((p) => p.warning).map((p) => p.id)),
+        [items, showAdditional],
     );
-    const itemOptions = useMemo(() => {
-        const warningById = new Map(pickerItems.filter((p) => p.warning).map((p) => [p.id, p.warning as string]));
-        return purchasableItemOptions(pickerItems.map((p) => p.item), amendedItemIds(amendOrder?.lines)).map((option) =>
-            warningById.has(option.value) ? { ...option, label: `${option.label} · ${warningById.get(option.value)}` } : option,
-        );
-    }, [pickerItems, amendOrder]);
+    const itemOptions = useMemo(
+        () => purchaseOrderItemOptions(items?.data, showAdditional, amendedItemIds(amendOrder?.lines)),
+        [items, showAdditional, amendOrder],
+    );
 
     const orders = useMemo(() => data?.data ?? [], [data]);
     const rowFor = (id: number | null) => (id === null ? undefined : orders.find((order) => order.id === id));

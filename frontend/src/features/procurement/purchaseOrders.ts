@@ -1,6 +1,7 @@
 import { type PickerOption, retiredOptionLabel } from '@/components/configuration/pickerOptions';
 import { statusColor as tallyStatusColor, statusLabel as tallyStatusLabel } from '@/features/tally-sync/drawer';
 import type { Item } from '@/features/inventory/types';
+import { purchasePickerItems } from '@/features/procurement/purchasePicker';
 import type { TallyLink } from '@/features/sales/types';
 import { itemLabel } from '@/lib/itemLabel';
 import { fromScaled, toScaled, trimQuantity } from '@/lib/scaledDecimal';
@@ -1103,6 +1104,43 @@ export function purchasableItemOptions(
     }
 
     return [...offered, ...kept];
+}
+
+/**
+ * `purchasableItemOptions` composed with DEC-20260902-023's
+ * `purchasePickerItems`, for a purchase-order line specifically.
+ *
+ * `purchasableItemOptions` is given the FULL item list, not a
+ * category-narrowed one — its own `keepIds` branch needs every archived
+ * item present to label a kept one "(Retired)", exactly as it did before
+ * this rule existed. The category/default filter narrows only what is
+ * OFFERED for a NEW selection: an option survives if `purchasePickerItems`
+ * offers its id (Raw/Packing by default, Other and unclassified behind
+ * `showAdditional`, never a finished good) OR the order being amended
+ * already names it (`keepIds`) — an item already on a draft is never
+ * silently dropped, finished good or not.
+ *
+ * `purchasableItemOptions` builds its label from `itemLabel` alone and
+ * knows nothing of `purchasePickerItems`'s `warning`, so the
+ * "· Unclassified — reason required" suffix is joined back on afterward,
+ * by id. A kept archived item's "(Retired)" label is left exactly as
+ * `purchasableItemOptions` built it.
+ */
+export function purchaseOrderItemOptions(
+    items: readonly Item[] | undefined | null,
+    showAdditional: boolean,
+    keepIds: readonly number[] = [],
+): PickerOption[] {
+    const pickerItems = purchasePickerItems(items, showAdditional);
+    const offeredIds = new Set(pickerItems.map((p) => p.id));
+    const warningById = new Map(pickerItems.filter((p) => p.warning).map((p) => [p.id, p.warning as string]));
+    const keep = new Set(keepIds);
+
+    return purchasableItemOptions(items, keepIds)
+        .filter((option) => offeredIds.has(option.value) || keep.has(option.value))
+        .map((option) =>
+            warningById.has(option.value) ? { ...option, label: `${option.label} · ${warningById.get(option.value)}` } : option,
+        );
 }
 
 /** The first argument that is a non-empty string, else null. */
