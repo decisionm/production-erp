@@ -3,6 +3,7 @@
 namespace Tests\Feature\Regression\Support;
 
 use App\Models\User;
+use App\Modules\Assistant\Models\AskErpConversation;
 use App\Modules\Compliance\Models\GstRate;
 use App\Modules\Compliance\Models\GstRegistration;
 use App\Modules\Core\Services\PermissionService;
@@ -438,6 +439,9 @@ trait RegressionFixtures
         $gstRate = GstRate::create(['hsn_sac_code' => '99999999', 'description' => 'Regression rate', 'rate_percent' => '18.00']);
         $gstRegistration = GstRegistration::create(['gstin' => '33AAAAA0000A1Z5', 'state_code' => '33', 'state_name' => 'Regression State', 'is_primary' => true]);
 
+        // ---- Ask ERP -------------------------------------------------------
+        $conversation = AskErpConversation::create(['user_id' => $actor->id, 'title' => 'Regression question']);
+
         return $this->fx = compact(
             'attendanceImport',
             'bottle', 'resin', 'masterbatch', 'carton', 'fg', 'rm', 'batch', 'serial',
@@ -455,6 +459,7 @@ trait RegressionFixtures
             'lead', 'opportunity', 'quotation',
             'gstRate', 'gstRegistration',
             'materialRequest', 'storeIssue',
+            'conversation',
         );
     }
 }
