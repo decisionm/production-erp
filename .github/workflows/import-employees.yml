@@ -1,0 +1,130 @@
+name: Import employees (Pooja master list)
+
+# Loads the employee master from database/data/employees-2026-09.json into
+# the live database, ON THE SERVER, over the same SSH key the deploy uses.
+#
+# Why this exists: the 03-Sep design (Track 1) loads the 63 people on the
+# owner's two paper lists, cross-matched to the Pooja punch app, plus the
+# two app-only people, as real employee rows. Every live master-data change
+# is a manual GitHub workflow wrapping an artisan command; dry-run first,
+# always (deploy-live-verify).
+#
+# WHY IT IS NOT A MIGRATION. Loading people is not a schema change and must
+# not happen as a side effect of a deploy. A person runs this, reads which
+# rows it would create or update, and only then runs it again with write=true.
+#
+# WHAT IT DOES AND REFUSES TO DO. Matched on employee_code. An existing row
+# is updated only in name / department / designation / status and only
+# where the value differs; nothing is deleted; a row the file does not name
+# — the seven demo employees included — is never touched. A duplicate code
+# inside the file is refused before anything is written.
+#
+# Manual only — never on push. Defaults to a DRY RUN.
+
+# Least privilege: nothing here writes to the repository. Every workflow uses
+# only checkout, setup-node/php and same-run artifacts, and reaches the server
+# over SSH with a deploy key — never the GITHUB_TOKEN. Without this block the
+# token is repository-default, which on a push-triggered workflow that runs
+# `npm ci` (arbitrary lockfile postinstall) is a write-capable token one
+# compromised transitive dependency away from the pipeline that rsyncs to a
+# live factory. Read is all any of these need.
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      write:
+        description: 'Actually write. Leave false for a dry run that changes nothing.'
+        type: boolean
+        default: false
+
+concurrency:
+  group: import-employees
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          # Same diagnostics as the deploy workflow: ssh-keyscan can exit 0
+          # having collected nothing, so check the output rather than the code.
+          # The host intermittently answers nothing: 10 of the last 100 runs failed
+          # here, and EVERY one cleared on a re-run of the SAME commit — it is the
+          # host, not the change. Retrying in-workflow removes that manual re-run.
+          # It does NOT weaken the check: if all three attempts come back empty the
+          # step still fails loudly, which is the state that must never deploy.
+          keys=""
+          for attempt in 1 2 3; do
+            keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+            if [ -n "$keys" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "ssh-keyscan attempt ${attempt} returned no host key; retrying in $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            fi
+          done
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Check hPanel → Advanced → SSH Access (it can be off or IP-restricted) and whether brute-force protection has banned the runner. Wait several minutes before re-running — retrying inside the ban window extends it."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      # Inputs cross into shell ONLY via env: — a `${{ }}` expression pasted
+      # into a run: body is substituted as text before bash parses it, which
+      # is the workflow-injection shape. `write` is declared boolean, but
+      # whether GitHub enforces the type for API-dispatched runs is not
+      # something this repo can verify, and this is a workflow that writes
+      # the employee master. So it is treated as untrusted text and compared,
+      # never interpolated into a command.
+      - name: Report what is about to run
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+        run: |
+          set -euo pipefail
+          if [ "$WRITE_RAW" = "true" ]; then
+            echo "::warning::WRITING the employee master to the live database. Rows are created or updated on employee_code; nothing is deleted."
+          else
+            echo "Dry run — nothing will be written."
+          fi
+
+      - name: Run the import
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+        run: |
+          set -euo pipefail
+          set -o pipefail
+
+          # The remote command is built from literals only. The input decides
+          # WHICH literal, and never contributes text to the command.
+          REMOTE="cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan hrms:import-employees database/data/employees-2026-09.json"
+          if [ "$WRITE_RAW" = "true" ]; then
+            REMOTE="$REMOTE --write"
+          fi
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "$REMOTE" \
+            2>&1 | tee import-output.txt
+
+      - name: Summarise
+        if: always()
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+        run: |
+          {
+            echo "### Import employees (Pooja master list)"
+            echo
+            echo "write: \`${WRITE_RAW}\`"
+            echo
+            echo '```'
+            cat import-output.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
