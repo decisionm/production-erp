@@ -2394,7 +2394,12 @@ gets recorded as answered.
 **Blocks:** nothing. Both answers are the shipped behaviour; what changes is
 where the office does the typing. *Open since 2026-08-31.*
 
-## Q87 · How should a COUNTED material record what physically arrived?
+## Q87 · How should a COUNTED material record what physically arrived? — PARTLY RESOLVED
+
+**Partly resolved 2026-09-02 by DEC-20260902-013:** a counted arrival DOES
+wait for incoming QA — the whole line quantity is held until the inspection
+records accepted and rejected pieces, with no bags needed. Still open: what ONE
+unit of a counted arrival is, and what carries its barcode.
 
 Raised by answering Q77, not instead of it. The owner's answer there was
 "every purchased material must record its lots and bags", and that is now

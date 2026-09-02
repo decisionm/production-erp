@@ -270,8 +270,16 @@ purchase rates."
   figure ends inside on hold; the build replaces the figure with bag selection.
   Any bag already stuck on hold on live is counted before the build, never
   assumed.
+- **VERIFIED as a decision:** DEC-20260902-013. A counted arrival waits for
+  incoming QA on its whole line quantity, no bags needed, enforced at the
+  balance like the weighed hold. Rejected pieces leave stock through Rejections
+  Out. Q87 part two closed.
+- **GAP:** today a counted line is issuable the moment its GRN is saved, and a
+  counted rejection moves no stock; the build adds the quantity hold and the
+  Rejections Out issue for counted lines.
 - **OPEN (asked one at a time):**
-  1. Counted packaging: Q87.
+  1. Q87 parts one and three: what is one unit of a counted arrival, and what
+     carries its barcode?
   2. The Tally rejection voucher: Accounts, not the floor.
 
 ## Sections still to capture
