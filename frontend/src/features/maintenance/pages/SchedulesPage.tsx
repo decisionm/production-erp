@@ -1,12 +1,23 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { createMaintenanceSchedule, generateDueWorkOrders, listAllAssets, listMaintenanceSchedules } from '@/features/maintenance/api';
+import {
+    SCHEDULE_DEFAULT_SORT,
+    SCHEDULE_LIST_SPEC,
+    SCHEDULE_SORT_FIELDS,
+    type ScheduleListParams,
+    scheduleServerFilters,
+    schedulesQueryKey,
+} from '@/features/maintenance/scheduleList';
 import type { MaintenanceSchedule } from '@/features/maintenance/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const scheduleSchema = z.object({
     asset_id: z.number({ error: 'Asset is required' }),
@@ -20,7 +31,15 @@ export default function SchedulesPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['maintenance', 'schedules'], queryFn: () => listMaintenanceSchedules() });
+    // THE LIST'S VIEW IS ITS URL (useListParams): sort, page, page size and
+    // the asset deep link, all answered by the SERVER over the whole list.
+    const { params, setParams, setPage } = useListParams<ScheduleListParams>(SCHEDULE_LIST_SPEC);
+    const filters = useMemo(() => scheduleServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: schedulesQueryKey(filters),
+        queryFn: () => listMaintenanceSchedules(filters),
+        placeholderData: (previous) => previous,
+    });
     const { data: assets } = useQuery({ queryKey: ['maintenance', 'assets', 'all'], queryFn: listAllAssets });
     // WS-B: a RETIRED asset takes no new maintenance work. `under_maintenance`
     // deliberately stays selectable — an asset being worked on is exactly the
@@ -80,16 +99,44 @@ export default function SchedulesPage() {
             </Space>
 
             <Table<MaintenanceSchedule>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries; the list is paginated, so sorting the
+                // loaded page would misorder the whole result set.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, SCHEDULE_SORT_FIELDS, SCHEDULE_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'schedules')}
                 columns={[
+                    // The asset column shows the relation's code and name, not
+                    // the foreign key — no server column to sort it on.
                     { title: 'Asset', render: (_, row) => `${row.asset.code} — ${row.asset.name}` },
-                    { title: 'Name', dataIndex: 'name' },
-                    { title: 'Frequency (days)', dataIndex: 'frequency_days' },
-                    { title: 'Next Due', dataIndex: 'next_due_date' },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, SCHEDULE_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Frequency (days)',
+                        dataIndex: 'frequency_days',
+                        key: 'frequency_days',
+                        sorter: true,
+                        sortOrder: columnSortOrder('frequency_days', params.sort, SCHEDULE_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Next Due',
+                        dataIndex: 'next_due_date',
+                        key: 'next_due_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('next_due_date', params.sort, SCHEDULE_DEFAULT_SORT),
+                    },
                 ]}
             />
 

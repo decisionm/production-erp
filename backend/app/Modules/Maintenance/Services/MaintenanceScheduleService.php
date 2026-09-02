@@ -2,8 +2,10 @@
 
 namespace App\Modules\Maintenance\Services;
 
+use App\Modules\Maintenance\Http\Requests\ListMaintenanceSchedulesRequest;
 use App\Modules\Maintenance\Models\MaintenanceSchedule;
 use App\Modules\Maintenance\Models\MaintenanceWorkOrder;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
@@ -11,12 +13,14 @@ class MaintenanceScheduleService
 {
     public function __construct(private readonly MaintenanceWorkOrderService $workOrders) {}
 
-    public function paginate(?int $assetId, int $perPage = 20): LengthAwarePaginator
+    /** Soonest due first unless a sort is asked for (ListMaintenanceSchedulesRequest::SORTABLE); id desc tiebreaks. */
+    public function paginate(?int $assetId, int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return MaintenanceSchedule::query()
+        $query = MaintenanceSchedule::query()
             ->when($assetId, fn ($query) => $query->where('asset_id', $assetId))
-            ->with('asset')
-            ->orderBy('next_due_date')
+            ->with('asset');
+
+        return ListSort::apply($query, $sort, ListMaintenanceSchedulesRequest::SORTABLE, 'next_due_date')
             ->paginate($perPage);
     }
 

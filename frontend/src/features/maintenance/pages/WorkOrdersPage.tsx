@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Descriptions, Drawer, Form, Input, InputNumber, message, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import BarcodeScanInput from '@/components/barcode/BarcodeScanInput';
@@ -20,6 +20,17 @@ import {
     startMaintenanceWorkOrder,
 } from '@/features/maintenance/api';
 import type { MaintenanceWorkOrder, MaintenanceWorkOrderStatus, MaintenanceWorkOrderType } from '@/features/maintenance/types';
+import {
+    WORK_ORDER_DEFAULT_SORT,
+    WORK_ORDER_LIST_SPEC,
+    WORK_ORDER_SORT_FIELDS,
+    type WorkOrderListParams,
+    workOrderServerFilters,
+    workOrdersQueryKey,
+} from '@/features/maintenance/workOrderList';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const createSchema = z.object({
     asset_id: z.number({ error: 'Asset is required' }),
@@ -61,7 +72,16 @@ export default function WorkOrdersPage() {
     const queryClient = useQueryClient();
     const user = useAuthStore((s) => s.user);
 
-    const { data, isLoading } = useQuery({ queryKey: ['maintenance', 'work-orders'], queryFn: () => listMaintenanceWorkOrders() });
+    // THE REGISTER'S VIEW IS ITS URL (useListParams): sort, page, page size
+    // and the asset deep link, all answered by the SERVER over the whole
+    // register.
+    const { params, setParams, setPage } = useListParams<WorkOrderListParams>(WORK_ORDER_LIST_SPEC);
+    const filters = useMemo(() => workOrderServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: workOrdersQueryKey(filters),
+        queryFn: () => listMaintenanceWorkOrders(filters),
+        placeholderData: (previous) => previous,
+    });
     const { data: assets } = useQuery({ queryKey: ['maintenance', 'assets', 'all'], queryFn: listAllAssets });
     const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
@@ -195,27 +215,80 @@ export default function WorkOrdersPage() {
             </Space>
 
             <Table<MaintenanceWorkOrder>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries; the register is paginated, so sorting the
+                // loaded page would misorder the whole result set.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, WORK_ORDER_SORT_FIELDS, WORK_ORDER_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'work orders')}
                 columns={[
+                    // The asset column shows the relation's code and name, not
+                    // the foreign key — no server column to sort it on.
                     { title: 'Asset', render: (_, row) => `${row.asset.code} — ${row.asset.name}` },
-                    { title: 'Type', dataIndex: 'type' },
+                    {
+                        title: 'Type',
+                        dataIndex: 'type',
+                        key: 'type',
+                        sorter: true,
+                        sortOrder: columnSortOrder('type', params.sort, WORK_ORDER_DEFAULT_SORT),
+                    },
                     {
                         title: 'Status',
                         dataIndex: 'status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, WORK_ORDER_DEFAULT_SORT),
                         render: (status: MaintenanceWorkOrderStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
-                    { title: 'Reported', dataIndex: 'reported_date' },
+                    {
+                        title: 'Reported',
+                        dataIndex: 'reported_date',
+                        key: 'reported_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('reported_date', params.sort, WORK_ORDER_DEFAULT_SORT),
+                    },
                     // parts_cost/total_cost arrive only for finance eyes (they
                     // embed the purchase rate, FC-06); a column that would show
                     // blanks for everyone else is not rendered — MaterialLotsPage
-                    // precedent. labor_cost is always present.
-                    ...(showsOrderCosts ? [{ title: 'Parts Cost', dataIndex: 'parts_cost' }] : []),
-                    { title: 'Labor Cost', dataIndex: 'labor_cost' },
-                    ...(showsOrderCosts ? [{ title: 'Total Cost', dataIndex: 'total_cost' }] : []),
+                    // precedent — and its sorter goes with it (the server
+                    // refuses the sort for the same eyes). labor_cost is always
+                    // present.
+                    ...(showsOrderCosts
+                        ? [
+                              {
+                                  title: 'Parts Cost',
+                                  dataIndex: 'parts_cost',
+                                  key: 'parts_cost',
+                                  sorter: true,
+                                  sortOrder: columnSortOrder('parts_cost', params.sort, WORK_ORDER_DEFAULT_SORT),
+                              },
+                          ]
+                        : []),
+                    {
+                        title: 'Labor Cost',
+                        dataIndex: 'labor_cost',
+                        key: 'labor_cost',
+                        sorter: true,
+                        sortOrder: columnSortOrder('labor_cost', params.sort, WORK_ORDER_DEFAULT_SORT),
+                    },
+                    ...(showsOrderCosts
+                        ? [
+                              {
+                                  title: 'Total Cost',
+                                  dataIndex: 'total_cost',
+                                  key: 'total_cost',
+                                  sorter: true,
+                                  sortOrder: columnSortOrder('total_cost', params.sort, WORK_ORDER_DEFAULT_SORT),
+                              },
+                          ]
+                        : []),
                     {
                         title: 'Actions',
                         render: (_, row) => (
