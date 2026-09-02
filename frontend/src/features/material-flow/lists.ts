@@ -19,6 +19,17 @@ import { type MaterialRequestStatus, type QueueStatusChoice, queueStatusFilter }
  * `status=all` is how the store reaches a request it has already finished.
  */
 
+/* ------------------------------- the order ------------------------------ */
+
+/** The columns the server orders material requests by (ListMaterialRequestsRequest). */
+export const MATERIAL_REQUEST_SORT_FIELDS: readonly string[] = ['id', 'requested_at', 'submitted_at', 'status'];
+
+/** The server's order when the URL names none: newest first. */
+export const MATERIAL_REQUEST_DEFAULT_SORT = '-id';
+
+/** Every `sort` the URL may carry, in the server's spelling: bare ascending, "-" descending. */
+const MATERIAL_REQUEST_SORT_OPTIONS: readonly string[] = MATERIAL_REQUEST_SORT_FIELDS.flatMap((field) => [field, `-${field}`]);
+
 /* ------------------------------ the queue ------------------------------- */
 
 export const QUEUE_STATUS_CHOICES: readonly QueueStatusChoice[] = [
@@ -39,13 +50,14 @@ export interface QueueListParams extends ListParams {
     item_id?: number;
     from?: string;
     to?: string;
+    sort?: string;
 }
 
 /** Module-level, as useListParams requires. */
 export const QUEUE_LIST_SPEC: ListParamsSpec = {
-    strings: ['status', 'from', 'to'],
+    strings: ['status', 'from', 'to', 'sort'],
     numbers: ['shift_id', 'work_center_id', 'item_id'],
-    allowed: { status: QUEUE_STATUS_CHOICES },
+    allowed: { status: QUEUE_STATUS_CHOICES, sort: MATERIAL_REQUEST_SORT_OPTIONS },
 };
 
 /** What the queue's dropdown shows for these params. */
@@ -81,11 +93,12 @@ export const REQUESTS_DEFAULT_STATUS: RequestStatusChoice = 'all';
 
 export interface RequestsListParams extends ListParams {
     status?: RequestStatusChoice;
+    sort?: string;
 }
 
 export const REQUESTS_LIST_SPEC: ListParamsSpec = {
-    strings: ['status'],
-    allowed: { status: REQUEST_STATUS_CHOICES },
+    strings: ['status', 'sort'],
+    allowed: { status: REQUEST_STATUS_CHOICES, sort: MATERIAL_REQUEST_SORT_OPTIONS },
 };
 
 export function requestsStatusChoice(params: RequestsListParams): RequestStatusChoice {

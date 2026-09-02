@@ -265,7 +265,16 @@ export async function cancelPurchaseOrder(id: number, reason: string): Promise<P
  * beside the read they feed, so the render test can seed the exact key the
  * page derives from its URL.
  */
-export const GOODS_RECEIPT_LIST_SPEC: ListParamsSpec = { numbers: ['po', 'grn'] };
+/** The columns the server sorts the register on (ListGoodsReceiptsRequest), besides id. */
+export const GOODS_RECEIPT_SORT_FIELDS: readonly string[] = ['id', 'received_date'];
+/** GoodsReceiptService's order when no sort is asked for: newest first. */
+export const GOODS_RECEIPT_DEFAULT_SORT = '-id';
+
+export const GOODS_RECEIPT_LIST_SPEC: ListParamsSpec = {
+    numbers: ['po', 'grn'],
+    strings: ['sort'],
+    allowed: { sort: GOODS_RECEIPT_SORT_FIELDS.flatMap((field) => [field, `-${field}`]) },
+};
 
 /** The page's URL → the request the server gets. Compacted: `{}` and `{ q: '' }` are one key. */
 export function goodsReceiptServerFilters(params: GoodsReceiptListParams): GoodsReceiptListFilters {

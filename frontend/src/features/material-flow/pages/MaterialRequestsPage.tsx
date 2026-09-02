@@ -6,6 +6,7 @@ import { itemLabel } from '@/lib/itemLabel';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { narrowingKeys } from '@/lib/listParams';
 import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { useListParams } from '@/lib/useListParams';
 import {
     apiRefusalMessage,
@@ -18,6 +19,8 @@ import {
 } from '../api';
 import RequestLinesTable from '../components/RequestLinesTable';
 import {
+    MATERIAL_REQUEST_DEFAULT_SORT,
+    MATERIAL_REQUEST_SORT_FIELDS,
     REQUESTS_LIST_SPEC,
     type RequestStatusChoice,
     type RequestsListParams,
@@ -253,6 +256,13 @@ export default function MaterialRequestsPage() {
                 rowKey="id"
                 sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries; the list is paginated, so sorting the loaded
+                // page would misorder the whole result set.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, MATERIAL_REQUEST_SORT_FIELDS, MATERIAL_REQUEST_DEFAULT_SORT) });
+                }}
                 loading={requestsQuery.isFetching}
                 dataSource={requestsQuery.data?.data}
                 pagination={serverPagination(requestsQuery.data?.meta, setPage, 'requests')}
@@ -261,9 +271,18 @@ export default function MaterialRequestsPage() {
                     expandedRowRender: (request) => <RequestLinesTable lines={request.lines} />,
                 }}
                 columns={[
-                    { title: 'Request', dataIndex: 'request_number' },
+                    {
+                        title: 'Request',
+                        key: 'id',
+                        dataIndex: 'request_number',
+                        sorter: true,
+                        sortOrder: columnSortOrder('id', params.sort, MATERIAL_REQUEST_DEFAULT_SORT),
+                    },
                     {
                         title: 'Status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, MATERIAL_REQUEST_DEFAULT_SORT),
                         render: (_, request) => (
                             <Tooltip title={REQUEST_STATUS_HELP[request.status]}>
                                 <Tag color={REQUEST_STATUS_TONE[request.status]}>{REQUEST_STATUS_LABEL[request.status]}</Tag>
@@ -271,7 +290,13 @@ export default function MaterialRequestsPage() {
                         ),
                     },
                     { title: 'Raised by', render: (_, request) => request.requested_by_name ?? '—' },
-                    { title: 'Raised at', render: (_, request) => request.requested_at ?? '—' },
+                    {
+                        title: 'Raised at',
+                        key: 'requested_at',
+                        sorter: true,
+                        sortOrder: columnSortOrder('requested_at', params.sort, MATERIAL_REQUEST_DEFAULT_SORT),
+                        render: (_, request) => request.requested_at ?? '—',
+                    },
                     { title: 'Shift', render: (_, request) => request.shift_name ?? '—' },
                     {
                         title: 'Machine / area',

@@ -26,8 +26,15 @@ import { billArithmetic, billStatusTag, billTallyLine } from '@/features/procure
 import { instant } from '@/features/tally-sync/drawer';
 import { itemLabel, itemPickerLabel } from '@/lib/itemLabel';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
+import { TABLE_STICKY } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 
 const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
+
+/** The columns the server sorts bills on (ListSupplierBillsRequest), besides id. */
+const SORT_FIELDS: readonly string[] = ['id', 'bill_date'];
+/** SupplierBillService's order when no sort is asked for: newest first. */
+const DEFAULT_SORT = '-id';
 
 interface DraftLine {
     key: number;
@@ -64,6 +71,7 @@ export default function SupplierBillsPage() {
     const [searchParams, setSearchParams] = useSearchParams();
     const [page, setPage] = useState(1);
     const [perPage, setPerPage] = useState(50);
+    const [sort, setSort] = useState<string | undefined>(undefined);
     const [detailBill, setDetailBill] = useState<SupplierBill | null>(null);
     const [formOpen, setFormOpen] = useState(false);
     const [editing, setEditing] = useState<SupplierBill | null>(null);
@@ -101,7 +109,7 @@ export default function SupplierBillsPage() {
         }, { replace: true });
     };
 
-    const filters = { status, q, page, per_page: perPage };
+    const filters = { status, q, page, per_page: perPage, sort };
     const billsQuery = useQuery({
         queryKey: ['procurement', 'supplier-bills', filters],
         queryFn: () => listSupplierBills(filters),
@@ -339,7 +347,16 @@ export default function SupplierBillsPage() {
 
             <Table<SupplierBill>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 rowKey="id"
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries; the list is paginated, so sorting the loaded
+                // page would misorder the whole result set.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setPage(1);
+                    setSort(sortParamFromSorter(sorter, SORT_FIELDS, DEFAULT_SORT));
+                }}
                 loading={billsQuery.isLoading}
                 dataSource={billsQuery.data?.data}
                 locale={{
@@ -364,10 +381,22 @@ export default function SupplierBillsPage() {
                     },
                 }}
                 columns={[
-                    { title: 'Bill', render: (_, row) => row.document_number },
+                    {
+                        title: 'Bill',
+                        key: 'id',
+                        sorter: true,
+                        sortOrder: columnSortOrder('id', sort, DEFAULT_SORT),
+                        render: (_, row) => row.document_number,
+                    },
                     { title: "Vendor's invoice no.", dataIndex: 'bill_number' },
                     { title: 'Vendor', render: (_, row) => `${row.vendor.code} — ${row.vendor.name}` },
-                    { title: 'Date', dataIndex: 'bill_date' },
+                    {
+                        title: 'Date',
+                        key: 'bill_date',
+                        dataIndex: 'bill_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('bill_date', sort, DEFAULT_SORT),
+                    },
                     {
                         title: 'Total',
                         align: 'right',

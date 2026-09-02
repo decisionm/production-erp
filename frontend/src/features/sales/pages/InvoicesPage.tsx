@@ -5,13 +5,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { createInvoice, issueInvoice, listInvoices, listSalesOrders } from '@/features/sales/api';
-import { hasActiveFilters } from '@/features/sales/filters';
+import { hasActiveFilters, SALES_DEFAULT_SORT, SALES_SORT_FIELDS } from '@/features/sales/filters';
 import SalesDocumentDrawer, { TallyLinkCell } from '@/features/sales/SalesDocumentDrawer';
 import SalesFilterBar from '@/features/sales/SalesFilterBar';
 import TallyMirrorPanel from '@/features/sales/TallyMirrorPanel';
 import type { Invoice, InvoiceStatus } from '@/features/sales/types';
 import { useSalesListParams } from '@/features/sales/useSalesListParams';
 import { listEmptyText } from '@/features/sales/drawer';
+import { TABLE_STICKY } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 
 const invoiceSchema = z.object({
     sales_order_id: z.number({ error: 'Sales order is required' }),
@@ -122,7 +124,15 @@ export default function InvoicesPage() {
 
             <Table<Invoice>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 rowKey="id"
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries; the list is paginated, so sorting the loaded
+                // page would misorder the whole result set.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setFilters((prev) => ({ ...prev, sort: sortParamFromSorter(sorter, SALES_SORT_FIELDS.invoice, SALES_DEFAULT_SORT) }));
+                }}
                 loading={isLoading}
                 dataSource={data?.data}
                 locale={{
@@ -142,7 +152,13 @@ export default function InvoicesPage() {
                         : false
                 }
                 columns={[
-                    { title: 'Number', render: (_, row) => <strong>{row.document_number ?? `INV-${row.id}`}</strong> },
+                    {
+                        title: 'Number',
+                        key: 'id',
+                        sorter: true,
+                        sortOrder: columnSortOrder('id', filters.sort, SALES_DEFAULT_SORT),
+                        render: (_, row) => <strong>{row.document_number ?? `INV-${row.id}`}</strong>,
+                    },
                     {
                         title: (
                             // Paid is never set by this ERP: receipts are recorded
@@ -169,7 +185,13 @@ export default function InvoicesPage() {
                             </Button>
                         ),
                     },
-                    { title: 'Invoice Date', dataIndex: 'invoice_date' },
+                    {
+                        title: 'Invoice Date',
+                        key: 'invoice_date',
+                        dataIndex: 'invoice_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('invoice_date', filters.sort, SALES_DEFAULT_SORT),
+                    },
                     { title: 'Due Date', dataIndex: 'due_date' },
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {

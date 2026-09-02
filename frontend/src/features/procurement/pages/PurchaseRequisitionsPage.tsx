@@ -24,7 +24,14 @@ import { instant } from '@/features/tally-sync/drawer';
 import { itemLabel } from '@/lib/itemLabel';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { showApiError } from '@/lib/showApiError';
+import { TABLE_STICKY } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { requisitionItemsLabel } from '@/features/procurement/requisitionItems';
+
+/** The columns this list sorts on, besides id (ListPurchaseRequisitionsRequest also allows created_at, which no column shows). */
+const SORT_FIELDS: readonly string[] = ['id', 'needed_by_date'];
+/** PurchaseRequisitionService's order when no sort is asked for: newest first. */
+const DEFAULT_SORT = '-id';
 
 const requisitionSchema = z.object({
     needed_by_date: z.string().optional(),
@@ -95,6 +102,7 @@ export default function PurchaseRequisitionsPage() {
     const [detailRequisition, setDetailRequisition] = useState<PurchaseRequisition | null>(null);
     const [page, setPage] = useState(1);
     const [perPage, setPerPage] = useState(50);
+    const [sort, setSort] = useState<string | undefined>(undefined);
     const [searchParams, setSearchParams] = useSearchParams();
     const navigate = useNavigate();
     const queryClient = useQueryClient();
@@ -117,7 +125,7 @@ export default function PurchaseRequisitionsPage() {
         );
     };
 
-    const filters = { status, q, page, per_page: perPage };
+    const filters = { status, q, page, per_page: perPage, sort };
     const { data, isLoading, isPending, isError, error, refetch } = useQuery({
         // The filters are part of the key, and the key still STARTS with the
         // prefix the invalidate uses, so creating or approving one refreshes
@@ -230,7 +238,16 @@ export default function PurchaseRequisitionsPage() {
 
             <Table<PurchaseRequisition>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 rowKey="id"
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries; the list is paginated, so sorting the loaded
+                // page would misorder the whole result set.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setPage(1);
+                    setSort(sortParamFromSorter(sorter, SORT_FIELDS, DEFAULT_SORT));
+                }}
                 loading={isLoading}
                 dataSource={data?.data}
                 locale={{
@@ -261,7 +278,13 @@ export default function PurchaseRequisitionsPage() {
                     },
                 }}
                 columns={[
-                    { title: 'Requisition', render: (_, row) => row.document_number ?? prNumber(row) },
+                    {
+                        title: 'Requisition',
+                        key: 'id',
+                        sorter: true,
+                        sortOrder: columnSortOrder('id', sort, DEFAULT_SORT),
+                        render: (_, row) => row.document_number ?? prNumber(row),
+                    },
                     {
                         title: 'Status',
                         dataIndex: 'status',
@@ -284,7 +307,13 @@ export default function PurchaseRequisitionsPage() {
                                 <Typography.Text style={{ fontSize: 12 }}>{decisionLine(row)}</Typography.Text>
                             ),
                     },
-                    { title: 'Needed By', dataIndex: 'needed_by_date' },
+                    {
+                        title: 'Needed By',
+                        key: 'needed_by_date',
+                        dataIndex: 'needed_by_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('needed_by_date', sort, DEFAULT_SORT),
+                    },
                     // What is being asked for, which is what a buyer scans
                     // this list to find.
                     { title: 'Items', render: (_, row) => requisitionItemsLabel(row.lines) },

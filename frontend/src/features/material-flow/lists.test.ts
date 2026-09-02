@@ -50,6 +50,16 @@ describe('the store queue’s URL', () => {
         expect(queueServerFilters(read('status=approved', QUEUE_LIST_SPEC))).toEqual({ status: ['submitted', 'partially_issued'] });
     });
 
+    it('carries a sort the server orders by, and drops one it does not', () => {
+        expect(queueServerFilters(read('sort=-requested_at', QUEUE_LIST_SPEC))).toEqual({
+            status: ['submitted', 'partially_issued'],
+            sort: '-requested_at',
+        });
+        expect(queueServerFilters(read('sort=status', QUEUE_LIST_SPEC))).toEqual({ status: ['submitted', 'partially_issued'], sort: 'status' });
+        expect(queueServerFilters(read('sort=vendor', QUEUE_LIST_SPEC))).toEqual({ status: ['submitted', 'partially_issued'] });
+        expect(queueServerFilters(read('sort=--id', QUEUE_LIST_SPEC))).toEqual({ status: ['submitted', 'partially_issued'] });
+    });
+
     it('keeps the workspace tab through a search and a page turn', () => {
         const out = writeListParams({ q: 'mr 12', status: 'all', page: 2 }, QUEUE_LIST_SPEC, new URLSearchParams('tab=issues'));
 
@@ -71,6 +81,12 @@ describe('the floor’s own URL', () => {
             page: 3,
             include_unsubmitted: 1,
         });
+    });
+
+    it('carries a sort the server orders by, and drops one it does not', () => {
+        expect(requestsServerFilters(read('sort=requested_at', REQUESTS_LIST_SPEC))).toEqual({ sort: 'requested_at', include_unsubmitted: 1 });
+        expect(requestsServerFilters(read('sort=-status', REQUESTS_LIST_SPEC))).toEqual({ sort: '-status', include_unsubmitted: 1 });
+        expect(requestsServerFilters(read('sort=request_number', REQUESTS_LIST_SPEC))).toEqual({ include_unsubmitted: 1 });
     });
 });
 
