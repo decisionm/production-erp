@@ -174,12 +174,21 @@ class PurchaseRequisitionService
         ], $approvedBy, 'approved');
     }
 
+    /**
+     * DEC-20260902-025: the self-decision comparison "APPLIES TO APPROVAL
+     * ONLY" — "REJECTION remains an approver action and carries NO requester
+     * comparison from this decision." That record exists specifically to
+     * withdraw DEC-20260902-024's inferred clause that rejection followed the
+     * same four-eyes comparison as approval. Passing null as decide()'s
+     * decider is what turns the comparison off; the stamp below still records
+     * who actually rejected it.
+     */
     public function reject(PurchaseRequisition $requisition, ?int $rejectedBy = null): PurchaseRequisition
     {
         return $this->decide($requisition, PurchaseRequisitionStatus::Rejected, [
             'rejected_by' => $rejectedBy,
             'rejected_at' => now(),
-        ], $rejectedBy, 'rejected');
+        ], null, 'rejected');
     }
 
     /**
@@ -188,6 +197,11 @@ class PurchaseRequisitionService
      * loser's stamps landed beside the winner's — a row claiming both
      * decisions. The guard now runs on a row lock, so the second decision
      * is refused as the status transition it actually is.
+     *
+     * $decidedBy is the self-decision comparison switch, not just a stamp
+     * source: approve() passes the actual approver so DEC-20260902-025's
+     * comparison runs; reject() passes null so it does not, because that
+     * decision confines the comparison to approval only.
      *
      * @param  array<string, mixed>  $stamps
      */

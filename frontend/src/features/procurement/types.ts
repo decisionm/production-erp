@@ -158,6 +158,8 @@ export interface PurchaseOrderLine {
      */
     unit_price?: string;
     quantity_received: string;
+    /** DEC-20260902-023: why an unclassified item was ordered — set when the line was written, always served (nullable). */
+    unclassified_reason?: string | null;
     schedules?: PurchaseOrderSchedule[];
 }
 

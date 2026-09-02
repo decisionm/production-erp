@@ -329,9 +329,13 @@ export default function PurchaseRequisitionsPage() {
                     {
                         title: 'Actions',
                         render: (_, row) => {
-                            // DEC-20260902-025: no Administrator exemption — the
-                            // server refuses a self-decision outright, so a row
-                            // the viewer raised never offers Approve/Reject.
+                            // DEC-20260902-025: the self-decision comparison
+                            // applies to APPROVAL ONLY — the server refuses a
+                            // requester approving their own draft, so Approve
+                            // never renders on a row the viewer raised.
+                            // Rejection carries NO requester comparison: it is
+                            // still an approver action, but the requester may
+                            // take it on their own row same as anyone else.
                             const isOwnRequisition = me != null && row.requested_by_id === me.id;
 
                             return (
@@ -340,35 +344,35 @@ export default function PurchaseRequisitionsPage() {
                                         View
                                     </Button>
                                     {row.status === 'draft' && !isOwnRequisition && (
-                                        <>
-                                            <Button
-                                                size="small"
-                                                onClick={() => approveMutation.mutate(row.id)}
-                                                loading={approveMutation.isPending}
-                                            >
-                                                Approve
-                                            </Button>
-                                            <Button
-                                                size="small"
-                                                danger
-                                                onClick={() =>
-                                                    // Rejecting is irreversible and sat one
-                                                    // mis-tap from Approve. The confirm names
-                                                    // the requisition so the dialog is about a
-                                                    // row rather than about a verb.
-                                                    Modal.confirm({
-                                                        title: `Reject requisition PR-${row.id}?`,
-                                                        content: 'This cannot be undone.',
-                                                        okText: 'Reject',
-                                                        okButtonProps: { danger: true },
-                                                        onOk: () => rejectMutation.mutate(row.id),
-                                                    })
-                                                }
-                                                loading={rejectMutation.isPending}
-                                            >
-                                                Reject
-                                            </Button>
-                                        </>
+                                        <Button
+                                            size="small"
+                                            onClick={() => approveMutation.mutate(row.id)}
+                                            loading={approveMutation.isPending}
+                                        >
+                                            Approve
+                                        </Button>
+                                    )}
+                                    {row.status === 'draft' && (
+                                        <Button
+                                            size="small"
+                                            danger
+                                            onClick={() =>
+                                                // Rejecting is irreversible and sat one
+                                                // mis-tap from Approve. The confirm names
+                                                // the requisition so the dialog is about a
+                                                // row rather than about a verb.
+                                                Modal.confirm({
+                                                    title: `Reject requisition PR-${row.id}?`,
+                                                    content: 'This cannot be undone.',
+                                                    okText: 'Reject',
+                                                    okButtonProps: { danger: true },
+                                                    onOk: () => rejectMutation.mutate(row.id),
+                                                })
+                                            }
+                                            loading={rejectMutation.isPending}
+                                        >
+                                            Reject
+                                        </Button>
                                     )}
                                     {row.status === 'draft' && isOwnRequisition && (
                                         <Button
