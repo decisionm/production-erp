@@ -485,9 +485,11 @@ record's source.
 - **VERIFIED as a decision:** DEC-20260902-029, Q62(b). The Store re-points a
   hold on its own judgement, at once, with lines, quantity, reason and person
   recorded. No approval step.
-- **OPEN (one at a time):** Q62(c) customer priority; (d) production request
-  queue order; (e) when a request is answered; (f) parallel lines for planning
-  dates.
+- **VERIFIED as a decision:** DEC-20260902-030, Q62(c). No permanent customer
+  priority; the ERP never ranks customers or infers priority from value, name,
+  date or history. A named priority would be a new decision.
+- **OPEN (one at a time):** Q62(d) production request queue order; (e) when a
+  request is answered; (f) parallel lines for planning dates.
 
 ## Sections still to capture
 
