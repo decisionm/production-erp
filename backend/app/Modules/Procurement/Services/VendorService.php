@@ -9,6 +9,7 @@ use App\Support\Configuration\ManagesConfigurationLifecycle;
 use Closure;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 
 class VendorService
 {
@@ -105,9 +106,15 @@ class VendorService
         $code = isset($data['code']) ? trim((string) $data['code']) : '';
 
         if ($code !== '') {
-            $vendor = Vendor::create(['is_active' => true, ...$data, 'code' => $code]);
+            // The vendor write and its classification rows are one fact, not
+            // two: without a transaction, a failure between syncClassifications'
+            // delete() and its last create() would leave a committed vendor
+            // with a partial or empty classification set.
+            return DB::transaction(function () use ($data, $code): Vendor {
+                $vendor = Vendor::create(['is_active' => true, ...$data, 'code' => $code]);
 
-            return $this->syncClassifications($vendor, $data);
+                return $this->syncClassifications($vendor, $data);
+            });
         }
 
         // Two people saving the form in the same instant would read the same
@@ -117,9 +124,11 @@ class VendorService
         // counter row — does not port to the sqlite the tests run on.
         for ($attempt = 1; ; $attempt++) {
             try {
-                $vendor = Vendor::create(['is_active' => true, ...$data, 'code' => $this->mintCode()]);
+                return DB::transaction(function () use ($data): Vendor {
+                    $vendor = Vendor::create(['is_active' => true, ...$data, 'code' => $this->mintCode()]);
 
-                return $this->syncClassifications($vendor, $data);
+                    return $this->syncClassifications($vendor, $data);
+                });
             } catch (QueryException $collision) {
                 if ($attempt >= self::MINT_ATTEMPTS || ! $this->isDuplicateCode($collision)) {
                     throw $collision;
@@ -204,9 +213,13 @@ class VendorService
 
     public function update(Vendor $vendor, array $data): Vendor
     {
-        $vendor->update($data);
+        // Same atomicity as create(): the vendor row and its classification
+        // rows commit together or not at all.
+        return DB::transaction(function () use ($vendor, $data): Vendor {
+            $vendor->update($data);
 
-        return $this->syncClassifications($vendor, $data);
+            return $this->syncClassifications($vendor, $data);
+        });
     }
 
     protected function configurationLabel(): string
