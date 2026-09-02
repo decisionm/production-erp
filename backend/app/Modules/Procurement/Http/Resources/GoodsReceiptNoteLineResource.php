@@ -65,6 +65,7 @@ class GoodsReceiptNoteLineResource extends JsonResource
                         'inspected_quantity' => $inspection->inspected_quantity,
                         'accepted_quantity' => $inspection->accepted_quantity,
                         'rejected_quantity' => $inspection->rejected_quantity,
+                        'rejections_out_reference' => $inspection->rejections_out_reference,
                         'inspection_date' => $inspection->inspection_date?->toDateString(),
                     ],
                     'bags' => $bags->isEmpty() ? null : [

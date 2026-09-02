@@ -141,7 +141,18 @@ class SupplierBillController extends Controller
     /**
      * An order's arrival lines, for the bill's optional matching — same
      * finance-gate reasoning. Each option is the line's identity plus the
-     * received quantity the variance column compares against.
+     * received quantity the variance column compares against, plus (DEC-
+     * 20260902-015) the line's Incoming QC disposition — Accounts matches
+     * the vendor's paper against what was actually rejected, and this is
+     * the ONLY line picker an Accounts-only login can reach: switching to
+     * the general `goods-receipts` show/index endpoint instead would 403
+     * here (that pair sits behind module:procurement, this one deliberately
+     * behind module:finance — see the class note above `vendorOptions`).
+     * Same shape as `GoodsReceiptNoteLineResource`'s `qc.inspection` block,
+     * hand-rolled rather than reused: that resource's `unit_cost` opens for
+     * `finance.view`, which is exactly this endpoint's audience, and would
+     * leak a rate onto a picker that is identity-and-quantity-only by
+     * contract (SupplierBillTest pins `assertArrayNotHasKey('unit_cost', ...)`).
      */
     public function receiptLineOptions(Request $request): JsonResponse
     {
@@ -149,7 +160,7 @@ class SupplierBillController extends Controller
 
         $lines = GoodsReceiptNoteLine::query()
             ->whereHas('goodsReceiptNote', fn ($grn) => $grn->where('purchase_order_id', (int) $validated['purchase_order_id']))
-            ->with(['item:id,sku,name,uom', 'goodsReceiptNote:id'])
+            ->with(['item:id,sku,name,uom', 'goodsReceiptNote:id', 'incomingInspections'])
             ->orderByDesc('id')
             ->limit(500)
             ->get()
@@ -158,6 +169,15 @@ class SupplierBillController extends Controller
                 'goods_receipt_note_id' => $line->goods_receipt_note_id,
                 'item' => $line->item ? ['id' => $line->item->id, 'sku' => $line->item->sku, 'name' => $line->item->name, 'uom' => $line->item->uom] : null,
                 'quantity' => $line->quantity,
+                'qc' => ['inspection' => ($inspection = $line->incomingInspections->first()) === null ? null : [
+                    'id' => $inspection->id,
+                    'result' => $inspection->result->value,
+                    'inspected_quantity' => $inspection->inspected_quantity,
+                    'accepted_quantity' => $inspection->accepted_quantity,
+                    'rejected_quantity' => $inspection->rejected_quantity,
+                    'rejections_out_reference' => $inspection->rejections_out_reference,
+                    'inspection_date' => $inspection->inspection_date?->toDateString(),
+                ]],
             ])
             ->values();
 

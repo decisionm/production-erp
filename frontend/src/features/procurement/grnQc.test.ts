@@ -3,7 +3,10 @@ import { lineQcLine, receiptQcLine } from './grnQc';
 import type { GoodsReceiptLineQc } from './types';
 
 const inspection = (result: string, accepted = '90.0000', rejected = '10.0000'): GoodsReceiptLineQc => ({
-    inspection: { id: 1, result, inspected_quantity: '100.0000', accepted_quantity: accepted, rejected_quantity: rejected, inspection_date: '2026-08-28' },
+    inspection: {
+        id: 1, result, inspected_quantity: '100.0000', accepted_quantity: accepted, rejected_quantity: rejected,
+        rejections_out_reference: null, inspection_date: '2026-08-28',
+    },
     bags: null,
 });
 
