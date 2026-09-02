@@ -43,6 +43,7 @@ class PurchaseOrderLineResource extends JsonResource
             'quantity' => $this->quantity,
             ...($showsCost ? ['unit_price' => $this->unit_price] : []),
             'quantity_received' => $this->quantity_received,
+            'unclassified_reason' => $this->unclassified_reason,
             // Item/due-date delivery windows, oldest due first. remaining is
             // served so the arrival preview can show what each window still
             // expects without re-deriving it client-side.

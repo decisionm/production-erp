@@ -3,6 +3,7 @@
 namespace Tests\Feature\Acceptance;
 
 use App\Models\User;
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Enums\MeasurementType;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\StockBalance;
@@ -290,7 +291,7 @@ class TwoUnitsChainTest extends TestCase
     {
         $odd = Item::create([
             'sku' => 'RM-NOUOM', 'name' => 'Master with no unit recorded', 'uom' => '',
-            'is_active' => true, 'is_production_input' => true,
+            'is_active' => true, 'is_production_input' => true, 'category' => ItemCategory::RawMaterial,
         ]);
         $this->receive($odd, '100', 'tu-blank');
 
@@ -528,7 +529,7 @@ class TwoUnitsChainTest extends TestCase
     {
         return Item::create([
             'sku' => $sku, 'name' => $name, 'uom' => $uom,
-            'is_active' => true, 'is_production_input' => true,
+            'is_active' => true, 'is_production_input' => true, 'category' => ItemCategory::RawMaterial,
         ]);
     }
 

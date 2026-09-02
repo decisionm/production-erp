@@ -3,6 +3,7 @@
 namespace Tests\Feature\Procurement;
 
 use App\Models\User;
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Procurement\Events\GoodsReceiptNoteReceived;
@@ -58,8 +59,8 @@ class PurchaseOrderLifecycleTest extends TestCase
         Event::fake([GoodsReceiptNoteReceived::class]);
 
         $this->vendor = Vendor::create(['code' => 'V-ALPHA', 'name' => 'Vendor Alpha']);
-        $this->itemA = Item::create(['sku' => 'ITEM_A', 'name' => 'Item A', 'uom' => 'Kgs']);
-        $this->itemB = Item::create(['sku' => 'ITEM_B', 'name' => 'Item B', 'uom' => 'Kgs']);
+        $this->itemA = Item::create(['sku' => 'ITEM_A', 'name' => 'Item A', 'uom' => 'Kgs', 'category' => ItemCategory::RawMaterial]);
+        $this->itemB = Item::create(['sku' => 'ITEM_B', 'name' => 'Item B', 'uom' => 'Kgs', 'category' => ItemCategory::RawMaterial]);
         $this->store = Warehouse::create(['code' => 'RM-STORE', 'name' => 'RM Store']);
     }
 

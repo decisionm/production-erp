@@ -21,6 +21,7 @@ use App\Modules\HRMS\Models\LeaveBalance;
 use App\Modules\HRMS\Models\LeaveRequest;
 use App\Modules\HRMS\Models\LeaveType;
 use App\Modules\Inventory\Models\Batch;
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Enums\MaterialRequestStatus;
 use App\Modules\Inventory\Models\Enums\SerialNumberStatus;
 use App\Modules\Inventory\Models\Enums\StoreIssueStatus;
@@ -165,7 +166,7 @@ trait RegressionFixtures
 
         // ---- Inventory --------------------------------------------------
         $bottle = Item::create(['sku' => 'RG-BTL', 'name' => 'Regression Bottle', 'uom' => 'Nos', 'tally_stock_item_guid' => 'rg-guid-bottle', 'hsn_sac_code' => '99999999']);
-        $resin = Item::create(['sku' => 'RG-RESIN', 'name' => 'Regression Resin', 'uom' => 'Kgs', 'tally_stock_item_guid' => 'rg-guid-resin']);
+        $resin = Item::create(['sku' => 'RG-RESIN', 'name' => 'Regression Resin', 'uom' => 'Kgs', 'tally_stock_item_guid' => 'rg-guid-resin', 'category' => ItemCategory::RawMaterial]);
         $masterbatch = Item::create(['sku' => 'RG-MB', 'name' => 'Regression Masterbatch', 'uom' => 'Kgs']);
         $carton = Item::create(['sku' => 'RG-CTN', 'name' => 'Regression Carton', 'uom' => 'Nos']);
         $fg = Warehouse::create(['code' => 'RG-FG', 'name' => 'Regression FG Store', 'tally_guid' => 'rg-gd-fg']);

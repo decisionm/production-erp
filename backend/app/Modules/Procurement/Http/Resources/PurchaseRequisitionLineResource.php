@@ -45,6 +45,7 @@ class PurchaseRequisitionLineResource extends JsonResource
             'item' => ItemResource::make($this->whenLoaded('item')),
             'quantity' => $this->quantity,
             'notes' => $this->notes,
+            'unclassified_reason' => $this->unclassified_reason,
             ...($line->coverage ?? []),
         ];
     }

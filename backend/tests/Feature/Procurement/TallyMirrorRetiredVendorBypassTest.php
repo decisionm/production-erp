@@ -3,6 +3,7 @@
 namespace Tests\Feature\Procurement;
 
 use App\Models\User;
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Procurement\Models\PurchaseOrder;
 use App\Modules\Procurement\Models\Vendor;
@@ -58,7 +59,7 @@ class TallyMirrorRetiredVendorBypassTest extends TestCase
             'name' => 'Retired In The Erp',
             'is_active' => false,
         ]);
-        $this->resin = Item::create(['sku' => 'RM-1', 'name' => 'Resin', 'uom' => 'Kgs']);
+        $this->resin = Item::create(['sku' => 'RM-1', 'name' => 'Resin', 'uom' => 'Kgs', 'category' => ItemCategory::RawMaterial]);
     }
 
     /** The identical order, differing only in the client-supplied `source`. */

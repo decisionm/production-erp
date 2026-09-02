@@ -25,16 +25,24 @@ use Tests\TestCase;
  * Contract is that the server refuses what the screen declines to offer. So
  * every case here goes over the wire.
  *
- * THE RULE IS ONE THING: an ARCHIVED item may not be put on a new line. The
- * item's CATEGORY is not consulted at all.
+ * THE ARCHIVED-ITEM RULE IS UNCHANGED: an ARCHIVED item may not be put on a
+ * new line, on create or on amend, whatever its category.
  *
- * MOST OF THIS FILE IS NEGATIVE CONTROLS, and they are the more important
- * half. Q59 is an OPEN owner question — (a) may `Other` be bought, (c)/(d)
- * what about a finished good and an item nobody has classified — and it says
- * what must not proceed is making a document refuse an item until it is
- * answered. `ItemCategory::purchasable()` exists and would refuse a finished
- * good; it is deliberately not called. The tests that pin an ACCEPTED item
- * are what stops a later "cleanup" wiring it in and answering Q59 in code.
+ * THE CATEGORY RULE IS NEW AND SCOPED TO CREATE. DEC-20260902-023 settled the
+ * open half of Q59 this file used to pin: an ERP-entered document (a
+ * requisition, or a purchase order whose `source` is not `tally`) now
+ * refuses a finished good outright and demands a reason for an unclassified
+ * item — `App\Modules\Procurement\Support\PurchaseLineEligibility`, pinned in
+ * full by `PurchaseLineEligibilityTest` rather than duplicated case-by-case
+ * here. `test_create_now_refuses_a_finished_good` and
+ * `test_an_unclassified_item_is_still_purchasable_with_a_reason` below are
+ * this file's share of that reconciliation.
+ *
+ * THE RULE DOES NOT YET REACH AMEND. `test_amend_accepts_a_finished_good`
+ * and `test_amend_accepts_an_unclassified_item` still pin today's answer —
+ * amend was not part of DEC-20260902-023's change, and closing that gap is
+ * an owner call to make deliberately, not a "cleanup" an agent applies by
+ * extending this file's assertions on its own judgment.
  *
  * Fixture values are synthetic (FC-06). Nothing here posts to Tally or moves
  * stock beyond the one goods receipt a test needs.
@@ -99,9 +107,14 @@ class InactiveMasterGuardTest extends TestCase
     }
 
     /** One line naming $item, in the shape create() and amend() both take. */
-    private function lineFor(Item $item): array
+    private function lineFor(Item $item, ?string $unclassifiedReason = null): array
     {
-        return ['item_id' => $item->id, 'quantity' => '10', 'unit_price' => '1.00'];
+        return array_filter([
+            'item_id' => $item->id,
+            'quantity' => '10',
+            'unit_price' => '1.00',
+            'unclassified_reason' => $unclassifiedReason,
+        ], fn ($value) => $value !== null);
     }
 
     // ---- refusals: create ---------------------------------------------------------
@@ -156,6 +169,24 @@ class InactiveMasterGuardTest extends TestCase
             ->assertJsonMissingValidationErrors('lines.0.item_id');
     }
 
+    public function test_create_now_refuses_a_finished_good(): void
+    {
+        // Was "still purchasable" while Q59(a) was open; DEC-20260902-023
+        // answers it. A dedicated behaviour pin lives in
+        // PurchaseLineEligibilityTest — this is this file's reconciliation of
+        // the negative control it used to carry.
+        $bottle = Item::create([
+            'sku' => 'BTL-PET-1000',
+            'name' => 'Bottle PET 1000',
+            'uom' => 'Nos.',
+            'category' => ItemCategory::FinishedGood,
+        ]);
+
+        $this->postOrder(['lines' => [$this->lineFor($bottle)]])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors('lines.0.item_id');
+    }
+
     // ---- refusals: amend ----------------------------------------------------------
 
     public function test_amend_refuses_an_archived_item_the_original_could_not_have_carried(): void
@@ -172,6 +203,9 @@ class InactiveMasterGuardTest extends TestCase
 
     public function test_amend_accepts_an_unclassified_item(): void
     {
+        // DEC-20260902-023 did not reach amend (class docblock) — no reason
+        // is demanded here, unlike the create path PurchaseLineEligibilityTest
+        // pins.
         $order = $this->draftOrder();
         $unclassified = Item::create(['sku' => 'ITEM_NEW', 'name' => 'Item New', 'uom' => 'Kgs']);
         $this->assertNull($unclassified->fresh()->category);
@@ -183,9 +217,10 @@ class InactiveMasterGuardTest extends TestCase
 
     public function test_amend_accepts_a_finished_good(): void
     {
-        // The amend half of the Q59 negative control that create already
-        // carries. Both write paths must stay open to a finished good while
-        // the question is unanswered, or one of them has quietly answered it.
+        // Create now refuses a finished good (DEC-20260902-023); amend's
+        // scope was not part of that change. This pins the remaining gap
+        // deliberately — see the class docblock — so closing it later is a
+        // decision made on purpose, not drift.
         $order = $this->draftOrder();
         $bottle = Item::create([
             'sku' => 'BTL-PET-500',
@@ -280,33 +315,18 @@ class InactiveMasterGuardTest extends TestCase
 
     // ---- negative controls: what these guards deliberately do NOT refuse ----------
 
-    public function test_an_unclassified_item_is_still_purchasable(): void
+    public function test_an_unclassified_item_is_still_purchasable_with_a_reason(): void
     {
-        // Q59(d) is OPEN. NULL means "nobody has said yet" and most of the
-        // catalogue is NULL — refusing it would stop real purchases of real
-        // materials. If this test starts failing, the refusal has widened
-        // into an owner question.
+        // Q59(d), settled by DEC-20260902-023: NULL means "nobody has said
+        // yet" and most of the catalogue is NULL — refusing it outright would
+        // stop real purchases of real materials. It is purchasable WITH a
+        // reason now (PurchaseLineEligibilityTest pins the without-a-reason
+        // refusal); this still-purchasable control lives on here with that
+        // one change.
         $unclassified = Item::create(['sku' => 'ITEM_NEW', 'name' => 'Item New', 'uom' => 'Kgs']);
         $this->assertNull($unclassified->fresh()->category);
 
-        $this->postOrder(['lines' => [$this->lineFor($unclassified)]])->assertCreated();
-    }
-
-    public function test_a_finished_good_is_still_purchasable(): void
-    {
-        // Q59(a) is OPEN, and the guard consults no category at all —
-        // `ItemCategory::purchasable()` would refuse this row and is
-        // deliberately not called. If this test starts failing, a document
-        // has begun refusing an item on a rule the owner has not confirmed,
-        // which is precisely what Q59 says must not proceed.
-        $bottle = Item::create([
-            'sku' => 'BTL-PET-1000',
-            'name' => 'Bottle PET 1000',
-            'uom' => 'Nos.',
-            'category' => ItemCategory::FinishedGood,
-        ]);
-
-        $this->postOrder(['lines' => [$this->lineFor($bottle)]])->assertCreated();
+        $this->postOrder(['lines' => [$this->lineFor($unclassified, 'Consumable, not yet classified')]])->assertCreated();
     }
 
     public function test_a_consumable_or_spare_is_still_purchasable(): void

@@ -2,10 +2,13 @@
 
 namespace App\Modules\Procurement\Http\Requests;
 
+use App\Modules\Inventory\Services\ItemService;
 use App\Modules\Procurement\Http\Requests\Rules\PurchasableItem;
+use App\Modules\Procurement\Support\PurchaseLineEligibility;
 use App\Rules\PlainDecimal;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 /**
  * THE `source: tally` BYPASS OF THE RETIRED-VENDOR RULE — READ BEFORE EDITING.
@@ -62,9 +65,10 @@ class StorePurchaseOrderRequest extends FormRequest
             'notes' => ['nullable', 'string'],
             'lines' => ['required', 'array', 'min:1'],
             // An item out of service — archived or trashed — is refused on a
-            // new line. The item's category is deliberately not consulted:
-            // Q59 is open and says a document must not start refusing an item
-            // on that until it is answered. See PurchasableItem.
+            // new line. PurchasableItem does not itself consult the item's
+            // category (see its class docblock); a finished good and an
+            // unclassified item are separately handled by withValidator()
+            // below, via PurchaseLineEligibility (DEC-20260902-023).
             //
             // SCOPED TO ERP-ENTERED ORDERS, exactly as the vendor rule above
             // is, and for the vendor rule's reason rather than a new one: a
@@ -78,6 +82,7 @@ class StorePurchaseOrderRequest extends FormRequest
                 : ['required', 'integer', 'exists:items,id', new PurchasableItem],
             'lines.*.quantity' => ['required', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
             'lines.*.unit_price' => ['required', 'numeric', 'min:0', 'max:99999999999', new PlainDecimal],
+            'lines.*.unclassified_reason' => ['nullable', 'string', 'max:255'],
             // A Tally-mirror order: Tally is the PO/schedule source of truth,
             // this row is its read-only reflection with the exact identities.
             'source' => ['sometimes', 'in:erp,tally'],
@@ -87,5 +92,33 @@ class StorePurchaseOrderRequest extends FormRequest
             'lines.*.schedules.*.quantity' => ['required_with:lines.*.schedules', 'numeric', 'gt:0', 'max:99999999999', new PlainDecimal],
             'lines.*.schedules.*.tally_reference' => ['nullable', 'string', 'max:64'],
         ];
+    }
+
+    /**
+     * DEC-20260902-023: a finished good is refused, and an unclassified item
+     * needs a reason. ERP-ENTERED ORDERS ONLY — the same scope the vendor and
+     * archived-item rules above carry, and for the same reason (class
+     * docblock): a Tally mirror is a read-only reflection of an order Tally
+     * already holds, so the ERP does not argue with the book it reflects.
+     */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator) {
+            if ($this->input('source') === 'tally') {
+                return;
+            }
+
+            $lines = (array) $this->input('lines', []);
+            $ids = array_values(array_unique(array_filter(array_map(
+                fn ($line) => isset($line['item_id']) ? (int) $line['item_id'] : null,
+                $lines,
+            ))));
+
+            PurchaseLineEligibility::validate(
+                $lines,
+                fn (string $key, string $message) => $validator->errors()->add($key, $message),
+                app(ItemService::class)->categoriesFor($ids),
+            );
+        });
     }
 }

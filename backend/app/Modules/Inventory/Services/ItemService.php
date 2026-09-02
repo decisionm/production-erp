@@ -2,6 +2,7 @@
 
 namespace App\Modules\Inventory\Services;
 
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\ItemGroup;
 use App\Modules\Production\Services\RunMaterialSuggestionService;
@@ -235,6 +236,22 @@ class ItemService
     public function count(): int
     {
         return Item::query()->count();
+    }
+
+    /**
+     * The cross-module read Procurement's PurchaseLineEligibility needs
+     * (CLAUDE.md: cross-module reads go through the other module's Service,
+     * never straight at its Eloquent model). A missing key means the id
+     * named no item at all (never created, or a soft-deleted row this
+     * default-scoped query does not see) — the caller must not read that as
+     * "unclassified", which is a real, present category value of null.
+     *
+     * @param  array<int, int>  $ids
+     * @return array<int, ?ItemCategory> item id => category (null = not recorded yet)
+     */
+    public function categoriesFor(array $ids): array
+    {
+        return Item::query()->whereIn('id', $ids)->get(['id', 'category'])->mapWithKeys(fn ($i) => [(int) $i->id => $i->category])->all();
     }
 
     public function create(array $data): Item

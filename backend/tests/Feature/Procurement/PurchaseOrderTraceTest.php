@@ -3,6 +3,7 @@
 namespace Tests\Feature\Procurement;
 
 use App\Models\User;
+use App\Modules\Inventory\Models\Enums\ItemCategory;
 use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Enums\StoreIssueStatus;
@@ -81,7 +82,7 @@ class PurchaseOrderTraceTest extends TestCase
         Event::fake([GoodsReceiptNoteReceived::class, PurchaseOrderSent::class]);
 
         $this->vendor = Vendor::create(['code' => 'V-ALPHA', 'name' => 'Vendor Alpha']);
-        $this->itemA = Item::create(['sku' => 'ITEM_A', 'name' => 'Item A', 'uom' => 'Kgs']);
+        $this->itemA = Item::create(['sku' => 'ITEM_A', 'name' => 'Item A', 'uom' => 'Kgs', 'category' => ItemCategory::RawMaterial]);
         $this->bottle = Item::create(['sku' => 'FG_A', 'name' => 'Finished A', 'uom' => 'Nos']);
         $this->store = Warehouse::create(['code' => 'RM-STORE', 'name' => 'RM Store']);
         $this->machine = WorkCenter::create(['code' => 'MC-01', 'name' => 'Machine 1']);

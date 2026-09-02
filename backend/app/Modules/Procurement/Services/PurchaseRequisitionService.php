@@ -131,7 +131,7 @@ class PurchaseRequisitionService
     }
 
     /**
-     * @param  array{needed_by_date?: string, notes?: string, lines: array<int, array{item_id: int, quantity: string, notes?: string}>}  $data
+     * @param  array{needed_by_date?: string, notes?: string, lines: array<int, array{item_id: int, quantity: string, notes?: string, unclassified_reason?: string}>}  $data
      */
     public function create(array $data, ?int $requestedBy): PurchaseRequisition
     {
@@ -148,6 +148,7 @@ class PurchaseRequisitionService
                     'item_id' => $line['item_id'],
                     'quantity' => $line['quantity'],
                     'notes' => $line['notes'] ?? null,
+                    'unclassified_reason' => $line['unclassified_reason'] ?? null,
                 ]);
             }
 
