@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, DatePicker, Descriptions, Drawer, Empty, Form, Input, Modal, Select, Space, Table, Tag, Timeline, Typography } from 'antd';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import {
@@ -16,7 +16,18 @@ import {
     updateLeadNotes,
     updateLeadStatus,
 } from '@/features/crm/api';
+import {
+    LEAD_DEFAULT_SORT,
+    LEAD_LIST_SPEC,
+    LEAD_SORT_FIELDS,
+    type LeadListParams,
+    leadServerFilters,
+    leadsQueryKey,
+} from '@/features/crm/leadList';
 import type { Lead, LeadActivityType, LeadStatus } from '@/features/crm/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const leadSchema = z.object({
     name: z.string().min(1, 'Name is required').max(255),
@@ -97,7 +108,15 @@ export default function LeadsPage() {
     const [editingRequirement, setEditingRequirement] = useState(false);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['crm', 'leads'], queryFn: listLeads });
+    // THE LIST'S VIEW IS ITS URL: sort, page and page size, sorted and paged
+    // on the SERVER over every lead.
+    const { params, setParams, setPage } = useListParams<LeadListParams>(LEAD_LIST_SPEC);
+    const filters = useMemo(() => leadServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: leadsQueryKey(filters),
+        queryFn: () => listLeads(filters),
+        placeholderData: (previous) => previous,
+    });
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<LeadFormValues>({
         resolver: zodResolver(leadSchema),
@@ -199,11 +218,19 @@ export default function LeadsPage() {
             </Space>
 
             <Table<Lead>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries every lead. Last contact and next follow-up
+                // are the latest activity's, not a lead column: no sorter.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, LEAD_SORT_FIELDS, LEAD_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'leads')}
                 onRow={(row) => ({
                     onClick: () => {
                         setEditingRequirement(false);
@@ -212,12 +239,33 @@ export default function LeadsPage() {
                     style: { cursor: 'pointer' },
                 })}
                 columns={[
-                    { title: 'Name', dataIndex: 'name' },
-                    { title: 'Company', dataIndex: 'company' },
-                    { title: 'Email', dataIndex: 'email' },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, LEAD_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Company',
+                        dataIndex: 'company',
+                        key: 'company',
+                        sorter: true,
+                        sortOrder: columnSortOrder('company', params.sort, LEAD_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Email',
+                        dataIndex: 'email',
+                        key: 'email',
+                        sorter: true,
+                        sortOrder: columnSortOrder('email', params.sort, LEAD_DEFAULT_SORT),
+                    },
                     {
                         title: 'Status',
                         dataIndex: 'status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, LEAD_DEFAULT_SORT),
                         render: (status: LeadStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
                     {

@@ -3,6 +3,7 @@
 namespace App\Modules\Compliance\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Compliance\Http\Requests\ListGstRegistrationsRequest;
 use App\Modules\Compliance\Http\Requests\StoreGstRegistrationRequest;
 use App\Modules\Compliance\Http\Requests\UpdateGstRegistrationRequest;
 use App\Modules\Compliance\Http\Resources\GstRegistrationResource;
@@ -14,9 +15,12 @@ class GstRegistrationController extends Controller
 {
     public function __construct(private readonly GstRegistrationService $registrations) {}
 
-    public function index(): AnonymousResourceCollection
+    public function index(ListGstRegistrationsRequest $request): AnonymousResourceCollection
     {
-        return GstRegistrationResource::collection($this->registrations->paginate());
+        return GstRegistrationResource::collection($this->registrations->paginate(
+            (int) ($request->validated('per_page') ?? 20),
+            $request->validated('sort'),
+        ));
     }
 
     public function store(StoreGstRegistrationRequest $request): GstRegistrationResource

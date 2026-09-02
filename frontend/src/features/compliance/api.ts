@@ -1,9 +1,12 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
+import type { GstRateListFilters } from './gstRateList';
+import type { GstRegistrationListFilters } from './gstRegistrationList';
 import type { GstInvoiceBreakdown, Gstr1Report, GstRate, GstRegistration } from './types';
 
-export async function listGstRates(): Promise<Paginated<GstRate>> {
-    const { data } = await api.get<Paginated<GstRate>>('/compliance/gst-rates');
+/** ONE page of rates, sorted and paged on the SERVER (ListGstRatesRequest). No argument is the HSN/SAC-ordered first page. */
+export async function listGstRates(filters: GstRateListFilters = {}): Promise<Paginated<GstRate>> {
+    const { data } = await api.get<Paginated<GstRate>>('/compliance/gst-rates', { params: filters });
     return data;
 }
 
@@ -25,8 +28,9 @@ export async function updateGstRate(id: number, payload: UpdateGstRatePayload): 
     return data.data;
 }
 
-export async function listGstRegistrations(): Promise<Paginated<GstRegistration>> {
-    const { data } = await api.get<Paginated<GstRegistration>>('/compliance/gst-registrations');
+/** ONE page of registrations, sorted and paged on the SERVER (ListGstRegistrationsRequest). No argument is the primary-first first page. */
+export async function listGstRegistrations(filters: GstRegistrationListFilters = {}): Promise<Paginated<GstRegistration>> {
+    const { data } = await api.get<Paginated<GstRegistration>>('/compliance/gst-registrations', { params: filters });
     return data;
 }
 

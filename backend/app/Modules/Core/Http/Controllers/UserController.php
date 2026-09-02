@@ -4,6 +4,7 @@ namespace App\Modules\Core\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Modules\Core\Http\Requests\ListUsersRequest;
 use App\Modules\Core\Http\Requests\ResetUserPasswordRequest;
 use App\Modules\Core\Http\Requests\StoreUserRequest;
 use App\Modules\Core\Http\Requests\UpdateUserRequest;
@@ -16,9 +17,12 @@ class UserController extends Controller
 {
     public function __construct(private readonly UserService $users) {}
 
-    public function index(): AnonymousResourceCollection
+    public function index(ListUsersRequest $request): AnonymousResourceCollection
     {
-        return UserResource::collection($this->users->paginate());
+        return UserResource::collection($this->users->paginate(
+            (int) ($request->validated('per_page') ?? 20),
+            $request->validated('sort'),
+        ));
     }
 
     public function store(StoreUserRequest $request): UserResource

@@ -1,10 +1,14 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type { SalesOrder } from '@/features/sales/types';
+import type { LeadListFilters } from './leadList';
+import type { OpportunityListFilters } from './opportunityList';
+import type { QuotationListFilters } from './quotationList';
 import type { Lead, LeadActivity, LeadActivityType, LeadStatus, Opportunity, Quotation } from './types';
 
-export async function listLeads(): Promise<Paginated<Lead>> {
-    const { data } = await api.get<Paginated<Lead>>('/crm/leads');
+/** ONE page of leads, sorted and paged on the SERVER (ListLeadsRequest). No argument is the newest-first first page. */
+export async function listLeads(filters: LeadListFilters = {}): Promise<Paginated<Lead>> {
+    const { data } = await api.get<Paginated<Lead>>('/crm/leads', { params: filters });
     return data;
 }
 
@@ -54,8 +58,9 @@ export async function createLeadActivity(leadId: number, payload: CreateLeadActi
     return data.data;
 }
 
-export async function listOpportunities(): Promise<Paginated<Opportunity>> {
-    const { data } = await api.get<Paginated<Opportunity>>('/crm/opportunities');
+/** ONE page of opportunities, sorted and paged on the SERVER (ListOpportunitiesRequest). No argument is the newest-first first page the quotation picker reads. */
+export async function listOpportunities(filters: OpportunityListFilters = {}): Promise<Paginated<Opportunity>> {
+    const { data } = await api.get<Paginated<Opportunity>>('/crm/opportunities', { params: filters });
     return data;
 }
 
@@ -86,8 +91,9 @@ export async function updateOpportunity(id: number, payload: UpdateOpportunityPa
     return data.data;
 }
 
-export async function listQuotations(): Promise<Paginated<Quotation>> {
-    const { data } = await api.get<Paginated<Quotation>>('/crm/quotations');
+/** ONE page of quotations, sorted and paged on the SERVER (ListQuotationsRequest). No argument is the newest-first first page. */
+export async function listQuotations(filters: QuotationListFilters = {}): Promise<Paginated<Quotation>> {
+    const { data } = await api.get<Paginated<Quotation>>('/crm/quotations', { params: filters });
     return data;
 }
 

@@ -4,18 +4,22 @@ namespace App\Modules\Core\Services;
 
 use App\Models\User;
 use App\Modules\Core\Exceptions\SelfDeactivationException;
+use App\Modules\Core\Http\Requests\ListUsersRequest;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
 class UserService
 {
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /** Name order when no sort is asked for — what this list always was. */
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return User::query()
+        $query = User::query()
             ->where('is_system', false)
-            ->with('roles.permissions')
-            ->orderBy('name')
-            ->paginate($perPage);
+            ->with('roles.permissions');
+        ListSort::apply($query, $sort, ListUsersRequest::SORTABLE, 'name');
+
+        return $query->paginate($perPage);
     }
 
     /**
