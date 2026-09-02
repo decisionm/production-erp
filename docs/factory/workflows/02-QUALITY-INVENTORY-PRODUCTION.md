@@ -45,8 +45,15 @@ only, floor does not scan again, so it iwll reach the day bin laod".
   Production/WIP, fed by the Store's scanned bags, and whether the floor records
   the tip-in at all. The code change that moves the scan cannot be designed until
   Q94(a) is answered.
-- **Verification pending:** whether the current Store Issue screen already scans
-  bags, and how the day-bin load and the Store Issue relate in code today.
+- **VERIFIED (code, 02-Sep-2026):** the Store Issue screen already scans bags —
+  `StoreIssueService::scanBag` behind `HandoverPanel.tsx` — and that scan is the
+  resin handover path. It writes the stock ledger only: no `day_bin_movements`
+  row and no resin-pool entry.
+- **GAP:** today the floor's scan at the day-bin load is still the live path and
+  the ONLY inflow to the resin pool and the day-bin estimate. Under
+  DEC-20260902-002 that scan goes away, so the Store's scan must feed whatever
+  Q94(a) names, or the day-bin figure and the resin provenance (DEC-20260810-001)
+  go dark. Detail and citations: [research note](research/2026-09-02-quality-inventory-production-ground-truth.md) §1.
 
 ## Sections still to capture
 
