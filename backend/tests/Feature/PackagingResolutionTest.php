@@ -162,4 +162,46 @@ class PackagingResolutionTest extends TestCase
             'production_standard_packaging_id' => $named->id,
         ]);
     }
+
+    public function test_a_packaging_from_another_standard_is_refused(): void
+    {
+        // A wholly separate product's standard and packaging — an id that
+        // exists in the table, so a bare exists() rule would let it
+        // through, but is not part of THIS run's standard at all.
+        $otherItem = Item::create([
+            'sku' => 'JAR-250', 'name' => '250ml Jar Clear', 'uom' => 'Nos.', 'is_active' => true,
+            'nominal_weight_grams' => '20.0000', 'standard_cycle_time' => '10.00', 'standard_cavities' => 4,
+            'nos_per_box' => 600, 'colour' => 'Clear', 'tally_stock_item_guid' => 'itm-0002',
+        ]);
+        $otherStandard = ProductionStandard::create([
+            'item_id' => $otherItem->id,
+            'source_product_name' => '250ml Jar Clear',
+            'cavities' => 4,
+            'unit_weight_grams' => '20.0000',
+            'cycle_time' => '10.00',
+            'status' => 'approved',
+        ]);
+        $foreignPackaging = $otherStandard->packagings()->create([
+            'mode' => ProductionStandardPackaging::MODE_DIRECT_BOX, 'nos_per_box' => 600, 'is_default' => false,
+        ]);
+
+        $this->postJson('/api/v1/production/shift-production-entries', $this->startPayload() + [
+            'production_standard_packaging_id' => $foreignPackaging->id,
+        ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['production_standard_packaging_id']);
+
+        $this->assertDatabaseCount('shift_production_entries', 0);
+    }
+
+    public function test_a_nonexistent_packaging_id_is_refused(): void
+    {
+        $this->postJson('/api/v1/production/shift-production-entries', $this->startPayload() + [
+            'production_standard_packaging_id' => 999999,
+        ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['production_standard_packaging_id']);
+
+        $this->assertDatabaseCount('shift_production_entries', 0);
+    }
 }
