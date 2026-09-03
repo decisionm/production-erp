@@ -37,6 +37,20 @@ use Illuminate\Validation\Rule;
  * (correction.awaiting_correction on the resource, row for row). Boolean
  * flags: 1/true asks; 0/false/absent is "no filter" — never the
  * complement — so an old client that sends nothing reads exactly as before.
+ *
+ * `item_id` / `q` / `returned` / `sort` (03-Sep-2026, "Earlier batches —
+ * still correctable" filters, Task 1): four further narrowings, additive
+ * to everything above and to each other. `item_id` is an exact match on
+ * the product. `q` is the batch number only — the product and the machine
+ * already have their own exact filters (`item_id`, `work_center_id`), so
+ * the search box has one job; blank or whitespace-only is no filter.
+ * `returned` reuses the SAME whereJsonLength predicate as
+ * `whereAwaitingCorrection()` (config_snapshot->quality_returns), so it
+ * reads exactly like its two boolean-flag neighbours above: 1/true asks,
+ * 0/false/absent is no filter. `sort` is deliberately NOT the ListSort
+ * column spelling the quality queue uses — just newest (the default) or
+ * oldest, reversing the same production_date/id order every other caller
+ * of paginate() already gets when no explicit sort is asked for.
  */
 class ListShiftProductionEntriesRequest extends FormRequest
 {
@@ -65,7 +79,25 @@ class ListShiftProductionEntriesRequest extends FormRequest
             // an axios params object spells a boolean 'true'/'false'.
             'correctable' => ['sometimes', 'nullable', Rule::in(['1', '0', 'true', 'false'])],
             'awaiting_correction' => ['sometimes', 'nullable', Rule::in(['1', '0', 'true', 'false'])],
+            'item_id' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'q' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'returned' => ['sometimes', 'nullable', Rule::in(['1', '0', 'true', 'false'])],
+            'sort' => ['sometimes', 'nullable', Rule::in(['newest', 'oldest'])],
         ];
+    }
+
+    /** The batch-number search term, trimmed, or null when blank — never a match on null. */
+    public function batchNumberTerm(): ?string
+    {
+        $term = trim((string) $this->validated('q'));
+
+        return $term === '' ? null : $term;
+    }
+
+    /** True only for the explicit `sort=oldest`; the default (absent or `newest`) is newest-first. */
+    public function oldestFirst(): bool
+    {
+        return $this->validated('sort') === 'oldest';
     }
 
     /** A boolean flag filter: true only when asked (1 / true); absent, empty, 0 or false is "no filter". */

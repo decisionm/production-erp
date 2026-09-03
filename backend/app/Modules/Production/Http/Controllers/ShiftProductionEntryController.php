@@ -43,6 +43,10 @@ class ShiftProductionEntryController extends Controller
             batchStatus: $request->batchStatus(),
             correctable: $request->flagFilter('correctable'),
             awaitingCorrection: $request->flagFilter('awaiting_correction'),
+            oldestFirst: $request->oldestFirst(),
+            returned: $request->flagFilter('returned'),
+            itemId: $request->idFilter('item_id'),
+            batchNumber: $request->batchNumberTerm(),
         ));
     }
 
