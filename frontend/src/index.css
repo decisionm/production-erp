@@ -551,3 +551,68 @@ body.is-resizing-sider .ant-layout {
         transition: none;
     }
 }
+
+/* ------------------------------------------------------------------ */
+/* Wide tables pan by hand (03-Sep-2026). The owner, of the floor's own  */
+/* screens: "scrolling is very difficult ... they scroll down to the     */
+/* last row, then hold the left scrolling bar and scroll."               */
+/* ------------------------------------------------------------------ */
+
+/* The invitation: a table that hides columns says so with the cursor. */
+.ant-table-body,
+.ant-table-content {
+    cursor: grab;
+}
+
+/* Nothing you press or type in should look draggable. */
+.ant-table-body a,
+.ant-table-body button,
+.ant-table-body input,
+.ant-table-body label,
+.ant-table-body .ant-select,
+.ant-table-body .ant-checkbox,
+.ant-table-content a,
+.ant-table-content button,
+.ant-table-content input {
+    cursor: pointer;
+}
+
+.ant-table-body input,
+.ant-table-content input {
+    cursor: text;
+}
+
+/* While the hand is down: hold the grab everywhere, and stop the drag
+   becoming a text selection — which is what it did before, and why
+   dragging a table felt broken rather than absent. */
+body.is-panning-table,
+body.is-panning-table * {
+    cursor: grabbing !important;
+    user-select: none !important;
+}
+
+/* The second half of the fix: antd's own sticky horizontal bar rides the
+   bottom of the WINDOW while a long table is in view, so the handle is
+   reachable without scrolling to the last row. It ships nearly invisible;
+   this makes it a real control in both modes. */
+.ant-table-sticky-scroll {
+    background: var(--app-surface);
+    border-top: 1px solid var(--app-rule);
+    opacity: 1;
+}
+
+.ant-table-sticky-scroll-bar {
+    height: 10px;
+    border-radius: 999px;
+    background: var(--brand-navy);
+    opacity: 0.55;
+}
+
+.ant-table-sticky-scroll-bar:hover,
+.ant-table-sticky-scroll-bar-active {
+    background: var(--brand-orange);
+    opacity: 1;
+}
+
+/* A device that asked for less motion still pans; there is nothing here
+   that animates on its own. */
