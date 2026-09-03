@@ -152,6 +152,7 @@ export function catalogueEmptyText(
     facet: CategoryFacetKey,
     warning: string | null,
     search: string,
+    requestable: RequestableFilterKey = REQUESTABLE_ALL,
 ): string {
     const inCategory = facet === CATEGORY_FACET_ALL
         ? ''
@@ -159,10 +160,65 @@ export function catalogueEmptyText(
 
     if (search.trim() !== '') return `Nothing matches "${search.trim()}"${inCategory}.`;
     if (warning !== null) return `Nothing flagged${inCategory}.`;
+
+    // NARROWEST FILTER FIRST, the rule this function already followed for
+    // three controls and now follows for four: an empty table must name the
+    // one that emptied it. "No packing material is switched off" is the
+    // ANSWER to the worklist question, not a dead end, so it has to be said
+    // rather than left as a bare "no items".
+    if (requestable === 'not_requestable') return `Nothing${inCategory} is switched off — all of it is requestable.`;
+    if (requestable === 'requestable') return `Nothing${inCategory} is switched on as requestable yet.`;
+
     if (inCategory !== '') return `No items${inCategory} yet.`;
 
     return 'The catalogue is empty.';
 }
+/* ----------------------------- requestable ------------------------------ */
+
+/**
+ * WHICH ITEMS THE FLOOR MAY ASK THE STORE FOR — the switch, made filterable.
+ *
+ * `items.is_production_input` decides what the Request Material picker offers
+ * (MaterialRequestService::requestableMaterials). The backfill that set it
+ * derived it from EVIDENCE — BOM lines, the packing register, the colourant
+ * register, and what the factory had actually requested and issued — and left
+ * anything it could not prove OFF rather than guessing. Q56(a) named the
+ * consequence in advance: "a material the store needs to hand over that the
+ * floor cannot ask for", to be fixed by somebody running the item master once
+ * and flipping the ones that belong.
+ *
+ * That reading was impossible on a 625-row catalogue: the column is on every
+ * row, but nothing let a person ask for the rows where it is OFF. This filter
+ * is that question, and it composes with the category facet, so "packing
+ * material the floor cannot ask for" — the exact worklist Q56 asks for — is
+ * two clicks.
+ */
+export const REQUESTABLE_ALL = 'all';
+
+export type RequestableFilterKey = typeof REQUESTABLE_ALL | 'requestable' | 'not_requestable';
+
+export const REQUESTABLE_FILTERS: readonly { key: RequestableFilterKey; label: string }[] = [
+    { key: REQUESTABLE_ALL, label: 'Any' },
+    { key: 'not_requestable', label: 'Not requestable' },
+    { key: 'requestable', label: 'Requestable' },
+];
+
+/**
+ * A row missing the field entirely is NOT counted as "not requestable".
+ * `undefined` means this payload did not state it — the identity read serves a
+ * narrower shape — and treating "unknown" as "off" would put rows on a
+ * worklist that asks somebody to switch on what may already be on.
+ */
+export function matchesRequestable(
+    item: { is_production_input?: boolean },
+    filter: RequestableFilterKey,
+): boolean {
+    if (filter === REQUESTABLE_ALL) return true;
+    if (item.is_production_input === undefined) return false;
+
+    return filter === 'requestable' ? item.is_production_input : !item.is_production_input;
+}
+
 
 /**
  * THE CATEGORY THE LAST PERSON PICKED, remembered per browser.

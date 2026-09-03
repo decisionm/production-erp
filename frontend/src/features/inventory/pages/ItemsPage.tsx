@@ -1,6 +1,6 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Button, Form, Input, InputNumber, Modal, Select, Space, Switch, Table, Tag, Tooltip, Typography } from 'antd';
+import { Button, Form, Input, InputNumber, message, Modal, Popconfirm, Segmented, Select, Space, Switch, Table, Tag, Tooltip, Typography } from 'antd';
 import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
@@ -21,6 +21,10 @@ import {
     readRememberedFacet,
     rememberFacet,
     skuPresentation,
+    REQUESTABLE_ALL,
+    REQUESTABLE_FILTERS,
+    type RequestableFilterKey,
+    matchesRequestable,
 } from '@/features/inventory/catalogue';
 import { CategoryFacets } from '@/features/inventory/components/CategoryFacets';
 import { IdentityHealthStrip } from '@/features/inventory/components/IdentityHealthStrip';
@@ -131,6 +135,18 @@ export default function ItemsPage() {
         return map;
     }, [allItems]);
 
+    /*
+     * THE WORKLIST Q56 ASKS FOR. The switch that decides what the Request
+     * Material picker offers is on every row, but until now nothing could ask
+     * for the rows where it is OFF — on a 625-row catalogue that made "run
+     * through the item master and flip the ones that belong" unperformable.
+     * Not remembered per browser like the category facet: this is a job
+     * somebody does once, not where a machine lives.
+     */
+    const [requestable, setRequestable] = useState<RequestableFilterKey>(REQUESTABLE_ALL);
+    const [marking, setMarking] = useState(false);
+    const [selected, setSelected] = useState<number[]>([]);
+
     const q = search.trim().toLowerCase();
     const searchedItems = q
         ? allItems.filter(
@@ -166,7 +182,7 @@ export default function ItemsPage() {
      * is already on each row.
      */
     const rows: ItemRow[] = warning === null
-        ? searchedItems.filter((item) => matchesCategoryFacet(item, facet))
+        ? searchedItems.filter((item) => matchesCategoryFacet(item, facet) && matchesRequestable(item, requestable))
         : flaggedRows;
 
     /*
@@ -257,6 +273,59 @@ export default function ItemsPage() {
         [allItems, editingItem],
     );
 
+    /*
+     * SWITCH ON A WHOLE WORKLIST, one ordinary edit at a time.
+     *
+     * Q56(a) is a per-item switch, and on live there are 51 packing materials
+     * alone — a storekeeper opening 51 modals is how a correction stops being
+     * made at all. This walks the SELECTED rows through the SAME update
+     * endpoint the edit modal uses, so every row keeps its validation and its
+     * audit line; there is no bulk API and this deliberately does not add one.
+     *
+     * ONLY EVER SWITCHES ON. Turning the flag OFF in bulk would take materials
+     * away from the floor in one click, which is a refusal nobody asked for
+     * and would be far harder to notice than a missing one. Off stays a
+     * deliberate, per-item edit in the modal.
+     *
+     * FAILURES ARE NAMED, NOT SWALLOWED. A partial run is the likely one on a
+     * flaky connection, and "12 of 51" with the rest still on screen is the
+     * honest report — the filter is still applied, so whatever failed is
+     * simply still listed as not requestable.
+     */
+    const markSelectedRequestable = async () => {
+        const targets = rows.filter((row) => selected.includes(row.id) && row.is_production_input !== true);
+
+        if (targets.length === 0) {
+            void message.info('Those rows are already requestable.');
+            return;
+        }
+
+        setMarking(true);
+        let done = 0;
+        const failed: string[] = [];
+
+        for (const row of targets) {
+            try {
+                await updateItem(row.id, { is_production_input: true });
+                done += 1;
+            } catch {
+                failed.push(row.name);
+            }
+        }
+
+        setMarking(false);
+        setSelected([]);
+        invalidate();
+
+        if (failed.length === 0) {
+            void message.success(`${done} item${done === 1 ? '' : 's'} can now be requested from the store.`);
+        } else {
+            void message.warning(
+                `${done} switched on. ${failed.length} did not: ${failed.slice(0, 3).join(', ')}${failed.length > 3 ? '…' : ''}`,
+            );
+        }
+    };
+
     return (
         <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }}>
@@ -279,6 +348,29 @@ export default function ItemsPage() {
 
             <CategoryFacets facets={facets} active={facet} onSelect={selectFacet} />
 
+            <Space style={{ marginBottom: 12 }} wrap>
+                <Segmented
+                    value={requestable}
+                    onChange={(value) => {
+                        setRequestable(value as RequestableFilterKey);
+                        setSelected([]);
+                    }}
+                    disabled={warning !== null}
+                    options={REQUESTABLE_FILTERS.map((option) => ({ label: option.label, value: option.key }))}
+                />
+                {selected.length > 0 && (
+                    <Popconfirm
+                        title={`Let the floor request ${selected.length} item${selected.length === 1 ? '' : 's'}?`}
+                        okText="Switch on"
+                        onConfirm={markSelectedRequestable}
+                    >
+                        <Button type="primary" loading={marking}>
+                            Mark requestable ({selected.length})
+                        </Button>
+                    </Popconfirm>
+                )}
+            </Space>
+
             <IdentityHealthStrip health={health} active={warning} onSelect={selectWarning} />
 
             <Table<ItemRow>
@@ -288,6 +380,13 @@ export default function ItemsPage() {
                 sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
+                // Selection only where a bulk switch means anything: the
+                // warning view is a server page of a different question.
+                rowSelection={warning === null ? {
+                    selectedRowKeys: selected,
+                    onChange: (keys) => setSelected(keys as number[]),
+                    getCheckboxProps: (row: ItemRow) => ({ disabled: row.is_production_input === true }),
+                } : undefined}
                 loading={warning === null ? isLoading : flaggedFetching}
                 dataSource={rows}
                 // Two filters stack here and a search sits above both, so an
@@ -296,7 +395,7 @@ export default function ItemsPage() {
                 // The search box is disabled while a warning filter is on, so
                 // its text is not applied and must not be blamed for an empty
                 // table.
-                locale={{ emptyText: catalogueEmptyText(facet, warning, warning === null ? search : '') }}
+                locale={{ emptyText: catalogueEmptyText(facet, warning, warning === null ? search : '', warning === null ? requestable : REQUESTABLE_ALL) }}
                 pagination={warning === null
                     ? { defaultPageSize: 20, showSizeChanger: true, pageSizeOptions: [20, 50, 100], showTotal: (t) => `${t} items` }
                     : {

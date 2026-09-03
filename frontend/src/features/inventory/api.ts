@@ -99,6 +99,16 @@ export interface CreateItemPayload {
      * from a screen that never saw a category cannot blank one.
      */
     category?: ItemCategoryValue | null;
+    /**
+     * May the floor ask the store for this item
+     * (MaterialRequestService::requestableMaterials reads the same column)?
+     *
+     * Already sent by both item forms through `toUpdatePayload`'s spread and
+     * accepted by StoreItemRequest/UpdateItemRequest — it was simply missing
+     * from this type, so a caller naming it explicitly did not compile while
+     * the form quietly sent it.
+     */
+    is_production_input?: boolean;
 }
 
 export async function createItem(payload: CreateItemPayload): Promise<Item> {
