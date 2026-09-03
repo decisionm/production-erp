@@ -1,0 +1,56 @@
+table: journal_entry_lines
+module: finance
+label: 'Journal Entry Lines'
+purpose: 'One debit or credit line of a journal entry against one GL account. Debits and credits of an entry balance. Its parent is journal_entries.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: journal_entry_id
+    type: integer
+    meaning: 'The journal entry this line belongs to (journal_entries)'
+    references: journal_entries.id
+  -
+    name: gl_account_id
+    type: integer
+    meaning: 'The GL account debited or credited (gl_accounts)'
+    references: gl_accounts.id
+  -
+    name: debit
+    type: decimal
+    meaning: 'Debit amount on this line (0 when it is a credit line)'
+    sensitive: rates
+  -
+    name: credit
+    type: decimal
+    meaning: 'Credit amount on this line (0 when it is a debit line)'
+    sensitive: rates
+  -
+    name: memo
+    type: string
+    nullable: true
+    meaning: 'Line-level narration'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the line was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the line was last changed'
+joins:
+  - 'journal_entry_lines.gl_account_id = gl_accounts.id'
+  - 'journal_entry_lines.journal_entry_id = journal_entries.id'
+keywords:
+  - debit
+  - credit
+  - 'journal line'
+  - 'account posting'
+  - 'ledger posting'
+questions:
+  - 'What is the total debited to each GL account this quarter?'
+  - 'Which journal lines hit the rent expense account?'

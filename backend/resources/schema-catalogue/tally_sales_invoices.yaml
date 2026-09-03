@@ -1,0 +1,86 @@
+table: tally_sales_invoices
+module: sales
+label: 'Tally Sales Invoices'
+purpose: "One row is a Sales voucher read out of Tally - the factory's real sales invoice, raised in Tally with its e-invoice and e-way details (DEC-20260831-008) - together with the importer's attempt to match it to an ERP sales order on customer and PO reference. Never written by the ERP's own billing; an unmatched voucher is recorded and waits for Accounts."
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Row id'
+  -
+    name: tally_guid
+    type: string
+    meaning: "Tally's own GUID for the voucher; unique, makes a re-import a no-op"
+  -
+    name: voucher_number
+    type: string
+    meaning: 'Tally invoice number (e.g. 042/26-27); not unique across years'
+  -
+    name: voucher_date
+    type: date
+    meaning: 'Invoice date in Tally'
+  -
+    name: party_ledger_name
+    type: string
+    meaning: 'Customer (sundry debtor) ledger name on the voucher as it reads in Tally'
+  -
+    name: customer_po_reference
+    type: string
+    nullable: true
+    meaning: "The customer's purchase-order string exactly as Tally holds it; the match key against sales_orders.customer_po_reference"
+  -
+    name: amount
+    type: decimal
+    nullable: true
+    meaning: 'Invoice value (INR) as Tally states it'
+    sensitive: rates
+  -
+    name: customer_id
+    type: integer
+    nullable: true
+    meaning: 'ERP customer resolved from the party ledger; null when no customer is linked to that ledger'
+    references: customers.id
+  -
+    name: sales_order_id
+    type: integer
+    nullable: true
+    meaning: 'The ERP sales order the invoice was matched to; null unless match_state is matched'
+    references: sales_orders.id
+  -
+    name: match_state
+    type: string
+    meaning: 'Importer verdict: matched, unmatched_no_reference (voucher carries no PO reference), unmatched_no_customer (no ERP customer for this ledger), unmatched_no_order (customer known but no live order with this reference), ambiguous (more than one order matched)'
+  -
+    name: match_detail
+    type: string
+    nullable: true
+    meaning: 'Human-readable explanation of the match verdict'
+  -
+    name: imported_at
+    type: datetime
+    meaning: 'When the voucher was imported from Tally'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'tally_sales_invoices.sales_order_id = sales_orders.id'
+  - 'tally_sales_invoices.customer_id = customers.id'
+keywords:
+  - invoice
+  - bill
+  - 'sales voucher'
+  - 'tally invoice'
+  - 'sales invoice'
+  - 'unmatched invoice'
+  - billing
+questions:
+  - 'Which customers had the most invoices last month?'
+  - 'Which Tally invoices are still unmatched to a sales order, and why?'
+  - 'What was the total invoiced value per customer this quarter?'

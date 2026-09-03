@@ -5,8 +5,11 @@ import { getMaterialLot, listAllItems, listMaterialBags } from '@/features/inven
 import { bagStatusLabel, bagStatusOptions, formatKg } from '@/features/inventory/bagStatus';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
 import MaterialLotsPage from '@/features/inventory/pages/MaterialLotsPage';
+import { MATERIAL_BAG_DEFAULT_SORT, MATERIAL_BAG_SORT_FIELDS } from '@/features/inventory/traceabilityRegisters';
 import type { MaterialBag } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 
 /**
  * THE LABEL BENCH — every barcoded bag this factory has registered, and the
@@ -40,6 +43,11 @@ function BagLabelBench() {
     const [itemId, setItemId] = useState<number | null>(null);
     const [status, setStatus] = useState<string | null>(null);
     const [page, setPage] = useState(1);
+    const [perPage, setPerPage] = useState(20);
+    // A column sort (ListMaterialBagsRequest::SORTABLE), SERVER-side because
+    // the register is paged. Component state rather than the URL: the two
+    // tabs of this screen would otherwise fight over `page`.
+    const [sort, setSort] = useState<string | undefined>();
     const [reprintBag, setReprintBag] = useState<MaterialBag | null>(null);
 
     const { data: items } = useQuery({
@@ -48,13 +56,16 @@ function BagLabelBench() {
     });
 
     const { data, isLoading, isError, error } = useQuery({
-        queryKey: ['inventory', 'material-bags', itemId, status, page],
+        queryKey: ['inventory', 'material-bags', itemId, status, sort, page, perPage],
         queryFn: () =>
             listMaterialBags({
                 item_id: itemId ?? undefined,
                 status: status ?? undefined,
+                sort,
                 page,
+                per_page: perPage,
             }),
+        placeholderData: (previous) => previous,
         retry: false,
     });
 
@@ -126,22 +137,31 @@ function BagLabelBench() {
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data ?? []}
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
-                pagination={
-                    data?.meta
-                        ? {
-                              current: data.meta.current_page,
-                              pageSize: data.meta.per_page,
-                              total: data.meta.total,
-                              showSizeChanger: false,
-                              onChange: setPage,
-                          }
-                        : false
-                }
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queries the
+                // whole register. Material and Supplier lot render the lot's
+                // relation and carry no sorter.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setSort(sortParamFromSorter(sorter, MATERIAL_BAG_SORT_FIELDS, MATERIAL_BAG_DEFAULT_SORT));
+                    setPage(1);
+                }}
+                pagination={serverPagination(
+                    data?.meta,
+                    (nextPage, nextSize) => {
+                        setPage(nextPage);
+                        setPerPage(nextSize);
+                    },
+                    'bags',
+                )}
                 columns={[
                     {
                         title: 'Barcode',
                         dataIndex: 'barcode',
+                        key: 'barcode',
+                        sorter: true,
+                        sortOrder: columnSortOrder('barcode', sort, MATERIAL_BAG_DEFAULT_SORT),
                         render: (barcode: string) => <Typography.Text code copyable>{barcode}</Typography.Text>,
                     },
                     { title: 'Material', render: (_, bag) => itemLabel(bag.lot?.item) },
@@ -149,11 +169,30 @@ function BagLabelBench() {
                         title: 'Supplier lot',
                         render: (_, bag) => bag.lot?.supplier_lot_no ?? `Lot #${bag.material_lot_id}`,
                     },
-                    { title: 'Original kg', dataIndex: 'original_kg', align: 'right', render: formatKg },
-                    { title: 'Remaining kg', dataIndex: 'remaining_kg', align: 'right', render: formatKg },
+                    {
+                        title: 'Original kg',
+                        dataIndex: 'original_kg',
+                        key: 'original_kg',
+                        align: 'right',
+                        sorter: true,
+                        sortOrder: columnSortOrder('original_kg', sort, MATERIAL_BAG_DEFAULT_SORT),
+                        render: formatKg,
+                    },
+                    {
+                        title: 'Remaining kg',
+                        dataIndex: 'remaining_kg',
+                        key: 'remaining_kg',
+                        align: 'right',
+                        sorter: true,
+                        sortOrder: columnSortOrder('remaining_kg', sort, MATERIAL_BAG_DEFAULT_SORT),
+                        render: formatKg,
+                    },
                     {
                         title: 'Status',
                         dataIndex: 'status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', sort, MATERIAL_BAG_DEFAULT_SORT),
                         render: (value: string) => {
                             const label = bagStatusLabel(value);
                             return <Tag color={label.tone}>{label.text}</Tag>;
@@ -168,6 +207,9 @@ function BagLabelBench() {
                         // print this one in UTC.
                         title: 'Registered',
                         dataIndex: 'created_at',
+                        key: 'created_at',
+                        sorter: true,
+                        sortOrder: columnSortOrder('created_at', sort, MATERIAL_BAG_DEFAULT_SORT),
                         render: (value: string | null | undefined) =>
                             value ? new Date(value).toLocaleString() : '—',
                     },

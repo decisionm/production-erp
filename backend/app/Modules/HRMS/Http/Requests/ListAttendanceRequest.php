@@ -4,6 +4,7 @@ namespace App\Modules\HRMS\Http\Requests;
 
 use App\Modules\HRMS\Models\Enums\AttendanceStatus;
 use App\Modules\HRMS\Services\HrmsListQuery;
+use App\Support\Lists\ListSort;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -15,10 +16,14 @@ use Illuminate\Validation\Rule;
  * is one of the four marks; `employee_id` narrows to one person; `from` /
  * `to` is an inclusive range on the attendance DATE (a plain date, not the
  * check-in clock). A reversed range or a non-date is a 422, never a
- * silently-full list.
+ * silently-full list. `sort` is `date` or `status` (ListSort spelling);
+ * absent is newest date first. The employee column shows a NAME through the
+ * relation, so it is not offered here.
  */
 class ListAttendanceRequest extends FormRequest
 {
+    public const SORTABLE = ['date', 'status'];
+
     public function authorize(): bool
     {
         return true;
@@ -32,6 +37,7 @@ class ListAttendanceRequest extends FormRequest
             'employee_id' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'from' => ['sometimes', 'nullable', 'date_format:Y-m-d'],
             'to' => ['sometimes', 'nullable', 'date_format:Y-m-d', 'after_or_equal:from'],
+            'sort' => ListSort::rule(self::SORTABLE),
             'per_page' => ['sometimes', 'nullable', 'integer', 'between:1,'.HrmsListQuery::PER_PAGE_MAX],
             'page' => ['sometimes', 'nullable', 'integer', 'min:1'],
         ];

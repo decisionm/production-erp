@@ -7,7 +7,9 @@ import { useAuthStore } from '@/features/auth/store';
 import { getItem, listItemStockBalances, listStockMovements } from '@/features/inventory/api';
 import { purchaseOrderIdIn } from '@/features/inventory/stockLedger';
 import type { ItemTrackingType, StockMovement } from '@/features/inventory/types';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 import { formatDateTime } from '@/lib/datetime';
+import { TABLE_STICKY } from '@/lib/tableProps';
 
 const trackingTypeColor: Record<ItemTrackingType, string> = {
     none: 'default',
@@ -62,19 +64,33 @@ function ReferenceCell({ reference }: { reference: string | null }) {
 
 // The Unit Cost column exists only when `showsUnitCost` — see the page body
 // for the rule (finance access AND the key actually present on the rows).
-const movementColumns = (showsUnitCost: boolean) => [
+// The whole history is here (one read at 300, no pager), so the sorters
+// and filters are honest client ones over every row of the tab.
+const movementColumns = (showsUnitCost: boolean, movements: StockMovement[]) => [
     {
         title: 'Date',
         dataIndex: 'movement_date',
+        sorter: columnSorter((row: StockMovement) => row.movement_date, 'date'),
         render: (d: string) => formatDateTime(d),
     },
     {
         title: 'Type',
         dataIndex: 'type',
+        filters: filterOptions(movements, (row) => row.type),
+        onFilter: onFilterBy((row: StockMovement) => row.type),
         render: (type: string) => <Tag color={movementTypeColor[type]}>{type}</Tag>,
     },
-    { title: 'Warehouse', render: (_: unknown, row: StockMovement) => row.warehouse.code },
-    { title: 'Quantity', dataIndex: 'quantity' },
+    {
+        title: 'Warehouse',
+        filters: filterOptions(movements, (row) => row.warehouse.code),
+        onFilter: onFilterBy((row: StockMovement) => row.warehouse.code),
+        render: (_: unknown, row: StockMovement) => row.warehouse.code,
+    },
+    {
+        title: 'Quantity',
+        dataIndex: 'quantity',
+        sorter: columnSorter((row: StockMovement) => row.quantity, 'number'),
+    },
     ...(showsUnitCost ? [{ title: 'Unit Cost', dataIndex: 'unit_cost' }] : []),
     {
         title: 'Reference',
@@ -100,10 +116,11 @@ function MovementTable({
         <Table<StockMovement>
             rowKey="id"
             size="small"
+            sticky={TABLE_STICKY}
             pagination={false}
             dataSource={movements}
             scroll={{ x: 'max-content' }}
-            columns={movementColumns(showsUnitCost)}
+            columns={movementColumns(showsUnitCost, movements)}
         />
     );
 }
@@ -201,6 +218,7 @@ export default function ItemDetailPage() {
             <Typography.Title level={5}>Stock by Warehouse</Typography.Title>
             {itemBalances.length > 0 ? (
                 <Table
+                    sticky={TABLE_STICKY}
                     scroll={{ x: 'max-content' }}
                     rowKey="id"
                     size="small"
@@ -208,8 +226,16 @@ export default function ItemDetailPage() {
                     dataSource={itemBalances}
                     style={{ marginBottom: 24 }}
                     columns={[
-                        { title: 'Warehouse', render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}` },
-                        { title: 'Quantity', dataIndex: 'quantity' },
+                        {
+                            title: 'Warehouse',
+                            sorter: columnSorter((row) => `${row.warehouse.code} — ${row.warehouse.name}`, 'text'),
+                            render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}`,
+                        },
+                        {
+                            title: 'Quantity',
+                            dataIndex: 'quantity',
+                            sorter: columnSorter((row) => row.quantity, 'number'),
+                        },
                         ...(showsAverageCost ? [{ title: 'Avg. Cost', dataIndex: 'average_cost' }] : []),
                     ]}
                 />

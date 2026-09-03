@@ -1,0 +1,77 @@
+table: opportunities
+module: crm
+label: Opportunities
+purpose: 'One row is a potential deal with a customer being tracked through a sales pipeline, with an estimated value and win probability. Part of the hidden CRM surface (DEC-20260902-052), so expected empty on the live instance.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Row id'
+  -
+    name: name
+    type: string
+    meaning: 'Short name of the deal'
+  -
+    name: customer_id
+    type: integer
+    meaning: 'The customer the deal is with'
+    references: customers.id
+  -
+    name: lead_id
+    type: integer
+    nullable: true
+    meaning: 'The lead this opportunity grew out of, if any'
+    references: leads.id
+  -
+    name: stage
+    type: string
+    meaning: 'Pipeline stage: prospecting, qualification, proposal, negotiation, won, lost'
+  -
+    name: estimated_value
+    type: decimal
+    meaning: 'Expected deal value (INR)'
+    sensitive: rates
+  -
+    name: probability
+    type: decimal
+    meaning: 'Estimated chance of winning, as a percentage 0-100'
+  -
+    name: expected_close_date
+    type: date
+    nullable: true
+    meaning: 'Date the deal is expected to close'
+  -
+    name: notes
+    type: string
+    nullable: true
+    meaning: 'Free-text notes on the deal'
+  -
+    name: assigned_to
+    type: integer
+    nullable: true
+    meaning: 'Salesperson (user) owning the deal'
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'opportunities.assigned_to = users.id'
+  - 'opportunities.lead_id = leads.id'
+  - 'opportunities.customer_id = customers.id'
+keywords:
+  - opportunity
+  - deal
+  - pipeline
+  - prospect
+  - won
+  - lost
+questions:
+  - 'What is the total estimated value of open opportunities by stage?'
+  - 'How many deals were won versus lost this year?'

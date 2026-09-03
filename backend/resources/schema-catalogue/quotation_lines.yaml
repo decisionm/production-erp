@@ -1,0 +1,47 @@
+table: quotation_lines
+module: sales
+label: 'Quotation Lines'
+purpose: 'One row is one item on a quotation with the quantity and rate quoted. Expected empty on the live instance because quotations are out of scope (DEC-20260902-052).'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Row id'
+  -
+    name: quotation_id
+    type: integer
+    meaning: 'The quotation this line belongs to'
+    references: quotations.id
+  -
+    name: item_id
+    type: integer
+    meaning: 'The item quoted'
+    references: items.id
+  -
+    name: quantity
+    type: decimal
+    meaning: "Quantity quoted, in the item's unit of measure"
+  -
+    name: unit_price
+    type: decimal
+    meaning: 'Quoted sale rate per unit (INR)'
+    sensitive: rates
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'quotation_lines.item_id = items.id'
+  - 'quotation_lines.quotation_id = quotations.id'
+keywords:
+  - 'quotation line'
+  - 'quoted rate'
+  - 'quoted quantity'
+questions:
+  - 'Which items were quoted to a customer and at what quantity?'

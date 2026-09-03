@@ -1,0 +1,74 @@
+table: finished_cartons
+module: production
+label: 'Finished Cartons'
+purpose: "One row is one physical packed carton of finished goods with a permanent scannable identity (batch number + sequence, e.g. M04-20260903-2-C07), born from a completed batch's packed count, held in stock until scanned onto a delivery, and traceable back to its batch. No cost or rate columns; the batch costing view is gated separately."
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: shift_production_entry_id
+    type: integer
+    meaning: 'The batch that packed this carton -> shift_production_entries'
+    references: shift_production_entries.id
+  -
+    name: carton_no
+    type: string
+    meaning: 'Unique carton code printed on the label: {batch_number}-C{sequence}'
+  -
+    name: item_id
+    type: integer
+    meaning: 'Finished product in the carton -> items'
+    references: items.id
+  -
+    name: pieces
+    type: decimal
+    meaning: 'Pieces (Nos) in this carton'
+  -
+    name: is_partial
+    type: integer
+    meaning: '1 = the tail carton holding the loose remainder (not a full box), 0 = full carton'
+  -
+    name: status
+    type: string
+    meaning: 'in_stock (in the FG store) or dispatched (scanned onto a delivery)'
+  -
+    name: delivery_id
+    type: integer
+    nullable: true
+    meaning: 'The delivery the carton left on -> deliveries; null while in stock'
+    references: deliveries.id
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User whose batch completion created the carton -> users'
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the carton identity was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed (e.g. dispatched)'
+joins:
+  - 'finished_cartons.created_by = users.id'
+  - 'finished_cartons.delivery_id = deliveries.id'
+  - 'finished_cartons.item_id = items.id'
+  - 'finished_cartons.shift_production_entry_id = shift_production_entries.id'
+keywords:
+  - carton
+  - box
+  - fg
+  - 'finished goods'
+  - label
+  - barcode
+  - dispatch
+questions:
+  - 'How many cartons of each product are in stock right now?'
+  - 'Which batch did carton M04-20260903-2-C07 come from?'
+  - 'How many cartons were dispatched yesterday?'

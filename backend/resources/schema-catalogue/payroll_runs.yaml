@@ -1,0 +1,52 @@
+table: payroll_runs
+module: payroll
+label: 'Payroll Runs'
+purpose: 'One row per monthly payroll: the year and month being paid and whether it is still a draft, processed (payslips generated) or paid.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'row id'
+  -
+    name: year
+    type: integer
+    meaning: 'salary year'
+  -
+    name: month
+    type: integer
+    meaning: 'salary month (1-12)'
+  -
+    name: status
+    type: string
+    meaning: "run state: 'draft', 'processed' (payslips generated), 'paid'"
+  -
+    name: processed_at
+    type: datetime
+    nullable: true
+    meaning: 'when payslips were generated for this month'
+  -
+    name: paid_at
+    type: datetime
+    nullable: true
+    meaning: 'when the run was marked as paid'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'when the run was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'when the row was last edited'
+joins: {}
+keywords:
+  - payroll
+  - 'salary run'
+  - 'monthly salary'
+  - 'pay month'
+  - wages
+  - 'payroll processing'
+questions:
+  - 'Has the August payroll been processed?'
+  - 'Which payroll runs are still in draft?'

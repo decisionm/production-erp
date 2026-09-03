@@ -281,10 +281,17 @@ class ApiSurfaceSmokeTest extends TestCase
         $entry = $fx['entry']->id;
 
         return [
+            // Ask ERP's conversation read is scoped to its owner; the fixture
+            // belongs to the acting administrator.
+            'api/v1/ask-erp/conversations/{id}' => "/api/v1/ask-erp/conversations/{$fx['conversation']->id}",
             'api/v1/compliance/invoices/{invoice}/gst-breakdown' => "/api/v1/compliance/invoices/{$fx['invoice']->id}/gst-breakdown",
             'api/v1/crm/leads/{lead}/activities' => "/api/v1/crm/leads/{$fx['lead']->id}/activities",
             'api/v1/crm/quotations/{quotation}/pdf' => "/api/v1/crm/quotations/{$fx['quotation']->id}/pdf",
             'api/v1/hrms/employees/{employee}' => "/api/v1/hrms/employees/{$fx['employee']->id}",
+            'api/v1/hrms/attendance-imports/{attendance_import}' => "/api/v1/hrms/attendance-imports/{$fx['attendanceImport']->id}",
+            'api/v1/hrms/attendance-imports/{attendance_import}/lines' => "/api/v1/hrms/attendance-imports/{$fx['attendanceImport']->id}/lines",
+            // The review's other grain: one row per person, month included.
+            'api/v1/hrms/attendance-imports/{attendance_import}/employees' => "/api/v1/hrms/attendance-imports/{$fx['attendanceImport']->id}/employees",
             'api/v1/inventory/batches/{batch}/ledger' => "/api/v1/inventory/batches/{$fx['batch']->id}/ledger",
             'api/v1/inventory/items/{item}' => "/api/v1/inventory/items/{$fx['bottle']->id}",
             'api/v1/inventory/material-requests/{material_request}' => "/api/v1/inventory/material-requests/{$fx['materialRequest']->id}",

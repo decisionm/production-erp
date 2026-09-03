@@ -4,8 +4,22 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getClientOutstanding } from '@/features/finance/api';
 import type { AgeingBucket, ClientOutstanding, OutstandingBill, PendingOrderLine } from '@/features/finance/types';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
+import { TABLE_STICKY } from '@/lib/tableProps';
 
 const { Text } = Typography;
+
+/** The name the Client column prints first: the ERP customer where linked, else the Tally ledger. */
+function clientLabel(row: ClientOutstanding): string {
+    return row.customer_id !== null ? (row.customer_name ?? row.party_ledger_name) : row.party_ledger_name;
+}
+
+/** Linked to an ERP customer or not — the second line of the Client column, as a filter. */
+function clientLink(row: ClientOutstanding): 'linked' | 'unlinked' {
+    return row.customer_id !== null ? 'linked' : 'unlinked';
+}
+
+const CLIENT_LINK_LABELS: Record<string, string> = { linked: 'Linked', unlinked: 'Not linked' };
 
 /**
  * WHAT EVERY CLIENT OWES, HOW LONG THEY HAVE OWED IT, AND WHAT IS STILL TO
@@ -173,6 +187,9 @@ export default function ClientOutstandingPage() {
             key: 'client',
             fixed: 'left' as const,
             width: 260,
+            sorter: columnSorter<ClientOutstanding>(clientLabel, 'text'),
+            filters: filterOptions(data?.clients ?? [], clientLink, (value) => CLIENT_LINK_LABELS[String(value)] ?? String(value)),
+            onFilter: onFilterBy<ClientOutstanding>(clientLink),
             render: (_: unknown, row: ClientOutstanding) => (
                 <Space direction="vertical" size={0}>
                     {/* The ERP customer where the ledger has been linked; the
@@ -267,6 +284,7 @@ export default function ClientOutstandingPage() {
             key: 'bill_count',
             align: 'right' as const,
             width: 110,
+            sorter: columnSorter<ClientOutstanding>((row) => row.bill_count, 'number'),
             render: (count: number, row: ClientOutstanding) =>
                 row.balance_only && count === 0
                     ? <Tag style={{ marginInlineEnd: 0 }}>Balance only</Tag>
@@ -359,6 +377,7 @@ export default function ClientOutstandingPage() {
             </Space>
 
             <Table<ClientOutstanding>
+                sticky={TABLE_STICKY}
                 rowKey={(row) => row.party_ledger_guid ?? `name:${row.party_ledger_name}`}
                 loading={isPending}
                 dataSource={clients}

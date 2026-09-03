@@ -152,7 +152,7 @@ Every item below is a GAP against a record now in force.
     create/issue routes, keep existing rows as read-only history on the
     order's trace, and stop building receivables and GST figures on them.
     Until this ships, an ERP invoice cannot bill more than the customer
-    ordered (PR #88). **Built: PR #89** — the create and issue routes and
+    ordered (PR #88). **Built: PR #90** — the create and issue routes and
     their controller actions, request and service methods are gone; the
     Invoices page is a read-only history list; receivables and GSTR-1 carry a
     `basis` saying they stand on retired ERP invoice history. The interim cap

@@ -1,0 +1,94 @@
+table: batch_resin_allocations
+module: production
+label: 'Batch Resin Cost Allocations'
+purpose: "One row is one slice of one batch's resin consumption, priced: how many kg were drawn from which bag-load layer (or the stock-average fallback) at what preserved rate. Append-only costing analytics beside the stock ledger — a correction stamps reversed_at and writes a new allocation_run; rates here never reach Tally."
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: shift_production_entry_id
+    type: integer
+    meaning: 'The batch whose resin consumption is being priced -> shift_production_entries'
+    references: shift_production_entries.id
+  -
+    name: allocation_run
+    type: integer
+    meaning: 'Attempt number per batch (1, 2, 3...); only one un-reversed run per batch at a time'
+  -
+    name: day_bin_movement_id
+    type: integer
+    nullable: true
+    meaning: 'The bag-load layer this slice was drawn from -> day_bin_movements; null = beyond-layers fallback priced at stock average'
+    references: day_bin_movements.id
+  -
+    name: material_bag_id
+    type: integer
+    nullable: true
+    meaning: 'The resin bag behind the layer -> material_bags; null when the load had no barcode'
+    references: material_bags.id
+  -
+    name: material_lot_id
+    type: integer
+    nullable: true
+    meaning: 'The purchase lot the bag came from -> material_lots'
+    references: material_lots.id
+  -
+    name: item_id
+    type: integer
+    meaning: 'The resin item consumed -> items'
+    references: items.id
+  -
+    name: quantity_kg
+    type: decimal
+    meaning: 'Kg of resin in this slice'
+  -
+    name: rate_per_kg
+    type: decimal
+    nullable: true
+    meaning: 'Preserved purchase rate per kg at allocation time; null = no price known'
+    sensitive: rates
+  -
+    name: amount
+    type: decimal
+    nullable: true
+    meaning: 'Cost of this slice = quantity_kg x rate_per_kg; null = no price known'
+    sensitive: rates
+  -
+    name: rate_source
+    type: string
+    meaning: 'Where the rate came from: bag_receipt (GRN cost), bag_version (a later cost version), average_fallback (stock average), unknown (no rate)'
+  -
+    name: reversed_at
+    type: datetime
+    nullable: true
+    meaning: 'When this row was superseded by a correction; null = live and counts'
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User whose completion/amendment produced the allocation -> users'
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the allocation was written'
+joins:
+  - 'batch_resin_allocations.created_by = users.id'
+  - 'batch_resin_allocations.item_id = items.id'
+  - 'batch_resin_allocations.material_lot_id = material_lots.id'
+  - 'batch_resin_allocations.material_bag_id = material_bags.id'
+  - 'batch_resin_allocations.day_bin_movement_id = day_bin_movements.id'
+  - 'batch_resin_allocations.shift_production_entry_id = shift_production_entries.id'
+keywords:
+  - 'resin cost'
+  - 'batch cost'
+  - 'bag cost'
+  - costing
+  - rate
+  - allocation
+questions:
+  - 'What did the resin for each batch cost last week?'
+  - 'Which batches were priced at the stock-average fallback instead of a bag rate?'

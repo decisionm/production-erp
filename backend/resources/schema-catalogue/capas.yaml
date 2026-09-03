@@ -1,0 +1,93 @@
+table: capas
+module: quality
+label: CAPAs
+purpose: 'One row is one corrective and preventive action (CAPA), usually raised against a non-conformance report: the problem, its root cause, the actions, the owner, the due date and whether it was verified effective.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: non_conformance_report_id
+    type: integer
+    nullable: true
+    meaning: 'NCR the CAPA answers (non_conformance_reports.id); null for a standalone CAPA'
+    references: non_conformance_reports.id
+  -
+    name: title
+    type: string
+    meaning: 'Short title'
+  -
+    name: problem_statement
+    type: string
+    meaning: 'Description of the problem'
+  -
+    name: root_cause
+    type: string
+    nullable: true
+    meaning: 'Root cause found'
+  -
+    name: corrective_action
+    type: string
+    nullable: true
+    meaning: 'Action taken to fix the occurrence'
+  -
+    name: preventive_action
+    type: string
+    nullable: true
+    meaning: 'Action taken to stop it recurring'
+  -
+    name: owner
+    type: integer
+    nullable: true
+    meaning: 'Employee responsible for the CAPA (employees.id)'
+    references: employees.id
+  -
+    name: due_date
+    type: date
+    nullable: true
+    meaning: 'Date the actions are due'
+  -
+    name: status
+    type: string
+    meaning: 'open | in_progress | closed'
+  -
+    name: verified_effective
+    type: integer
+    nullable: true
+    meaning: '1 = verified effective, 0 = verified not effective, null = not yet verified'
+  -
+    name: closed_date
+    type: date
+    nullable: true
+    meaning: 'Date the CAPA was closed'
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User who raised the CAPA (users.id)'
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last updated'
+joins:
+  - 'capas.created_by = users.id'
+  - 'capas.owner = employees.id'
+  - 'capas.non_conformance_report_id = non_conformance_reports.id'
+keywords:
+  - capa
+  - 'corrective action'
+  - 'preventive action'
+  - 'root cause'
+  - 'ncr action'
+  - 'quality action'
+questions:
+  - 'Which CAPAs are overdue?'
+  - 'Which CAPAs are open per owner?'

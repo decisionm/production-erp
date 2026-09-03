@@ -1,0 +1,68 @@
+table: sales_orders
+module: sales
+label: 'Sales Orders'
+purpose: 'One row is a customer order booked in the ERP (numbered SO-{id}), a planning reference that says what a customer wants and by when. A sales order never moves stock; stock leaves only through a delivery (dispatch), and the sales invoice is raised in Tally, not here.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Row id; the order number shown as SO-{id}'
+  -
+    name: customer_id
+    type: integer
+    meaning: 'The customer who placed the order'
+    references: customers.id
+  -
+    name: status
+    type: string
+    meaning: 'Order state: draft, confirmed, partially_delivered, completed, cancelled'
+  -
+    name: order_date
+    type: date
+    meaning: 'Date the order was booked'
+  -
+    name: expected_date
+    type: date
+    nullable: true
+    meaning: 'Promised date - the date promised to the customer (DEC-20260902-043)'
+  -
+    name: notes
+    type: string
+    nullable: true
+    meaning: 'Free-text notes on the order'
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User who booked the order'
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+  -
+    name: customer_po_reference
+    type: string
+    nullable: true
+    meaning: "The customer's own purchase-order number; the key a Tally sales invoice is matched on"
+joins:
+  - 'sales_orders.created_by = users.id'
+  - 'sales_orders.customer_id = customers.id'
+keywords:
+  - so
+  - order
+  - 'sales order'
+  - 'customer order'
+  - booking
+  - 'customer po'
+  - 'promised date'
+questions:
+  - 'Which sales orders are confirmed but not yet fully delivered?'
+  - 'How many sales orders did each customer place this month?'
+  - 'Which orders are past their promised date and still open?'

@@ -4,6 +4,7 @@ namespace App\Modules\Production\Http\Requests;
 
 use App\Modules\Production\Models\ProductionStandardPackaging;
 use App\Modules\Production\Services\ProductStandardsWorkspaceService;
+use App\Support\Lists\ListSort;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -52,6 +53,11 @@ class IndexProductionStandardsRequest extends FormRequest
 
             'page' => ['sometimes', 'integer', 'min:1'],
             'per_page' => ['sometimes', 'integer', 'min:1'],
+
+            // Column-header sorting (03-Sep-2026): the product name and the
+            // standard's status, in the shared ListSort spelling. Absent is
+            // the workspace's own order (product name, cavities, id).
+            'sort' => ListSort::rule(ProductStandardsWorkspaceService::SORTABLE),
         ];
     }
 }

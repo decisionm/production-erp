@@ -1,0 +1,175 @@
+# DEC-20260903-002 — remove the 23-Jul-2026 demo stock standing on the
+# Production/WIP row, BY EXACT ID, dry run first.
+#
+# How to use it:
+#   1. Run with write=false (the default). Read the candidate table in the job
+#      summary: id, item, quantity, reference. Every id is a demo row the
+#      seeder wrote on that day; a real, stamped row is never listed.
+#   2. Run again with write=true, the ids you read typed into `ids`, and the
+#      confirmation text. The workflow re-runs the dry run, takes a FULL
+#      database dump on the server (backend/scripts/backup-db.sh — refuses to
+#      write if the dump fails), then runs the delete. The command refuses
+#      any id that is not a candidate, any row another record references, and
+#      any transfer leg whose partner is not also named; the touched balances
+#      are recomputed from the surviving movements inside the same transaction.
+#
+# Nothing here reads item names. The candidate rule is the WIP warehouse
+# (resolved by the app, never a hard-coded id), the calendar day, no purpose
+# stamp, and the seeder's reference shape.
+
+name: Remove WIP demo rows (DEC-20260903-002)
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      write:
+        description: 'Actually delete. Leave false for a dry run that lists the candidates and changes nothing.'
+        type: boolean
+        default: false
+      ids:
+        description: 'The stock_movements ids to remove, comma-separated, read from the dry run (ignored on a dry run).'
+        type: string
+        default: ''
+      on_day:
+        description: 'The UTC day the demo rows were written (YYYY-MM-DD). Leave as is unless the dry run says otherwise.'
+        type: string
+        default: '2026-07-23'
+      confirm:
+        description: 'To write, type exactly:  REMOVE WIP DEMO ROWS  (ignored on a dry run)'
+        type: string
+        default: ''
+
+concurrency:
+  group: remove-wip-demo-rows
+  cancel-in-progress: false
+
+jobs:
+  remove:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse a write without the typed confirmation
+        if: ${{ inputs.write }}
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "REMOVE WIP DEMO ROWS" ]; then
+            echo "::error::Write refused. To delete, set write=true AND type REMOVE WIP DEMO ROWS in the confirm box. A dry run (write=false) needs no confirmation."
+            exit 1
+          fi
+
+      - name: Refuse a write without plain ids
+        if: ${{ inputs.write }}
+        env:
+          IDS: ${{ inputs.ids }}
+        run: |
+          TRIMMED="$(printf '%s' "$IDS" | tr -d '[:space:]')"
+          if ! printf '%s' "$TRIMMED" | grep -Eq '^[0-9]+(,[0-9]+)*$'; then
+            echo "::error::Write refused. ids must be the stock_movements ids read from the dry run, digits and commas only, e.g. 12,13,14. Got: '$IDS'"
+            exit 1
+          fi
+          echo "IDS=$TRIMMED" >> "$GITHUB_ENV"
+          echo "::warning::DELETING $(printf '%s' "$TRIMMED" | tr ',' '\n' | wc -l | tr -d ' ') demo stock movement(s) from the LIVE database after a full backup."
+
+      - name: Refuse a day that is not a date
+        env:
+          ON_DAY: ${{ inputs.on_day }}
+        run: |
+          if ! printf '%s' "$ON_DAY" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
+            echo "::error::on_day must be a date in YYYY-MM-DD form (got '$ON_DAY')."
+            exit 1
+          fi
+          echo "ON_DAY=$ON_DAY" >> "$GITHUB_ENV"
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          keys=""
+          for attempt in 1 2 3; do
+            keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+            if [ -n "$keys" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "ssh-keyscan attempt ${attempt} returned no host key; retrying in $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            fi
+          done
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Re-running usually clears a transient failure; if not, brute-force protection may have banned the runner."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Dry run first
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan inventory:remove-wip-demo-rows --on='$ON_DAY'" \
+            2>&1 | tee dry-run.txt
+
+      - name: Back up the database before writing
+        if: ${{ inputs.write }}
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && bash scripts/backup-db.sh" \
+            2>&1 | tee backup.txt
+          echo "Backup written on the server: $(tail -1 backup.txt)"
+
+      - name: Write
+        if: ${{ inputs.write }}
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan inventory:remove-wip-demo-rows --on='$ON_DAY' --write --ids='$IDS'" \
+            2>&1 | tee write.txt
+
+      - name: Ledger invariant after the write
+        if: ${{ inputs.write }}
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan inventory:check-ledger" \
+            2>&1 | tee ledger.txt
+
+      - name: Summarise
+        if: always()
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+        run: |
+          {
+            echo "### Remove WIP demo rows (DEC-20260903-002)"
+            echo
+            echo "write: \`$WRITE_RAW\` · on_day: \`${ON_DAY:-}\` · ids: \`${IDS:-}\`"
+            echo
+            echo "#### Dry run (always runs first)"
+            echo '```'
+            cat dry-run.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+            if [ "$WRITE_RAW" = "true" ]; then
+              echo
+              echo "#### Backup"
+              echo '```'
+              cat backup.txt 2>/dev/null || echo "(no backup output — a gate refused before it ran, or the step failed)"
+              echo '```'
+              echo
+              echo "#### Write"
+              echo '```'
+              cat write.txt 2>/dev/null || echo "(no write output — the backup or a gate refused before it ran)"
+              echo '```'
+              echo
+              echo "#### Ledger invariant"
+              echo '```'
+              cat ledger.txt 2>/dev/null || echo "(not run)"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

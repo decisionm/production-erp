@@ -6,6 +6,8 @@ import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { createRole, deleteRole, listPermissionCatalog, listRoles, updateRole } from '@/features/access/api';
 import type { PermissionCatalogEntry, Role } from '@/features/access/types';
+import { columnSorter } from '@/lib/clientSort';
+import { TABLE_STICKY } from '@/lib/tableProps';
 
 const roleSchema = z.object({
     name: z.string().min(1, 'Name is required').max(255),
@@ -141,13 +143,16 @@ export default function RolesPage() {
             </Typography.Paragraph>
 
             <Table<Role>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={roles}
+                // The whole role list is in the browser (an unpaged array),
+                // so these sorters are client-side over all of it.
                 pagination={false}
                 columns={[
-                    { title: 'Name', dataIndex: 'name' },
+                    { title: 'Name', dataIndex: 'name', sorter: columnSorter((row) => row.name, 'text') },
                     {
                         title: 'Access',
                         render: (_, row) => (
@@ -158,7 +163,7 @@ export default function RolesPage() {
                             </Space>
                         ),
                     },
-                    { title: 'Users', dataIndex: 'users_count' },
+                    { title: 'Users', dataIndex: 'users_count', sorter: columnSorter((row) => row.users_count, 'number') },
                     {
                         title: 'Actions',
                         render: (_, row) => (

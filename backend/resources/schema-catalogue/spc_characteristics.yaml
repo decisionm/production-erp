@@ -1,0 +1,70 @@
+table: spc_characteristics
+module: quality
+label: 'SPC Characteristics'
+purpose: 'One row is one measured characteristic of an item for statistical process control (e.g. piece weight, neck diameter), with its target value and specification limits.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: item_id
+    type: integer
+    meaning: 'Item the characteristic belongs to (items.id)'
+    references: items.id
+  -
+    name: name
+    type: string
+    meaning: 'Characteristic name, e.g. Weight, Neck ID'
+  -
+    name: unit_of_measure
+    type: string
+    nullable: true
+    meaning: 'Unit the value is measured in, e.g. g, mm'
+  -
+    name: target_value
+    type: decimal
+    nullable: true
+    meaning: 'Nominal target value'
+  -
+    name: lower_spec_limit
+    type: decimal
+    nullable: true
+    meaning: 'Lower specification limit'
+  -
+    name: upper_spec_limit
+    type: decimal
+    nullable: true
+    meaning: 'Upper specification limit'
+  -
+    name: is_active
+    type: integer
+    meaning: '1 = active, 0 = deactivated'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last updated'
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+    meaning: 'Soft-delete timestamp; null means the row is live'
+joins:
+  - 'spc_characteristics.item_id = items.id'
+  - 'spc_measurements.spc_characteristic_id = spc_characteristics.id'
+keywords:
+  - spc
+  - characteristic
+  - 'spec limit'
+  - tolerance
+  - 'control chart'
+  - 'quality parameter'
+questions:
+  - 'Which characteristics are tracked for a product?'
+  - 'What are the spec limits for piece weight?'

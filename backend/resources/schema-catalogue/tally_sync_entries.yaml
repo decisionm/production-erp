@@ -1,0 +1,89 @@
+table: tally_sync_entries
+module: tally-sync
+label: 'Tally Sync Queue'
+purpose: 'One voucher queued from the ERP to Tally: the source document (a shift production entry, goods receipt, purchase order, journal entry, invoice or delivery), the normalised payload the on-prem agent turns into Tally XML, and its delivery status. Never deleted; dismissed rows stay as history.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key; the queue entry id'
+  -
+    name: syncable_type
+    type: string
+    meaning: 'Model class of the source document (e.g. Production Shift / ShiftProductionEntry, Procurement GoodsReceiptNote, PurchaseOrder, Finance JournalEntry, Sales Invoice, Delivery)'
+  -
+    name: syncable_id
+    type: integer
+    meaning: 'Primary key of the source document in the table named by syncable_type'
+  -
+    name: tally_voucher_type
+    type: string
+    meaning: 'Tally voucher type name: Stock Journal, Manufacturing Journal (ERP label; sent as Stock Journal), Receipt Note, Purchase Order, Journal, Sales, Delivery Note'
+  -
+    name: payload
+    type: string
+    meaning: 'JSON, XML-agnostic voucher shape: voucher_date, voucher_number, party_ledger (where any), and for production batch_number, shift, consumed[], produced[], withheld[], resolution_log[]; includes supplier party and rates for Receipt Note / Purchase Order'
+    sensitive: rates
+  -
+    name: status
+    type: string
+    meaning: 'Delivery state: pending (waiting for the agent), synced (Tally accepted), failed (Tally rejected), dismissed (written off by a person, never sent)'
+  -
+    name: attempts
+    type: integer
+    meaning: 'Number of times the agent has attempted to post it'
+  -
+    name: error_message
+    type: string
+    nullable: true
+    meaning: 'Last error text reported by the agent / Tally'
+  -
+    name: synced_at
+    type: datetime
+    nullable: true
+    meaning: 'When Tally accepted the voucher'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the entry was queued'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+  -
+    name: delivered_at
+    type: datetime
+    nullable: true
+    meaning: 'When the agent first collected it; closes the merge window of a shift voucher'
+  -
+    name: last_merged_at
+    type: datetime
+    nullable: true
+    meaning: 'Idle-hold clock for a shift voucher: last time an approval merged in and the payload was rebuilt; NULL on batch-mode vouchers'
+  -
+    name: released_at
+    type: datetime
+    nullable: true
+    meaning: 'When a person released a held shift voucher ahead of the gate'
+  -
+    name: released_by
+    type: integer
+    nullable: true
+    meaning: 'User who released it by hand (users)'
+    references: users.id
+joins:
+  - 'tally_sync_entries.released_by = users.id'
+keywords:
+  - 'tally sync'
+  - 'sync queue'
+  - voucher
+  - 'pending voucher'
+  - 'failed sync'
+  - 'stock journal'
+  - 'posted to tally'
+questions:
+  - 'How many vouchers are pending or failed in the Tally queue?'
+  - 'Which production shift vouchers failed to post this week, and with what error?'
+  - 'When was the last voucher synced to Tally?'

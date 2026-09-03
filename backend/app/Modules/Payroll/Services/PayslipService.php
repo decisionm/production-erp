@@ -2,7 +2,9 @@
 
 namespace App\Modules\Payroll\Services;
 
+use App\Modules\Payroll\Http\Requests\ListPayslipsRequest;
 use App\Modules\Payroll\Models\Payslip;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -14,7 +16,8 @@ class PayslipService
      * The list, filtered (ListPayslipsRequest's validated input). `q`
      * matches the employee's name or code through the relation — a payslip's
      * identity is its employee and its run, and the run is the page's own
-     * filter. Newest first; id is unique, so the order is stable as it is.
+     * filter. Ordered by `sort` (ListSort), newest first as it always was
+     * when absent; id breaks every tie.
      *
      * @param  array<string, mixed>  $filters
      */
@@ -41,9 +44,9 @@ class PayslipService
             });
         }
 
-        return $query
-            ->with(['employee', 'payrollRun', 'lines'])
-            ->orderByDesc('id')
+        $query->with(['employee', 'payrollRun', 'lines']);
+
+        return ListSort::apply($query, $filters['sort'] ?? null, ListPayslipsRequest::SORTABLE)
             ->paginate($this->query->perPage($filters))
             ->withQueryString();
     }

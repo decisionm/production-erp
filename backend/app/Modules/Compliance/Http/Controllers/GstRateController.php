@@ -3,6 +3,7 @@
 namespace App\Modules\Compliance\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Compliance\Http\Requests\ListGstRatesRequest;
 use App\Modules\Compliance\Http\Requests\StoreGstRateRequest;
 use App\Modules\Compliance\Http\Requests\UpdateGstRateRequest;
 use App\Modules\Compliance\Http\Resources\GstRateResource;
@@ -14,9 +15,12 @@ class GstRateController extends Controller
 {
     public function __construct(private readonly GstRateService $rates) {}
 
-    public function index(): AnonymousResourceCollection
+    public function index(ListGstRatesRequest $request): AnonymousResourceCollection
     {
-        return GstRateResource::collection($this->rates->paginate());
+        return GstRateResource::collection($this->rates->paginate(
+            (int) ($request->validated('per_page') ?? 20),
+            $request->validated('sort'),
+        ));
     }
 
     public function store(StoreGstRateRequest $request): GstRateResource

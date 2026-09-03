@@ -1,0 +1,74 @@
+table: attendance_imports
+module: hrms
+label: 'Attendance Imports'
+purpose: 'One upload of the Pooja punch report: the period it covers, who uploaded it, and how many employees, days and flagged days it carried. The days themselves are in attendance_import_lines; nothing here is attendance until a person applies the run.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'primary key'
+  -
+    name: source
+    type: string
+    meaning: "which system the file came from — 'pooja' is the only value today"
+  -
+    name: period_from
+    type: date
+    meaning: 'first day the report covers'
+  -
+    name: period_to
+    type: date
+    meaning: 'last day the report covers'
+  -
+    name: file_name
+    type: string
+    nullable: true
+    meaning: 'the workbook the office uploaded, kept so a run can be recognised'
+  -
+    name: uploaded_by
+    type: integer
+    meaning: 'the user who uploaded the file'
+    references: users.id
+  -
+    name: status
+    type: string
+    meaning: 'review | applied — applied means every line has been written into attendances'
+  -
+    name: employee_count
+    type: integer
+    meaning: 'people found in the file'
+  -
+    name: day_count
+    type: integer
+    meaning: 'employee-days found in the file'
+  -
+    name: issue_count
+    type: integer
+    meaning: 'employee-days the server flagged for a correction'
+  -
+    name: applied_at
+    type: datetime
+    nullable: true
+    meaning: 'when the run was applied to attendance; null while under review'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'when the file was uploaded'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'last change'
+joins:
+  - 'attendance_imports.uploaded_by = users.id'
+keywords:
+  - 'attendance import'
+  - 'punch report'
+  - pooja
+  - upload
+  - biometric
+  - muster
+questions:
+  - 'How many attendance imports were uploaded this month?'
+  - 'Which attendance imports are still under review?'

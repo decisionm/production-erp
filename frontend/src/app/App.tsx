@@ -74,7 +74,11 @@ const GstRatesPage = lazyPage(() => import('@/features/compliance/pages/GstRates
 const GstRegistrationsPage = lazyPage(() => import('@/features/compliance/pages/GstRegistrationsPage'));
 const GstReportsPage = lazyPage(() => import('@/features/compliance/pages/GstReportsPage'));
 const HelpPage = lazyPage(() => import('@/features/help/pages/HelpPage'));
+const SettingsPage = lazyPage(() => import('@/features/settings/pages/SettingsPage'));
+const AskErpPage = lazyPage(() => import('@/features/ask-erp/pages/AskErpPage'));
 const AttendancePage = lazyPage(() => import('@/features/hrms/pages/AttendancePage'));
+const AttendanceImportsPage = lazyPage(() => import('@/features/hrms/pages/AttendanceImportsPage'));
+const AttendanceImportPage = lazyPage(() => import('@/features/hrms/pages/AttendanceImportPage'));
 const EmployeesPage = lazyPage(() => import('@/features/hrms/pages/EmployeesPage'));
 const LeaveBalancesPage = lazyPage(() => import('@/features/hrms/pages/LeaveBalancesPage'));
 const LeaveRequestsPage = lazyPage(() => import('@/features/hrms/pages/LeaveRequestsPage'));
@@ -159,6 +163,7 @@ export default function App() {
                                 <Routes>
                                     <Route path="/" element={<DashboardPage />} />
                                     <Route path="/account/change-password" element={<ChangePasswordPage />} />
+                                    <Route path="/ask-erp" element={<AskErpPage />} />
                                     <Route path="/crm/leads" element={<LeadsPage />} />
                                     <Route path="/crm/opportunities" element={<OpportunitiesPage />} />
                                     <Route path="/crm/quotations" element={<QuotationsPage />} />
@@ -338,6 +343,8 @@ export default function App() {
                                     <Route path="/hrms/leave-balances" element={<LeaveBalancesPage />} />
                                     <Route path="/hrms/leave-requests" element={<LeaveRequestsPage />} />
                                     <Route path="/hrms/attendance" element={<AttendancePage />} />
+                                    <Route path="/hrms/attendance-imports" element={<AttendanceImportsPage />} />
+                                    <Route path="/hrms/attendance-imports/:id" element={<AttendanceImportPage />} />
                                     <Route path="/payroll/salary-components" element={<SalaryComponentsPage />} />
                                     <Route path="/payroll/salary-structures" element={<SalaryStructuresPage />} />
                                     <Route path="/payroll/runs" element={<PayrollRunsPage />} />
@@ -349,6 +356,15 @@ export default function App() {
                                     <Route path="/tally-sync" element={<TallySyncPage />} />
                                     <Route path="/tally-sync/agent-tokens" element={<AgentTokensPage />} />
                                     <Route path="/tally-sync/settings" element={<TallySettingsPage />} />
+                                    {/* The one destination for the four utilities
+                                        below it, which used to sit loose at the
+                                        bottom of the sidebar. Ungated like they are:
+                                        the CARDS gate themselves (settingsSections
+                                        mirrors AppLayout's adoption-then-permission
+                                        rule), so a login holding neither users nor
+                                        roles still opens the page and sees only
+                                        Downloads and Help. */}
+                                    <Route path="/settings" element={<SettingsPage />} />
                                     {/* The Download / Export Center. Open to every
                                         login like every other route — the SERVER's
                                         catalogue is what filters: a kind is offered,

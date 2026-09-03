@@ -2,12 +2,23 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, DatePicker, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import BarcodeDisplay from '@/components/barcode/BarcodeDisplay';
 import { createAsset, listAssets, updateAsset } from '@/features/maintenance/api';
+import {
+    ASSET_DEFAULT_SORT,
+    ASSET_LIST_SPEC,
+    ASSET_SORT_FIELDS,
+    type AssetListParams,
+    assetServerFilters,
+    assetsQueryKey,
+} from '@/features/maintenance/assetList';
 import type { Asset, AssetStatus } from '@/features/maintenance/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const assetSchema = z.object({
     code: z.string().min(1, 'Code is required').max(32),
@@ -42,7 +53,15 @@ export default function AssetsPage() {
     const [barcodeAsset, setBarcodeAsset] = useState<Asset | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['maintenance', 'assets'], queryFn: listAssets });
+    // THE REGISTER'S VIEW IS ITS URL (useListParams): sort, page and page
+    // size, all answered by the SERVER over the whole register.
+    const { params, setParams, setPage } = useListParams<AssetListParams>(ASSET_LIST_SPEC);
+    const filters = useMemo(() => assetServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: assetsQueryKey(filters),
+        queryFn: () => listAssets(filters),
+        placeholderData: (previous) => previous,
+    });
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<AssetFormValues>({
         resolver: zodResolver(assetSchema),
@@ -97,19 +116,54 @@ export default function AssetsPage() {
             </Space>
 
             <Table<Asset>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries; the register is paginated, so sorting the
+                // loaded page would misorder the whole result set.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, ASSET_SORT_FIELDS, ASSET_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'assets')}
                 columns={[
-                    { title: 'Code', dataIndex: 'code' },
-                    { title: 'Name', dataIndex: 'name' },
-                    { title: 'Category', dataIndex: 'category' },
-                    { title: 'Location', dataIndex: 'location' },
+                    {
+                        title: 'Code',
+                        dataIndex: 'code',
+                        key: 'code',
+                        sorter: true,
+                        sortOrder: columnSortOrder('code', params.sort, ASSET_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, ASSET_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Category',
+                        dataIndex: 'category',
+                        key: 'category',
+                        sorter: true,
+                        sortOrder: columnSortOrder('category', params.sort, ASSET_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Location',
+                        dataIndex: 'location',
+                        key: 'location',
+                        sorter: true,
+                        sortOrder: columnSortOrder('location', params.sort, ASSET_DEFAULT_SORT),
+                    },
                     {
                         title: 'Status',
                         dataIndex: 'status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, ASSET_DEFAULT_SORT),
                         render: (status: AssetStatus, row) => (
                             <Select
                                 value={status}

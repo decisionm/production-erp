@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\Assistant\Http\Controllers\AskErpController;
 use App\Modules\Compliance\Http\Controllers\GstComputationController;
 use App\Modules\Compliance\Http\Controllers\GstRateController;
 use App\Modules\Compliance\Http\Controllers\GstRegistrationController;
@@ -19,6 +20,7 @@ use App\Modules\Finance\Http\Controllers\FinancialReportController;
 use App\Modules\Finance\Http\Controllers\GLAccountController;
 use App\Modules\Finance\Http\Controllers\JournalEntryController;
 use App\Modules\HRMS\Http\Controllers\AttendanceController;
+use App\Modules\HRMS\Http\Controllers\AttendanceImportController;
 use App\Modules\HRMS\Http\Controllers\EmployeeController;
 use App\Modules\HRMS\Http\Controllers\LeaveBalanceController;
 use App\Modules\HRMS\Http\Controllers\LeaveRequestController;
@@ -935,6 +937,21 @@ Route::prefix('v1')->group(function () {
             Route::post('stock-summary/preview', [TallySyncAgentController::class, 'stockSummaryPreview']);
         });
 
+        // ASK ERP — natural-language questions over the tables this login may
+        // view. `module-read:assistant` gates the page on `.view` for every
+        // verb, because a question is a read: the POSTs here run a guarded
+        // SELECT and write nothing but the asker's own conversation log. What
+        // the page may READ is decided per table inside SchemaRetriever from
+        // the login's other module permissions, and per column by
+        // SensitiveColumns.
+        Route::prefix('ask-erp')->middleware('module-read:assistant')->group(function () {
+            Route::get('catalogue', [AskErpController::class, 'catalogue']);
+            Route::get('conversations', [AskErpController::class, 'index']);
+            Route::post('conversations', [AskErpController::class, 'store']);
+            Route::get('conversations/{id}', [AskErpController::class, 'show']);
+            Route::post('conversations/{id}/ask', [AskErpController::class, 'ask']);
+        });
+
         Route::prefix('hrms')->middleware('module:hrms')->group(function () {
             Route::apiResource('employees', EmployeeController::class)->only(['index', 'store', 'update']);
             // The Configuration Lifecycle Contract (DEC-20260817-002) on the
@@ -959,6 +976,22 @@ Route::prefix('v1')->group(function () {
 
             Route::get('attendance', [AttendanceController::class, 'index']);
             Route::post('attendance/mark', [AttendanceController::class, 'mark']);
+
+            // The punch-report import (03-Sep design, Track 2): the browser
+            // parses the workbook, the server keeps the rows, the reviewer
+            // corrects, Apply writes `attendances`. The month sheet is an
+            // ExportKind (attendance_month_sheet) on the Export Center.
+            Route::get('attendance-imports', [AttendanceImportController::class, 'index']);
+            Route::post('attendance-imports', [AttendanceImportController::class, 'store']);
+            Route::get('attendance-imports/{attendance_import}', [AttendanceImportController::class, 'show']);
+            // The review's PERSON grain, and one answer for one kind of
+            // problem. Both sit beside the line list rather than replacing
+            // it: the same lines, at the grain the reviewer is working at.
+            Route::get('attendance-imports/{attendance_import}/employees', [AttendanceImportController::class, 'employees']);
+            Route::get('attendance-imports/{attendance_import}/lines', [AttendanceImportController::class, 'lines']);
+            Route::post('attendance-imports/{attendance_import}/lines/bulk-resolve', [AttendanceImportController::class, 'bulkResolve']);
+            Route::patch('attendance-imports/{attendance_import}/lines/{line}', [AttendanceImportController::class, 'resolveLine']);
+            Route::post('attendance-imports/{attendance_import}/apply', [AttendanceImportController::class, 'apply']);
         });
 
         Route::prefix('payroll')->middleware('module:payroll')->group(function () {

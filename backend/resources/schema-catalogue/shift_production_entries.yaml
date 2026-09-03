@@ -1,0 +1,414 @@
+table: shift_production_entries
+module: production
+label: 'Production Batches'
+purpose: 'THE batch record: one row is one production run of one product on one machine (work centre) in one shift, from Start Batch (in_progress) through Complete Batch (counts, kg, packing), the quality check, the plant-manager and accountant approvals and finally the Tally stock journal. Quantities are pieces (Nos) unless the column name says kg; a run that crosses a shift boundary becomes a child segment row sharing the parent batch_number.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: shift_id
+    type: integer
+    meaning: 'The shift (Day/Night) the batch ran in -> shifts'
+    references: shifts.id
+  -
+    name: work_center_id
+    type: integer
+    meaning: 'The machine the batch ran on -> work_centers'
+    references: work_centers.id
+  -
+    name: item_id
+    type: integer
+    meaning: 'The product (bottle/jar) being made -> items; the Tally item it posts as may be finished_item_id instead'
+    references: items.id
+  -
+    name: warehouse_id
+    type: integer
+    meaning: 'Finished-goods store the produced pieces are received into -> warehouses'
+    references: warehouses.id
+  -
+    name: production_date
+    type: date
+    meaning: 'Factory production date (IST); an overnight Night shift files under the date the shift STARTED'
+  -
+    name: quantity_produced
+    type: decimal
+    nullable: true
+    meaning: 'NET good pieces produced (Nos); null while in_progress, set at Complete Batch, rewritten to gross minus quality-rejected at the quality check'
+  -
+    name: quantity_scrap
+    type: decimal
+    meaning: 'Rejected pieces (Nos) the supervisor counted at Complete Batch; 0 when none'
+  -
+    name: scrap_reason_id
+    type: integer
+    nullable: true
+    meaning: 'Why the supervisor-counted scrap was rejected -> scrap_reasons'
+    references: scrap_reasons.id
+  -
+    name: operator_id
+    type: integer
+    nullable: true
+    meaning: 'Machine operator on this run -> employees'
+    references: employees.id
+  -
+    name: notes
+    type: string
+    nullable: true
+    meaning: 'Free-text remarks from the floor'
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User (supervisor) who pressed Start Batch -> users'
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the batch was started (row created)'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed (every approval rewrites it)'
+  -
+    name: batch_status
+    type: string
+    meaning: 'Whether the run itself finished: in_progress (started, machine busy), completed (counts entered), cancelled (started by mistake and withdrawn, never produced anything)'
+  -
+    name: batch_number
+    type: string
+    nullable: true
+    meaning: 'Batch identity like M04-20260903-2 (machine tag, production date, sequence on that machine that day); shared by every segment of one run'
+  -
+    name: quantity_produced_kg
+    type: decimal
+    nullable: true
+    meaning: 'Net produced weight in kg = quantity_produced x the unit weight frozen in config_snapshot'
+  -
+    name: quantity_rejection_kg
+    type: decimal
+    nullable: true
+    meaning: 'Supervisor-counted rejection converted to kg (quantity_scrap x unit weight)'
+  -
+    name: nos_per_tray
+    type: integer
+    nullable: true
+    meaning: 'Pieces per tray used by this run (frozen at Complete Batch)'
+  -
+    name: no_of_trays
+    type: integer
+    nullable: true
+    meaning: 'Number of trays packed'
+  -
+    name: nos_per_box
+    type: integer
+    nullable: true
+    meaning: 'Pieces per carton/box used by this run (frozen at Complete Batch)'
+  -
+    name: no_of_box
+    type: integer
+    nullable: true
+    meaning: 'Number of cartons/boxes packed'
+  -
+    name: supervisor_signed_by
+    type: integer
+    nullable: true
+    meaning: 'Supervisor who signed off the paper report (stage 1, audit only) -> employees'
+    references: employees.id
+  -
+    name: supervisor_signed_at
+    type: datetime
+    nullable: true
+    meaning: 'When the supervisor signed (stage 1)'
+  -
+    name: plant_manager_signed_at
+    type: datetime
+    nullable: true
+    meaning: 'When the Plant Manager approved (stage 2, status becomes pm_approved)'
+  -
+    name: status
+    type: string
+    meaning: 'Approval chain: pending (completed, awaiting quality/PM), pm_approved (Plant Manager verified), approved (Accountant approved, eligible for Tally), synced (Tally voucher posted), failed (Tally posting failed), rejected (sent back to the supervisor); accountant_approved is a retired historical value'
+  -
+    name: rejection_reason
+    type: string
+    nullable: true
+    meaning: 'Why the PM or Accountant rejected the batch back to the supervisor'
+  -
+    name: approved_by
+    type: integer
+    nullable: true
+    meaning: 'User whose approval made status = approved (the Accountant, the final gate) -> users'
+    references: users.id
+  -
+    name: approved_at
+    type: datetime
+    nullable: true
+    meaning: 'When the batch reached status = approved'
+  -
+    name: accountant_signed_by
+    type: integer
+    nullable: true
+    meaning: 'Accountant who approved (stage 3, the final posting gate) -> users'
+    references: users.id
+  -
+    name: accountant_signed_at
+    type: datetime
+    nullable: true
+    meaning: 'When the Accountant approved (stage 3)'
+  -
+    name: plant_manager_signed_by
+    type: integer
+    nullable: true
+    meaning: 'Plant Manager who approved (stage 2) -> users'
+    references: users.id
+  -
+    name: helper_name
+    type: string
+    nullable: true
+    meaning: 'Helper on the machine, free text (not necessarily an employee record)'
+  -
+    name: standard_cycle_time
+    type: decimal
+    nullable: true
+    meaning: 'Standard cycle time in seconds frozen at Start Batch (configuration, else product standard, else item master)'
+  -
+    name: actual_cycle_time
+    type: decimal
+    nullable: true
+    meaning: 'Cycle time in seconds the machine actually ran at'
+  -
+    name: standard_cavities
+    type: integer
+    nullable: true
+    meaning: 'Standard number of mould cavities frozen at Start Batch'
+  -
+    name: active_cavities
+    type: integer
+    nullable: true
+    meaning: 'Cavities actually open on this run (blocked cavities reduce it)'
+  -
+    name: running_hours
+    type: decimal
+    nullable: true
+    meaning: 'Hours the machine ran this batch (8 = full shift; partials 2/4/6), entered at Complete Batch'
+  -
+    name: qc_rejection_kg
+    type: decimal
+    nullable: true
+    meaning: 'Quality-rejected weight in kg; written from quality_rejected_nos x unit weight (or weighed by QC) and, under precedence qc, replaces the supervisor rejection figure'
+  -
+    name: tally_sync_entry_id
+    type: integer
+    nullable: true
+    meaning: 'The shift-level Tally Stock Journal this batch was aggregated into (only under shift voucher granularity) -> tally_sync_entries'
+    references: tally_sync_entries.id
+  -
+    name: no_of_pouches
+    type: integer
+    nullable: true
+    meaning: 'Number of pouches packed (pouch-packed products)'
+  -
+    name: loose_pieces
+    type: integer
+    nullable: true
+    meaning: 'Loose pieces (Nos) left over after filling whole containers'
+  -
+    name: nos_per_pouch
+    type: integer
+    nullable: true
+    meaning: 'Pieces per pouch used by this run (frozen at Complete Batch)'
+  -
+    name: parent_entry_id
+    type: integer
+    nullable: true
+    meaning: 'For a run that crossed the shift boundary: the outgoing segment this row continued from -> shift_production_entries (same batch_number)'
+    references: shift_production_entries.id
+  -
+    name: production_configuration_id
+    type: integer
+    nullable: true
+    meaning: 'Approved machine+product configuration the run was judged against -> production_configurations'
+    references: production_configurations.id
+  -
+    name: calculation_version
+    type: string
+    nullable: true
+    meaning: 'Which formula set produced the expected-output figures: production_v2_floor for new batches; null = legacy_v1 (older rows, never recalculated)'
+  -
+    name: config_snapshot
+    type: string
+    nullable: true
+    meaning: 'JSON frozen at Start Batch: configuration_id/status, colour, effective_cycle_time, effective_cavities, their sources, unit_weight_grams, production_standard_id, packaging_mode, nos_per_box/tray/pouch, pouches_per_box, trays_per_box, bom_id, scheduled_hours, configuration_gaps, opening_day_bin_basis'
+  -
+    name: cycle_time_source
+    type: string
+    nullable: true
+    meaning: 'Where the effective cycle time came from: configuration, item_master or override'
+  -
+    name: cavities_source
+    type: string
+    nullable: true
+    meaning: 'Where the effective cavity count came from: configuration, item_master or override'
+  -
+    name: override_reason
+    type: string
+    nullable: true
+    meaning: 'Reason given when cycle time or cavities were overridden against an approved standard'
+  -
+    name: override_by
+    type: integer
+    nullable: true
+    meaning: 'User who overrode the cycle time / cavities -> users'
+    references: users.id
+  -
+    name: planned_downtime_minutes
+    type: decimal
+    nullable: true
+    meaning: 'Planned downtime in minutes known before start, subtracted from the expected output'
+  -
+    name: scheduled_hours
+    type: decimal
+    nullable: true
+    meaning: 'Hours the machine was scheduled to run this batch'
+  -
+    name: target_boxes_override
+    type: integer
+    nullable: true
+    meaning: 'Manually adjusted target in cartons, kept beside the computed target'
+  -
+    name: target_override_reason
+    type: string
+    nullable: true
+    meaning: 'Mandatory reason for the target adjustment'
+  -
+    name: target_override_by
+    type: integer
+    nullable: true
+    meaning: 'User who adjusted the target -> users'
+    references: users.id
+  -
+    name: production_standard_id
+    type: integer
+    nullable: true
+    meaning: 'Product-level standard (cavities/weight/cycle time variant) the run used -> production_standards'
+    references: production_standards.id
+  -
+    name: production_standard_packaging_id
+    type: integer
+    nullable: true
+    meaning: 'Packaging option (pouch/tray/direct box) the run used -> production_standard_packagings'
+    references: production_standard_packagings.id
+  -
+    name: packaging_mode
+    type: string
+    nullable: true
+    meaning: 'How pieces reach a carton: pouch, tray or direct_box'
+  -
+    name: completed_by
+    type: integer
+    nullable: true
+    meaning: 'User who counted the output at Complete Batch (four-eyes: must differ from quality_checked_by) -> users'
+    references: users.id
+  -
+    name: gross_quantity_produced
+    type: decimal
+    nullable: true
+    meaning: "The supervisor's original count (Nos) before quality rejections were deducted"
+  -
+    name: quality_reviewed_nos
+    type: integer
+    nullable: true
+    meaning: 'Pieces (Nos) reviewed at the quality gate = ok + rejected'
+  -
+    name: quality_ok_nos
+    type: integer
+    nullable: true
+    meaning: 'Pieces (Nos) passed by quality'
+  -
+    name: quality_rejected_nos
+    type: integer
+    nullable: true
+    meaning: 'Pieces (Nos) rejected by quality; deducted from quantity_produced'
+  -
+    name: quality_checked_by
+    type: integer
+    nullable: true
+    meaning: 'Quality user who signed the quality check (gate between completion and PM approval) -> users'
+    references: users.id
+  -
+    name: quality_checked_at
+    type: datetime
+    nullable: true
+    meaning: 'When the quality check was signed'
+  -
+    name: quality_note
+    type: string
+    nullable: true
+    meaning: "Quality inspector's remarks"
+  -
+    name: quality_scrap_note
+    type: string
+    nullable: true
+    meaning: 'Why no scrap stock receipt was booked for the quality-rejected pieces (e.g. no scrap item configured)'
+  -
+    name: cancelled_at
+    type: datetime
+    nullable: true
+    meaning: 'When a mistakenly started batch was cancelled'
+  -
+    name: cancelled_by
+    type: integer
+    nullable: true
+    meaning: 'User who cancelled the batch -> users'
+    references: users.id
+  -
+    name: cancellation_reason
+    type: string
+    nullable: true
+    meaning: 'Mandatory reason for cancelling'
+  -
+    name: finished_item_id
+    type: integer
+    nullable: true
+    meaning: "Tally stock item the finished goods actually post as, frozen at completion from the packaging's own identity -> items; null = the product's own item_id"
+    references: items.id
+joins:
+  - 'shift_production_entries.cancelled_by = users.id'
+  - 'shift_production_entries.production_standard_packaging_id = production_standard_packagings.id'
+  - 'shift_production_entries.production_standard_id = production_standards.id'
+  - 'shift_production_entries.override_by = users.id'
+  - 'shift_production_entries.production_configuration_id = production_configurations.id'
+  - 'shift_production_entries.tally_sync_entry_id = tally_sync_entries.id'
+  - 'shift_production_entries.approved_by = users.id'
+  - 'shift_production_entries.supervisor_signed_by = employees.id'
+  - 'shift_production_entries.created_by = users.id'
+  - 'shift_production_entries.operator_id = employees.id'
+  - 'shift_production_entries.scrap_reason_id = scrap_reasons.id'
+  - 'shift_production_entries.warehouse_id = warehouses.id'
+  - 'shift_production_entries.item_id = items.id'
+  - 'shift_production_entries.work_center_id = work_centers.id'
+  - 'shift_production_entries.shift_id = shifts.id'
+  - 'shift_production_entries.accountant_signed_by = users.id'
+  - 'shift_production_entries.plant_manager_signed_by = users.id'
+  - 'shift_production_entries.parent_entry_id = shift_production_entries.id'
+  - 'shift_production_entries.target_override_by = users.id'
+  - 'shift_production_entries.completed_by = users.id'
+  - 'shift_production_entries.quality_checked_by = users.id'
+  - 'shift_production_entries.finished_item_id = items.id'
+keywords:
+  - batch
+  - 'production entry'
+  - run
+  - output
+  - 'shift production'
+  - 'machine output'
+  - approval
+  - rejection
+questions:
+  - 'How many pieces did each machine produce yesterday?'
+  - 'Which batches are still waiting for accountant approval?'
+  - 'What was the total production in kg per product last week?'

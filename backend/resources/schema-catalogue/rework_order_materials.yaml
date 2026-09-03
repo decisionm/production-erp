@@ -1,0 +1,47 @@
+table: rework_order_materials
+module: production
+label: 'Rework Order Materials'
+purpose: 'One row is one extra material required by a rework order: how much the rework BOM says is needed for the input quantity, and how much has actually been issued from stock.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: rework_order_id
+    type: integer
+    meaning: 'The rework order this material line belongs to -> rework_orders'
+    references: rework_orders.id
+  -
+    name: component_item_id
+    type: integer
+    meaning: 'The component item required -> items'
+    references: items.id
+  -
+    name: quantity_required
+    type: decimal
+    meaning: "Rework BOM quantity_per x rework order quantity_input, in the component item's unit of measure"
+  -
+    name: quantity_issued
+    type: decimal
+    meaning: 'Quantity actually issued from the warehouse at release (0 while draft)'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'rework_order_materials.component_item_id = items.id'
+  - 'rework_order_materials.rework_order_id = rework_orders.id'
+keywords:
+  - 'rework material'
+  - 'material issue'
+  - component
+  - 'issued quantity'
+questions:
+  - 'Which materials were issued for this rework order?'

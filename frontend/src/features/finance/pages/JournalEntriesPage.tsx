@@ -6,7 +6,18 @@ import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { createJournalEntry, listAllGLAccounts, listJournalEntries, postJournalEntry } from '@/features/finance/api';
+import {
+    JOURNAL_ENTRY_DEFAULT_SORT,
+    JOURNAL_ENTRY_LIST_SPEC,
+    JOURNAL_ENTRY_SORT_FIELDS,
+    type JournalEntryListParams,
+    journalEntriesQueryKey,
+    journalEntryServerFilters,
+} from '@/features/finance/journalEntryList';
 import type { JournalEntry, JournalEntryStatus } from '@/features/finance/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const lineSchema = z.object({
     gl_account_id: z.number({ error: 'Account is required' }),
@@ -41,7 +52,15 @@ export default function JournalEntriesPage() {
     const [detailEntry, setDetailEntry] = useState<JournalEntry | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['finance', 'journal-entries'], queryFn: listJournalEntries });
+    // THE REGISTER'S VIEW IS ITS URL: sort, page and page size, sorted and
+    // paged on the SERVER over the whole register.
+    const { params, setParams, setPage } = useListParams<JournalEntryListParams>(JOURNAL_ENTRY_LIST_SPEC);
+    const filters = useMemo(() => journalEntryServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: journalEntriesQueryKey(filters),
+        queryFn: () => listJournalEntries(filters),
+        placeholderData: (previous) => previous,
+    });
     const { data: accounts } = useQuery({ queryKey: ['finance', 'gl-accounts', 'all'], queryFn: listAllGLAccounts });
     // WS-B: a DEACTIVATED account takes no new posting, so the line picker
     // stops offering one. Entries already posted against it are untouched and
@@ -87,20 +106,48 @@ export default function JournalEntriesPage() {
             </Space>
 
             <Table<JournalEntry>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries the whole register.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, JOURNAL_ENTRY_SORT_FIELDS, JOURNAL_ENTRY_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'journal entries')}
                 columns={[
-                    { title: 'ID', dataIndex: 'id' },
+                    {
+                        title: 'ID',
+                        dataIndex: 'id',
+                        key: 'id',
+                        sorter: true,
+                        sortOrder: columnSortOrder('id', params.sort, JOURNAL_ENTRY_DEFAULT_SORT),
+                    },
                     {
                         title: 'Status',
                         dataIndex: 'status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, JOURNAL_ENTRY_DEFAULT_SORT),
                         render: (status: JournalEntryStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
-                    { title: 'Date', dataIndex: 'entry_date' },
-                    { title: 'Reference', dataIndex: 'reference' },
+                    {
+                        title: 'Date',
+                        dataIndex: 'entry_date',
+                        key: 'entry_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('entry_date', params.sort, JOURNAL_ENTRY_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Reference',
+                        dataIndex: 'reference',
+                        key: 'reference',
+                        sorter: true,
+                        sortOrder: columnSortOrder('reference', params.sort, JOURNAL_ENTRY_DEFAULT_SORT),
+                    },
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {
                         title: 'Actions',

@@ -692,7 +692,11 @@ export function isReceivableOrder(order: { status: PurchaseOrderStatus | string 
 }
 
 /** The columns ListPurchaseOrdersRequest sorts on, besides id. */
-const SORT_FIELDS: readonly string[] = ['id', 'order_date', 'expected_date'];
+export const PURCHASE_ORDER_SORT_FIELDS: readonly string[] = ['id', 'order_date', 'expected_date'];
+const SORT_FIELDS = PURCHASE_ORDER_SORT_FIELDS;
+
+/** The server's order when the URL names none: newest first. */
+export const PURCHASE_ORDER_DEFAULT_SORT = '-id';
 
 const SORT_LABELS: Record<string, string> = {
     id: 'Number',

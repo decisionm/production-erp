@@ -2,16 +2,20 @@
 
 namespace App\Modules\Finance\Services;
 
+use App\Modules\Finance\Http\Requests\ListGlAccountsRequest;
 use App\Modules\Finance\Models\GLAccount;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 class GLAccountService
 {
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /** Code order when no sort is asked for — what this list always was. */
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return GLAccount::query()
-            ->orderBy('code')
-            ->paginate($perPage);
+        $query = GLAccount::query();
+        ListSort::apply($query, $sort, ListGlAccountsRequest::SORTABLE, 'code');
+
+        return $query->paginate($perPage);
     }
 
     public function create(array $data): GLAccount

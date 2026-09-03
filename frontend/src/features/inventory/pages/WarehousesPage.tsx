@@ -7,6 +7,16 @@ import { z } from 'zod';
 import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { createWarehouse, listWarehouses, updateWarehouse } from '@/features/inventory/api';
 import type { Warehouse } from '@/features/inventory/types';
+import {
+    WAREHOUSE_DEFAULT_SORT,
+    WAREHOUSE_LIST_SPEC,
+    WAREHOUSE_SORT_FIELDS,
+    type WarehouseListParams,
+    warehouseListRequest,
+} from '@/features/inventory/warehouseList';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const warehouseSchema = z.object({
     code: z.string().min(1, 'Code is required').max(32),
@@ -20,14 +30,17 @@ export default function WarehousesPage() {
     const [editingWarehouse, setEditingWarehouse] = useState<Warehouse | null>(null);
     const queryClient = useQueryClient();
 
-    // Server-side paging. The table showed the first twenty stores and said
-    // nothing about the rest, which is the same defect the item picker had.
-    const [page, setPage] = useState(1);
-    const [perPage, setPerPage] = useState(20);
+    // Server-side paging AND ordering, both in the URL (useListParams). The
+    // table showed the first twenty stores and said nothing about the rest,
+    // which is the same defect the item picker had; a sorter over that page
+    // would have been the same defect again.
+    const { params, setParams, setPage } = useListParams<WarehouseListParams>(WAREHOUSE_LIST_SPEC);
+    const request = warehouseListRequest(params);
 
     const { data, isLoading } = useQuery({
-        queryKey: ['inventory', 'warehouses', page, perPage],
-        queryFn: () => listWarehouses({ page, per_page: perPage }),
+        queryKey: ['inventory', 'warehouses', request],
+        queryFn: () => listWarehouses(request),
+        placeholderData: (previous) => previous,
     });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['inventory', 'warehouses'] });
@@ -72,26 +85,32 @@ export default function WarehousesPage() {
             </Space>
 
             <Table<Warehouse>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={{
-                    current: page,
-                    pageSize: perPage,
-                    // The server's count, not the page's length.
-                    total: data?.meta?.total ?? data?.data?.length ?? 0,
-                    showSizeChanger: true,
-                    pageSizeOptions: [20, 50, 100, 200],
-                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} warehouses`,
-                    onChange: (nextPage, nextSize) => {
-                        setPage(nextPage);
-                        setPerPage(nextSize);
-                    },
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queries.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, WAREHOUSE_SORT_FIELDS, WAREHOUSE_DEFAULT_SORT) });
                 }}
+                pagination={serverPagination(data?.meta, setPage, 'warehouses')}
                 columns={[
-                    { title: 'Code', dataIndex: 'code' },
-                    { title: 'Name', dataIndex: 'name' },
+                    {
+                        title: 'Code',
+                        dataIndex: 'code',
+                        key: 'code',
+                        sorter: true,
+                        sortOrder: columnSortOrder('code', params.sort, WAREHOUSE_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, WAREHOUSE_DEFAULT_SORT),
+                    },
                     {
                         // ONE status vocabulary, product-wide. The old control
                         // was a Switch that PUT `is_active` straight onto the
@@ -101,6 +120,9 @@ export default function WarehousesPage() {
                         // Reactivate below, which is the contract's own path.
                         title: 'Status',
                         dataIndex: 'is_active',
+                        key: 'is_active',
+                        sorter: true,
+                        sortOrder: columnSortOrder('is_active', params.sort, WAREHOUSE_DEFAULT_SORT),
                         render: (_: boolean, row) => <ConfigurationStatusTag entity="warehouse" row={row} />,
                     },
                     {

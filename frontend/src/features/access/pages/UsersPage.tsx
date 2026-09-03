@@ -1,18 +1,29 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Form, Input, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import {
     createUser,
     listRoles,
-    listUsers,
+    listUsersPage,
     resetUserPassword,
     updateUser,
 } from '@/features/access/api';
+import {
+    USER_DEFAULT_SORT,
+    USER_LIST_SPEC,
+    USER_SORT_FIELDS,
+    type UserListParams,
+    userServerFilters,
+    usersQueryKey,
+} from '@/features/access/userList';
 import { useAuthStore } from '@/features/auth/store';
 import type { User } from '@/features/auth/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const createSchema = z.object({
     name: z.string().min(1, 'Name is required').max(255),
@@ -41,7 +52,15 @@ export default function UsersPage() {
     const currentUser = useAuthStore((state) => state.user);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['access', 'users'], queryFn: listUsers });
+    // THE LIST'S VIEW IS ITS URL: sort, page and page size, sorted and paged
+    // on the SERVER over every user.
+    const { params, setParams, setPage } = useListParams<UserListParams>(USER_LIST_SPEC);
+    const filters = useMemo(() => userServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: usersQueryKey(filters),
+        queryFn: () => listUsersPage(filters),
+        placeholderData: (previous) => previous,
+    });
     const { data: roles } = useQuery({ queryKey: ['access', 'roles'], queryFn: listRoles });
     const roleOptions = roles?.map((r) => ({ value: r.id, label: r.name })) ?? [];
 
@@ -117,14 +136,33 @@ export default function UsersPage() {
             </Space>
 
             <Table<User>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries every user. Roles are a relation: no sorter.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, USER_SORT_FIELDS, USER_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'users')}
                 columns={[
-                    { title: 'Name', dataIndex: 'name' },
-                    { title: 'Email', dataIndex: 'email' },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, USER_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Email',
+                        dataIndex: 'email',
+                        key: 'email',
+                        sorter: true,
+                        sortOrder: columnSortOrder('email', params.sort, USER_DEFAULT_SORT),
+                    },
                     {
                         title: 'Roles',
                         render: (_, row) => (
@@ -136,6 +174,9 @@ export default function UsersPage() {
                     {
                         title: 'Active',
                         dataIndex: 'is_active',
+                        key: 'is_active',
+                        sorter: true,
+                        sortOrder: columnSortOrder('is_active', params.sort, USER_DEFAULT_SORT),
                         render: (active: boolean, row) => (
                             <Switch
                                 checked={active}

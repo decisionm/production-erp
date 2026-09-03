@@ -1,11 +1,22 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Form, Input, Modal, Space, Switch, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { createGstRegistration, listGstRegistrations, updateGstRegistration } from '@/features/compliance/api';
+import {
+    GST_REGISTRATION_DEFAULT_SORT,
+    GST_REGISTRATION_LIST_SPEC,
+    GST_REGISTRATION_SORT_FIELDS,
+    type GstRegistrationListParams,
+    gstRegistrationServerFilters,
+    gstRegistrationsQueryKey,
+} from '@/features/compliance/gstRegistrationList';
 import type { GstRegistration } from '@/features/compliance/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const registrationSchema = z.object({
     gstin: z
@@ -22,7 +33,15 @@ export default function GstRegistrationsPage() {
     const [editingRegistration, setEditingRegistration] = useState<GstRegistration | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['compliance', 'gst-registrations'], queryFn: listGstRegistrations });
+    // THE LIST'S VIEW IS ITS URL: sort, page and page size, sorted and paged
+    // on the SERVER over every registration.
+    const { params, setParams, setPage } = useListParams<GstRegistrationListParams>(GST_REGISTRATION_LIST_SPEC);
+    const filters = useMemo(() => gstRegistrationServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: gstRegistrationsQueryKey(filters),
+        queryFn: () => listGstRegistrations(filters),
+        placeholderData: (previous) => previous,
+    });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['compliance', 'gst-registrations'] });
 
@@ -71,15 +90,41 @@ export default function GstRegistrationsPage() {
             </Space>
 
             <Table<GstRegistration>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries every registration; clearing one returns to
+                // the primary-first order.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, GST_REGISTRATION_SORT_FIELDS, GST_REGISTRATION_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'registrations')}
                 columns={[
-                    { title: 'GSTIN', dataIndex: 'gstin' },
-                    { title: 'State', dataIndex: 'state_name' },
-                    { title: 'State Code', dataIndex: 'state_code' },
+                    {
+                        title: 'GSTIN',
+                        dataIndex: 'gstin',
+                        key: 'gstin',
+                        sorter: true,
+                        sortOrder: columnSortOrder('gstin', params.sort, GST_REGISTRATION_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'State',
+                        dataIndex: 'state_name',
+                        key: 'state_name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('state_name', params.sort, GST_REGISTRATION_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'State Code',
+                        dataIndex: 'state_code',
+                        key: 'state_code',
+                        sorter: true,
+                        sortOrder: columnSortOrder('state_code', params.sort, GST_REGISTRATION_DEFAULT_SORT),
+                    },
                     {
                         title: 'Primary',
                         dataIndex: 'is_primary',
@@ -88,6 +133,9 @@ export default function GstRegistrationsPage() {
                     {
                         title: 'Active',
                         dataIndex: 'is_active',
+                        key: 'is_active',
+                        sorter: true,
+                        sortOrder: columnSortOrder('is_active', params.sort, GST_REGISTRATION_DEFAULT_SORT),
                         render: (active: boolean, row) => (
                             <Switch
                                 checked={active}

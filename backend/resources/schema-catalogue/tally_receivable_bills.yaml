@@ -1,0 +1,82 @@
+table: tally_receivable_bills
+module: finance
+label: 'Tally Receivable Bills'
+purpose: 'One outstanding receivable bill as at a date, read from the Tally Bills Receivable report: which customer party owes it, its reference, due date and closing balance. Feeds the Client Outstanding page; each pull replaces the set, and nothing is posted from it.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: party_ledger_name
+    type: string
+    meaning: 'The customer as named in Tally (the party ledger)'
+  -
+    name: party_ledger_guid
+    type: string
+    nullable: true
+    meaning: 'Tally GUID of the party ledger; joins to customers.tally_ledger_guid at read time, NULL when the report carried none'
+  -
+    name: bill_reference
+    type: string
+    nullable: true
+    meaning: 'The bill / invoice reference in Tally; NULL for an on-account amount'
+  -
+    name: bill_date
+    type: date
+    nullable: true
+    meaning: 'Date of the bill'
+  -
+    name: due_date
+    type: date
+    nullable: true
+    meaning: 'Date the bill fell due; NULL when the party has no credit terms (age is computed at read time)'
+  -
+    name: closing_amount
+    type: decimal
+    meaning: 'Amount still outstanding on the bill as Tally states it; negative for a credit note or advance'
+    sensitive: rates
+  -
+    name: opening_amount
+    type: decimal
+    nullable: true
+    meaning: 'Full original value of the bill where Tally states it'
+    sensitive: rates
+  -
+    name: as_of
+    type: date
+    meaning: 'The date the outstanding position was read as at'
+  -
+    name: tally_company
+    type: string
+    nullable: true
+    meaning: 'Tally company the report was read from'
+  -
+    name: tally_synced_at
+    type: datetime
+    meaning: 'When the pull that wrote this row ran'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was written'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'tally_receivable_bills.party_ledger_guid = customers.tally_ledger_guid'
+  - 'tally_receivable_bills.party_ledger_guid = ledgers.tally_guid'
+keywords:
+  - receivable
+  - outstanding
+  - 'client outstanding'
+  - 'bills receivable'
+  - 'overdue bills'
+  - 'sundry debtor'
+  - 'who owes us'
+questions:
+  - 'Which customers have overdue bills and how much is outstanding?'
+  - 'What is the total receivable outstanding as of the latest pull?'
+  - 'Which bills are more than 60 days past due?'

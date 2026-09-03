@@ -31,6 +31,7 @@ const ROUTE_TABLE = [
     '/*',
     '/',
     '/account/change-password',
+    '/ask-erp',
     '/crm/leads',
     '/crm/opportunities',
     '/crm/quotations',
@@ -105,6 +106,9 @@ const ROUTE_TABLE = [
     '/hrms/leave-balances',
     '/hrms/leave-requests',
     '/hrms/attendance',
+    // The punch-report import: the runs, and one run's review (03-Sep).
+    '/hrms/attendance-imports',
+    '/hrms/attendance-imports/:id',
     '/payroll/salary-components',
     '/payroll/salary-structures',
     '/payroll/runs',
@@ -116,6 +120,10 @@ const ROUTE_TABLE = [
     '/tally-sync',
     '/tally-sync/agent-tokens',
     '/tally-sync/settings',
+    // The one destination gathering the three below it — Downloads, Help and
+    // the two Administration screens. The four keep their own URLs; Settings
+    // is a way in, not a replacement.
+    '/settings',
     '/exports',
     '/help',
     '/administration/users',

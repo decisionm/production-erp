@@ -1,0 +1,51 @@
+table: leave_types
+module: hrms
+label: 'Leave Types'
+purpose: 'The kinds of leave the factory grants — casual, sick, earned and so on — each with a short code and the default number of days per year.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'row id'
+  -
+    name: code
+    type: string
+    meaning: 'short unique code (e.g. CL, SL, EL)'
+  -
+    name: name
+    type: string
+    meaning: 'leave type name (e.g. Casual Leave)'
+  -
+    name: default_annual_days
+    type: decimal
+    meaning: 'days of this leave an employee gets per year by default'
+  -
+    name: is_active
+    type: integer
+    meaning: '1 = still offered; 0 = retired'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'when the row was created in the ERP'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'when the row was last edited'
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+    meaning: 'when the leave type was soft-deleted (null = still live); deleted rows are hidden from lists'
+joins: {}
+keywords:
+  - 'leave type'
+  - 'casual leave'
+  - 'sick leave'
+  - 'earned leave'
+  - CL
+  - SL
+  - EL
+questions:
+  - 'What leave types exist and how many days does each give per year?'

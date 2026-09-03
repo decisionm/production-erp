@@ -5,6 +5,8 @@ namespace App\Modules\Inventory\Services;
 use App\Models\User;
 use App\Modules\Inventory\Exceptions\BagOverloadException;
 use App\Modules\Inventory\Exceptions\FifoPolicyException;
+use App\Modules\Inventory\Http\Requests\ListMaterialBagsRequest;
+use App\Modules\Inventory\Http\Requests\ListMaterialLotsRequest;
 use App\Modules\Inventory\Models\Enums\MaterialBagStatus;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\MaterialBag;
@@ -13,6 +15,7 @@ use App\Modules\Production\Models\DayBinMovement;
 use App\Modules\Production\Models\Enums\DayBinMovementType;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Services\DayBinLedgerService;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -55,13 +58,14 @@ class TraceabilityService
         ?string $receivedFrom = null,
         ?string $receivedTo = null,
         string $order = 'newest',
+        ?string $sort = null,
     ): LengthAwarePaginator {
         // NEWEST FIRST unless asked otherwise: the receipt somebody is holding
         // is usually the recent one. Oldest-first exists because the lot they
         // cannot find usually is not.
         $direction = $order === 'oldest' ? 'asc' : 'desc';
 
-        return MaterialLot::query()
+        $query = MaterialLot::query()
             // grn + goodsReceiptLine: the register shows each lot's receipt,
             // its price and the date+time it was received (read-only).
             // costVersions: MaterialLotResource asks each lot for its current
@@ -71,7 +75,16 @@ class TraceabilityService
             ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
             ->when($grnId, fn ($query) => $query->where('grn_id', $grnId))
             ->when($receivedFrom, fn ($query) => $query->whereDate('received_date', '>=', $receivedFrom))
-            ->when($receivedTo, fn ($query) => $query->whereDate('received_date', '<=', $receivedTo))
+            ->when($receivedTo, fn ($query) => $query->whereDate('received_date', '<=', $receivedTo));
+
+        // A column sort (ListMaterialLotsRequest::SORTABLE, 03-Sep-2026) wins
+        // over the older newest/oldest switch, with ListSort's id-desc tiebreak.
+        if ($sort !== null) {
+            return ListSort::apply($query, $sort, ListMaterialLotsRequest::SORTABLE, '-received_date')
+                ->paginate($perPage);
+        }
+
+        return $query
             // id breaks the tie in the SAME direction, so two lots received on
             // one day read in a stable order either way round.
             ->orderBy('received_date', $direction)
@@ -190,16 +203,18 @@ class TraceabilityService
         });
     }
 
-    public function paginateBags(?int $itemId = null, ?string $status = null, int $perPage = 20): LengthAwarePaginator
+    public function paginateBags(?int $itemId = null, ?string $status = null, int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return MaterialBag::query()
+        $query = MaterialBag::query()
             // lot.costVersions: MaterialBagResource nests the lot, and a
             // finance user's lot payload asks for its current rate. Without
             // this the register lazy-loads twice per bag.
             ->with(['lot.item', 'lot.costVersions'])
             ->when($itemId, fn ($query) => $query->whereHas('lot', fn ($lot) => $lot->where('item_id', $itemId)))
-            ->when($status, fn ($query) => $query->where('status', $status))
-            ->orderBy('id')
+            ->when($status, fn ($query) => $query->where('status', $status));
+
+        // Oldest bag first unless asked otherwise (ListMaterialBagsRequest::SORTABLE).
+        return ListSort::apply($query, $sort, ListMaterialBagsRequest::SORTABLE, 'id')
             ->paginate($perPage);
     }
 

@@ -2,15 +2,19 @@ import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type {
     Asset,
+    AssetListFilters,
     AssetStatus,
     MaintenanceSchedule,
+    MaintenanceScheduleListFilters,
     MaintenanceWorkOrder,
+    MaintenanceWorkOrderListFilters,
     MaintenanceWorkOrderType,
     ReliabilityReport,
 } from './types';
 
-export async function listAssets(): Promise<Paginated<Asset>> {
-    const { data } = await api.get<Paginated<Asset>>('/maintenance/assets');
+/** ONE page of the asset register, sorted and paged on the SERVER; no argument is the first page in name order. */
+export async function listAssets(filters: AssetListFilters = {}): Promise<Paginated<Asset>> {
+    const { data } = await api.get<Paginated<Asset>>('/maintenance/assets', { params: filters });
     return data;
 }
 
@@ -53,10 +57,9 @@ export async function updateAsset(id: number, payload: UpdateAssetPayload): Prom
     return data.data;
 }
 
-export async function listMaintenanceSchedules(assetId?: number): Promise<Paginated<MaintenanceSchedule>> {
-    const { data } = await api.get<Paginated<MaintenanceSchedule>>('/maintenance/schedules', {
-        params: assetId ? { asset_id: assetId } : undefined,
-    });
+/** ONE page of the schedules, sorted and paged on the SERVER; no argument is the first page, soonest due first. */
+export async function listMaintenanceSchedules(filters: MaintenanceScheduleListFilters = {}): Promise<Paginated<MaintenanceSchedule>> {
+    const { data } = await api.get<Paginated<MaintenanceSchedule>>('/maintenance/schedules', { params: filters });
     return data;
 }
 
@@ -77,10 +80,9 @@ export async function generateDueWorkOrders(): Promise<MaintenanceWorkOrder[]> {
     return data.data;
 }
 
-export async function listMaintenanceWorkOrders(assetId?: number): Promise<Paginated<MaintenanceWorkOrder>> {
-    const { data } = await api.get<Paginated<MaintenanceWorkOrder>>('/maintenance/work-orders', {
-        params: assetId ? { asset_id: assetId } : undefined,
-    });
+/** ONE page of the work orders, sorted and paged on the SERVER; no argument is the first page, newest first. */
+export async function listMaintenanceWorkOrders(filters: MaintenanceWorkOrderListFilters = {}): Promise<Paginated<MaintenanceWorkOrder>> {
+    const { data } = await api.get<Paginated<MaintenanceWorkOrder>>('/maintenance/work-orders', { params: filters });
     return data;
 }
 

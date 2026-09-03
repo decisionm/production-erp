@@ -1,14 +1,16 @@
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Button, Card, Col, Form, Modal, Row, Select, Statistic, Typography } from 'antd';
 import { useState } from 'react';
-import { getReliabilityReport, listAssets } from '@/features/maintenance/api';
+import { getReliabilityReport, listAllAssets } from '@/features/maintenance/api';
 import type { ReliabilityReport } from '@/features/maintenance/types';
 
 export default function ReliabilityReportPage() {
     const [assetId, setAssetId] = useState<number | undefined>();
     const [report, setReport] = useState<ReliabilityReport | null>(null);
 
-    const { data: assets } = useQuery({ queryKey: ['maintenance', 'assets'], queryFn: listAssets });
+    // A PICKER reads the whole master (the Schedules and Work Orders pages'
+    // key), not the register's first page.
+    const { data: assets } = useQuery({ queryKey: ['maintenance', 'assets', 'all'], queryFn: listAllAssets });
     const assetOptions = assets?.data.map((a) => ({ value: a.id, label: `${a.code} — ${a.name}` })) ?? [];
 
     const mutation = useMutation({

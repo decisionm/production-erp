@@ -10,7 +10,9 @@ import { getShiftKpiReport, listCompletedEntriesFor, listShifts, saveShiftSummar
 import CecPreviewPanel from '@/features/production/components/CecPreviewPanel';
 import { currentShift, productionDateFor } from '@/features/production/shiftClock';
 import { reconcileShiftSummary } from '@/features/production/shiftSummaryReconcile';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 import { itemLabel } from '@/lib/itemLabel';
+import { TABLE_STICKY } from '@/lib/tableProps';
 import type {
     ShiftKpiDowntimeLog,
     ShiftKpiItemBreakdown,
@@ -264,19 +266,46 @@ export default function ShiftSummaryPage() {
                     <Card title="Items Manufactured" size="small">
                         <Table<ShiftKpiItemBreakdown>
                             scroll={{ x: 'max-content' }}
+                            sticky={TABLE_STICKY}
                             size="small"
                             rowKey={(row) => row.item.id}
                             pagination={false}
                             loading={reportLoading}
                             dataSource={report?.items_manufactured ?? []}
                             locale={{ emptyText: 'Nothing completed yet.' }}
+                            // The whole report is in the browser; each column sorts on the value it shows.
                             columns={[
-                                { title: 'Item', render: (_, row) => itemLabel(row.item) },
-                                { title: 'Batches', dataIndex: 'batches', width: 80 },
-                                { title: 'Produced (Nos)', dataIndex: 'quantity_produced' },
-                                { title: 'Produced (Kg)', dataIndex: 'quantity_produced_kg' },
-                                { title: 'Rejected (Nos)', dataIndex: 'quantity_rejected' },
-                                { title: 'Rejected (Kg)', dataIndex: 'quantity_rejection_kg' },
+                                {
+                                    title: 'Item',
+                                    sorter: columnSorter((row: ShiftKpiItemBreakdown) => itemLabel(row.item), 'text'),
+                                    render: (_, row) => itemLabel(row.item),
+                                },
+                                {
+                                    title: 'Batches',
+                                    dataIndex: 'batches',
+                                    width: 80,
+                                    sorter: columnSorter((row: ShiftKpiItemBreakdown) => row.batches, 'number'),
+                                },
+                                {
+                                    title: 'Produced (Nos)',
+                                    dataIndex: 'quantity_produced',
+                                    sorter: columnSorter((row: ShiftKpiItemBreakdown) => row.quantity_produced, 'number'),
+                                },
+                                {
+                                    title: 'Produced (Kg)',
+                                    dataIndex: 'quantity_produced_kg',
+                                    sorter: columnSorter((row: ShiftKpiItemBreakdown) => row.quantity_produced_kg, 'number'),
+                                },
+                                {
+                                    title: 'Rejected (Nos)',
+                                    dataIndex: 'quantity_rejected',
+                                    sorter: columnSorter((row: ShiftKpiItemBreakdown) => row.quantity_rejected, 'number'),
+                                },
+                                {
+                                    title: 'Rejected (Kg)',
+                                    dataIndex: 'quantity_rejection_kg',
+                                    sorter: columnSorter((row: ShiftKpiItemBreakdown) => row.quantity_rejection_kg, 'number'),
+                                },
                             ]}
                         />
                     </Card>
@@ -286,6 +315,7 @@ export default function ShiftSummaryPage() {
                     <Card title="Machine Downtime" size="small">
                         <Table<ShiftKpiDowntimeLog>
                             scroll={{ x: 'max-content' }}
+                            sticky={TABLE_STICKY}
                             size="small"
                             rowKey="id"
                             pagination={false}
@@ -293,14 +323,37 @@ export default function ShiftSummaryPage() {
                             dataSource={report?.downtime_logs ?? []}
                             locale={{ emptyText: 'No breakdowns logged.' }}
                             columns={[
-                                { title: 'Machine', dataIndex: 'work_center' },
-                                { title: 'Problem', dataIndex: 'nature_of_problem' },
-                                { title: 'From', render: (_, row) => formatTime(row.from_time) },
-                                { title: 'To', render: (_, row) => formatTime(row.to_time) },
-                                { title: 'Mins', dataIndex: 'total_minutes', render: (v: string | null) => v ?? '—' },
+                                {
+                                    title: 'Machine',
+                                    dataIndex: 'work_center',
+                                    sorter: columnSorter((row: ShiftKpiDowntimeLog) => row.work_center, 'text'),
+                                },
+                                {
+                                    title: 'Problem',
+                                    dataIndex: 'nature_of_problem',
+                                    sorter: columnSorter((row: ShiftKpiDowntimeLog) => row.nature_of_problem, 'text'),
+                                },
+                                {
+                                    title: 'From',
+                                    sorter: columnSorter((row: ShiftKpiDowntimeLog) => row.from_time, 'date'),
+                                    render: (_, row) => formatTime(row.from_time),
+                                },
+                                {
+                                    title: 'To',
+                                    sorter: columnSorter((row: ShiftKpiDowntimeLog) => row.to_time, 'date'),
+                                    render: (_, row) => formatTime(row.to_time),
+                                },
+                                {
+                                    title: 'Mins',
+                                    dataIndex: 'total_minutes',
+                                    sorter: columnSorter((row: ShiftKpiDowntimeLog) => row.total_minutes, 'number'),
+                                    render: (v: string | null) => v ?? '—',
+                                },
                                 {
                                     title: 'Status',
                                     dataIndex: 'status',
+                                    filters: filterOptions(report?.downtime_logs ?? [], (row) => row.status, (s) => (s === 'open' ? 'Open' : 'Closed')),
+                                    onFilter: onFilterBy((row: ShiftKpiDowntimeLog) => row.status),
                                     render: (s: string) => (s === 'open' ? <Typography.Text type="danger">Open</Typography.Text> : 'Closed'),
                                 },
                             ]}
@@ -312,6 +365,7 @@ export default function ShiftSummaryPage() {
                     <Card title="Power Interruptions" size="small">
                         <Table<ShiftKpiPowerInterruptionLog>
                             scroll={{ x: 'max-content' }}
+                            sticky={TABLE_STICKY}
                             size="small"
                             rowKey="id"
                             pagination={false}
@@ -319,9 +373,21 @@ export default function ShiftSummaryPage() {
                             dataSource={report?.power_interruption_logs ?? []}
                             locale={{ emptyText: 'None logged.' }}
                             columns={[
-                                { title: 'From', render: (_, row) => formatTime(row.from_time) },
-                                { title: 'To', render: (_, row) => formatTime(row.to_time) },
-                                { title: 'Hours', dataIndex: 'idle_hours' },
+                                {
+                                    title: 'From',
+                                    sorter: columnSorter((row: ShiftKpiPowerInterruptionLog) => row.from_time, 'date'),
+                                    render: (_, row) => formatTime(row.from_time),
+                                },
+                                {
+                                    title: 'To',
+                                    sorter: columnSorter((row: ShiftKpiPowerInterruptionLog) => row.to_time, 'date'),
+                                    render: (_, row) => formatTime(row.to_time),
+                                },
+                                {
+                                    title: 'Hours',
+                                    dataIndex: 'idle_hours',
+                                    sorter: columnSorter((row: ShiftKpiPowerInterruptionLog) => row.idle_hours, 'number'),
+                                },
                             ]}
                         />
                     </Card>
@@ -331,6 +397,7 @@ export default function ShiftSummaryPage() {
                     <Card title="Mold Changes" size="small">
                         <Table<ShiftKpiMoldChangeLog>
                             scroll={{ x: 'max-content' }}
+                            sticky={TABLE_STICKY}
                             size="small"
                             rowKey="id"
                             pagination={false}
@@ -338,14 +405,39 @@ export default function ShiftSummaryPage() {
                             dataSource={report?.mold_change_logs ?? []}
                             locale={{ emptyText: 'None logged.' }}
                             columns={[
-                                { title: 'Machine', dataIndex: 'work_center' },
-                                { title: 'Mold Out', dataIndex: 'changed_from_mold', render: (v: string | null) => v ?? '—' },
-                                { title: 'Mold In', dataIndex: 'changed_to_mold', render: (v: string | null) => v ?? '—' },
-                                { title: 'To Item', dataIndex: 'changed_to' },
-                                { title: 'Mins', dataIndex: 'total_minutes', render: (v: string | null) => v ?? '—' },
+                                {
+                                    title: 'Machine',
+                                    dataIndex: 'work_center',
+                                    sorter: columnSorter((row: ShiftKpiMoldChangeLog) => row.work_center, 'text'),
+                                },
+                                {
+                                    title: 'Mold Out',
+                                    dataIndex: 'changed_from_mold',
+                                    sorter: columnSorter((row: ShiftKpiMoldChangeLog) => row.changed_from_mold, 'text'),
+                                    render: (v: string | null) => v ?? '—',
+                                },
+                                {
+                                    title: 'Mold In',
+                                    dataIndex: 'changed_to_mold',
+                                    sorter: columnSorter((row: ShiftKpiMoldChangeLog) => row.changed_to_mold, 'text'),
+                                    render: (v: string | null) => v ?? '—',
+                                },
+                                {
+                                    title: 'To Item',
+                                    dataIndex: 'changed_to',
+                                    sorter: columnSorter((row: ShiftKpiMoldChangeLog) => row.changed_to, 'text'),
+                                },
+                                {
+                                    title: 'Mins',
+                                    dataIndex: 'total_minutes',
+                                    sorter: columnSorter((row: ShiftKpiMoldChangeLog) => row.total_minutes, 'number'),
+                                    render: (v: string | null) => v ?? '—',
+                                },
                                 {
                                     title: 'Status',
                                     dataIndex: 'status',
+                                    filters: filterOptions(report?.mold_change_logs ?? [], (row) => row.status, (s) => (s === 'open' ? 'In Progress' : 'Done')),
+                                    onFilter: onFilterBy((row: ShiftKpiMoldChangeLog) => row.status),
                                     render: (s: string) => (s === 'open' ? <Typography.Text type="warning">In Progress</Typography.Text> : 'Done'),
                                 },
                             ]}
@@ -358,14 +450,27 @@ export default function ShiftSummaryPage() {
                         <Card title="Stock Counts" size="small">
                             <Table<ShiftKpiStockCount>
                                 scroll={{ x: 'max-content' }}
+                                sticky={TABLE_STICKY}
                                 size="small"
                                 rowKey="id"
                                 pagination={false}
                                 dataSource={report?.stock_counts ?? []}
                                 columns={[
-                                    { title: 'Location', dataIndex: 'location_label' },
-                                    { title: 'Item', render: (_, row) => itemLabel(row.item) },
-                                    { title: 'Kg', dataIndex: 'quantity_kg' },
+                                    {
+                                        title: 'Location',
+                                        dataIndex: 'location_label',
+                                        sorter: columnSorter((row: ShiftKpiStockCount) => row.location_label, 'text'),
+                                    },
+                                    {
+                                        title: 'Item',
+                                        sorter: columnSorter((row: ShiftKpiStockCount) => itemLabel(row.item), 'text'),
+                                        render: (_, row) => itemLabel(row.item),
+                                    },
+                                    {
+                                        title: 'Kg',
+                                        dataIndex: 'quantity_kg',
+                                        sorter: columnSorter((row: ShiftKpiStockCount) => row.quantity_kg, 'number'),
+                                    },
                                 ]}
                             />
                         </Card>

@@ -5,10 +5,12 @@ namespace App\Modules\Maintenance\Services;
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Maintenance\Exceptions\MaintenanceWorkOrderClosedException;
+use App\Modules\Maintenance\Http\Requests\ListMaintenanceWorkOrdersRequest;
 use App\Modules\Maintenance\Models\Enums\MaintenanceWorkOrderStatus;
 use App\Modules\Maintenance\Models\Enums\MaintenanceWorkOrderType;
 use App\Modules\Maintenance\Models\MaintenanceSchedule;
 use App\Modules\Maintenance\Models\MaintenanceWorkOrder;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
@@ -23,13 +25,22 @@ class MaintenanceWorkOrderService
 {
     public function __construct(private readonly StockMovementService $stock) {}
 
-    public function paginate(?int $assetId, int $perPage = 20): LengthAwarePaginator
+    /**
+     * Newest first unless a sort is asked for; id desc tiebreaks. The cost
+     * columns are in the allowed set because ListMaintenanceWorkOrdersRequest
+     * is the gate that keeps them from non-finance eyes (FC-06).
+     */
+    public function paginate(?int $assetId, int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return MaintenanceWorkOrder::query()
+        $query = MaintenanceWorkOrder::query()
             ->when($assetId, fn ($query) => $query->where('asset_id', $assetId))
-            ->with(['asset', 'assignee', 'parts.item', 'parts.warehouse'])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+            ->with(['asset', 'assignee', 'parts.item', 'parts.warehouse']);
+
+        return ListSort::apply(
+            $query,
+            $sort,
+            [...ListMaintenanceWorkOrdersRequest::SORTABLE, ...ListMaintenanceWorkOrdersRequest::COST_SORTABLE],
+        )->paginate($perPage);
     }
 
     public function openCount(): int

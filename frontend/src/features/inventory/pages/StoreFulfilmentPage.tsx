@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography, message } from 'antd';
 import { useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
 import {
     listFulfilmentQueue,
     releaseReservation,
@@ -17,7 +16,17 @@ import {
     reservePrefill,
     sendToProductionPrefill,
 } from '@/features/inventory/fulfilment';
+import {
+    FULFILMENT_QUEUE_DEFAULT_SORT,
+    FULFILMENT_QUEUE_LIST_SPEC,
+    FULFILMENT_QUEUE_SORT_FIELDS,
+    type FulfilmentQueueListParams,
+    fulfilmentQueueRequest,
+} from '@/features/inventory/fulfilmentQueueList';
 import type { FulfilmentQueueRow, FulfilmentState } from '@/features/inventory/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 // The 422 IS the answer — the server refuses on figures recomputed under a
 // lock, and its sentence carries the real number. Imported rather than
 // re-implemented: cross-feature imports are precedented (StoreIssueQueuePage
@@ -40,9 +49,13 @@ import { itemLabel } from '@/lib/itemLabel';
  * THE SERVER DECIDES EVERYTHING THIS PAGE RENDERS. `fulfilment_state` and
  * `can{}` arrive on the row from the same service the writes refuse in, and
  * the ORDER of the rows — over-reserved first, across the whole queue rather
- * than the page in front of the reader (S8) — is the server's too. So no
- * column carries a `sorter`: one that did would sort 25 rows and quietly
- * defeat the thing it looks like it is implementing.
+ * than the page in front of the reader (S8) — is the server's too. The two
+ * sorters here (Order, Ordered) are sortOrder-controlled and RE-QUERY: they
+ * name the real columns of the queue's base query
+ * (FulfilmentQueueService::SORTABLE) and the server orders the whole queue
+ * by them. Every computed column — state, reserved, short, free, promised
+ * twice — carries none: a sorter over 25 rows would quietly defeat the
+ * thing it looks like it is implementing.
  *
  * THE DEFAULT VIEW HIDES COVERED LINES (S16). A fully allocated line needs
  * nothing from the store, and a queue whose majority needs nothing stops being
@@ -112,31 +125,16 @@ export default function StoreFulfilmentPage() {
     const queryClient = useQueryClient();
 
     /*
-     * THE VIEW IS THE URL — the state filter and the page, so a pasted link is
-     * the same queue. The same rule the three Sales lists follow
-     * (useSalesListParams); kept local here because this page has one filter
-     * and no drawer, so the shared hook's document-kind machinery has nothing
-     * to do.
+     * THE VIEW IS THE URL — the state filter, the sort and the page, so a
+     * pasted link is the same queue (useListParams, fulfilmentQueueList.ts).
      */
-    const [searchParams, setSearchParams] = useSearchParams();
-    const state = (searchParams.get('state') ?? '') as FulfilmentState | '';
-    const page = Number(searchParams.get('page') ?? 1) || 1;
-    const perPage = Number(searchParams.get('per_page') ?? 25) || 25;
-
-    const writeParams = (next: { state?: FulfilmentState | ''; page?: number; per_page?: number }) => {
-        const params = new URLSearchParams();
-        const nextState = next.state ?? state;
-        const nextPage = next.page ?? page;
-        const nextPerPage = next.per_page ?? perPage;
-        if (nextState !== '') params.set('state', nextState);
-        if (nextPage !== 1) params.set('page', String(nextPage));
-        if (nextPerPage !== 25) params.set('per_page', String(nextPerPage));
-        setSearchParams(params, { replace: true });
-    };
+    const { params, setParams, setPage } = useListParams<FulfilmentQueueListParams>(FULFILMENT_QUEUE_LIST_SPEC);
+    const request = fulfilmentQueueRequest(params);
+    const state: FulfilmentState | '' = params.state ?? '';
 
     const queueQuery = useQuery({
-        queryKey: ['inventory', 'fulfilment', 'queue', { state, page, perPage }],
-        queryFn: () => listFulfilmentQueue({ state: state === '' ? undefined : state, page, per_page: perPage }),
+        queryKey: ['inventory', 'fulfilment', 'queue', request],
+        queryFn: () => listFulfilmentQueue(request),
         placeholderData: (previous) => previous,
     });
 
@@ -265,32 +263,28 @@ export default function StoreFulfilmentPage() {
                     value={state}
                     style={{ width: 220 }}
                     options={STATE_OPTIONS}
-                    onChange={(next) => writeParams({ state: next, page: 1 })}
+                    onChange={(next) => setParams({ state: next === '' ? undefined : next })}
                 />
             </Space>
 
             <Table<FulfilmentQueueRow>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="line_id"
                 loading={queueQuery.isLoading}
                 dataSource={rows}
                 locale={{ emptyText: queueQuery.isError ? 'The queue could not be read.' : 'Nothing waiting on the store.' }}
-                pagination={
-                    queueQuery.data?.meta
-                        ? {
-                              current: queueQuery.data.meta.current_page,
-                              pageSize: queueQuery.data.meta.per_page,
-                              total: queueQuery.data.meta.total,
-                              showSizeChanger: true,
-                              pageSizeOptions: [25, 50, 100, 200],
-                              showTotal: (total) => `${total} line${total === 1 ? '' : 's'}`,
-                              onChange: (nextPage, nextSize) => writeParams({ page: nextPage, per_page: nextSize }),
-                          }
-                        : false
-                }
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, FULFILMENT_QUEUE_SORT_FIELDS, FULFILMENT_QUEUE_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(queueQuery.data?.meta, setPage, 'lines')}
                 columns={[
                     {
                         title: 'Order',
+                        key: 'sales_order_id',
+                        sorter: true,
+                        sortOrder: columnSortOrder('sales_order_id', params.sort, FULFILMENT_QUEUE_DEFAULT_SORT),
                         render: (_, row) => (
                             <Space direction="vertical" size={0}>
                                 <strong>SO-{row.sales_order_id}</strong>
@@ -311,7 +305,10 @@ export default function StoreFulfilmentPage() {
                     },
                     {
                         title: 'Ordered / delivered',
+                        key: 'quantity',
                         align: 'right',
+                        sorter: true,
+                        sortOrder: columnSortOrder('quantity', params.sort, FULFILMENT_QUEUE_DEFAULT_SORT),
                         render: (_, row) => (
                             <span style={numeric}>
                                 {formatQuantity(row.ordered)} / {formatQuantity(row.delivered)}

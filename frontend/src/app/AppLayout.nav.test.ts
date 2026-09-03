@@ -27,6 +27,7 @@ import { allNavItems, buildNavItems, navTrailForPath } from './AppLayout';
  */
 const CONFIGURED_ORDER = [
     'Dashboard',
+    'Ask ERP',
     'Procurement',
     'Inventory',
     'Production',
@@ -53,10 +54,10 @@ const CONFIGURED_ORDER = [
     // sit directly after 'Payroll' and move the entry in AppLayout.tsx with
     // it — do not resequence either one without that answer.
     'Tally Sync',
-    // Utilities, below the divider AppLayout inserts before Downloads.
-    'Downloads',
-    'Help',
-    'Administration',
+    // One utility entry, below the divider AppLayout inserts before it:
+    // Downloads, Help, Users and Roles are cards on the Settings page now
+    // (owner, 03-Sep-2026), and their routes are unchanged.
+    'Settings',
 ];
 
 /**
@@ -98,10 +99,10 @@ describe('the sidebar', () => {
     });
 
     it('shows nothing at all to a login with no permissions', () => {
-        // Dashboard, Downloads and Help carry no `module`, so they survive —
+        // Dashboard and Settings carry no `module`, so they survive —
         // that is deliberate (see the comments on those entries) and is
         // pinned here so a stray gate on one of them is a red test.
-        expect(buildNavItems(null).map((item) => item.label)).toEqual(['Dashboard', 'Downloads', 'Help']);
+        expect(buildNavItems(null).map((item) => item.label)).toEqual(['Dashboard', 'Settings']);
     });
 });
 

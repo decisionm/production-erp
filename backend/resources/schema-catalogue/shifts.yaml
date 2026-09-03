@@ -1,0 +1,63 @@
+table: shifts
+module: production
+label: Shifts
+purpose: 'One row is a factory shift definition (e.g. Day, Night) with its wall-clock start and end times in IST. Production batches, stock counts and shift summaries all point at a shift plus a production date.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: name
+    type: string
+    meaning: 'Shift name as the floor calls it (Day, Night, ...)'
+  -
+    name: start_time
+    type: time
+    meaning: 'Wall-clock start time (IST, HH:MM:SS)'
+  -
+    name: end_time
+    type: time
+    meaning: 'Wall-clock end time (IST); earlier than start_time for an overnight shift, whose output files under the date it started'
+  -
+    name: is_active
+    type: integer
+    meaning: '1 = shift can be selected for new batches, 0 = deactivated'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+    meaning: 'Soft-delete timestamp; null = live'
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User who created the shift in the app -> users; null = seeded/imported'
+    references: users.id
+  -
+    name: updated_by
+    type: integer
+    nullable: true
+    meaning: 'User who last edited the shift -> users'
+    references: users.id
+joins:
+  - 'shifts.updated_by = users.id'
+  - 'shifts.created_by = users.id'
+keywords:
+  - shift
+  - 'day shift'
+  - 'night shift'
+  - 'shift timing'
+questions:
+  - 'What are the shift timings?'
+  - 'Which shifts are active?'

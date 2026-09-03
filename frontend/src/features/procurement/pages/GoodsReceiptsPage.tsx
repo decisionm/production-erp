@@ -13,7 +13,9 @@ import { useAuthStore } from '@/features/auth/store';
 import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels';
 import { listAllWarehouses } from '@/features/inventory/api';
 import {
+    GOODS_RECEIPT_DEFAULT_SORT,
     GOODS_RECEIPT_LIST_SPEC,
+    GOODS_RECEIPT_SORT_FIELDS,
     createGoodsReceipt,
     goodsReceiptServerFilters,
     goodsReceiptsQueryKey,
@@ -31,6 +33,7 @@ import { formatDateTime } from '@/lib/datetime';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { narrowingKeys } from '@/lib/listParams';
 import { TABLE_STICKY, noMatchLine, pageRangeLine, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { useListParams } from '@/lib/useListParams';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { itemLabel } from '@/lib/itemLabel';
@@ -965,12 +968,25 @@ export default function GoodsReceiptsPage() {
                 sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries; the register is paginated, so sorting the
+                // loaded page would misorder the whole result set.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, GOODS_RECEIPT_SORT_FIELDS, GOODS_RECEIPT_DEFAULT_SORT) });
+                }}
                 loading={isLoading}
                 dataSource={receipts}
                 locale={{ emptyText: <ListEmpty state={listQuery} entity="goods receipts" empty={emptyText} /> }}
                 pagination={serverPagination(data?.meta, setPage, 'goods receipts')}
                 columns={[
-                    { title: 'Receipt', render: (_, row) => grnNumber(row) },
+                    {
+                        title: 'Receipt',
+                        key: 'id',
+                        sorter: true,
+                        sortOrder: columnSortOrder('id', params.sort, GOODS_RECEIPT_DEFAULT_SORT),
+                        render: (_, row) => grnNumber(row),
+                    },
                     {
                         title: 'PO',
                         render: (_, row) => (
@@ -982,7 +998,13 @@ export default function GoodsReceiptsPage() {
                         ),
                     },
                     { title: 'Warehouse', render: (_, row) => `${row.warehouse.code} — ${row.warehouse.name}` },
-                    { title: 'Received', render: (_, row) => formatDateTime(row.received_date) },
+                    {
+                        title: 'Received',
+                        key: 'received_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('received_date', params.sort, GOODS_RECEIPT_DEFAULT_SORT),
+                        render: (_, row) => formatDateTime(row.received_date),
+                    },
                     ...(showsRates ? [{ title: 'Unit Price', render: (_: unknown, row: GoodsReceiptNote) => unitPriceSummary(row) }] : []),
                     { title: 'Reference', dataIndex: 'reference' },
                     { title: 'Lines', render: (_, row) => row.lines.length },

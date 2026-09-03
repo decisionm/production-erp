@@ -3,6 +3,7 @@
 namespace Tests\Feature\Regression\Support;
 
 use App\Models\User;
+use App\Modules\Assistant\Models\AskErpConversation;
 use App\Modules\Compliance\Models\GstRate;
 use App\Modules\Compliance\Models\GstRegistration;
 use App\Modules\Core\Services\PermissionService;
@@ -15,6 +16,8 @@ use App\Modules\Finance\Models\Enums\GLAccountType;
 use App\Modules\Finance\Models\GLAccount;
 use App\Modules\Finance\Models\JournalEntry;
 use App\Modules\HRMS\Models\Attendance;
+use App\Modules\HRMS\Models\AttendanceImport;
+use App\Modules\HRMS\Models\AttendanceImportLine;
 use App\Modules\HRMS\Models\Employee;
 use App\Modules\HRMS\Models\Enums\AttendanceStatus;
 use App\Modules\HRMS\Models\LeaveBalance;
@@ -371,6 +374,17 @@ trait RegressionFixtures
         $leaveBalance = LeaveBalance::create(['employee_id' => $employee->id, 'leave_type_id' => $leaveType->id, 'year' => 2026, 'allocated_days' => 12]);
         $leaveRequest = LeaveRequest::create(['employee_id' => $employee->id, 'leave_type_id' => $leaveType->id, 'start_date' => '2026-08-20', 'end_date' => '2026-08-20', 'days' => 1]);
         $attendance = Attendance::create(['employee_id' => $employee->id, 'date' => '2026-08-12', 'status' => AttendanceStatus::Present]);
+        // One punch-report run with one clean line (03-Sep).
+        $attendanceImport = AttendanceImport::create([
+            'source' => 'pooja', 'period_from' => '2026-08-01', 'period_to' => '2026-08-31', 'file_name' => 'regression.xlsx',
+            'uploaded_by' => $actor->id, 'employee_count' => 1, 'day_count' => 1, 'issue_count' => 0,
+        ]);
+        AttendanceImportLine::create([
+            'attendance_import_id' => $attendanceImport->id, 'employee_id' => $employee->id, 'employee_code' => 'RG-E1',
+            'employee_name' => 'Regression Employee', 'date' => '2026-08-12', 'raw_status' => 'FD',
+            'first_in' => '09:00:00', 'last_out' => '18:00:00', 'resolution' => 'present',
+            'resolved_check_in' => '09:00:00', 'resolved_check_out' => '18:00:00',
+        ]);
 
         // ---- Payroll --------------------------------------------------------
         $component = SalaryComponent::create(['code' => 'RG-BASIC', 'name' => 'Regression basic', 'type' => SalaryComponentType::Earning, 'calculation_type' => SalaryCalculationType::FixedAmount]);
@@ -436,7 +450,11 @@ trait RegressionFixtures
         $gstRate = GstRate::create(['hsn_sac_code' => '99999999', 'description' => 'Regression rate', 'rate_percent' => '18.00']);
         $gstRegistration = GstRegistration::create(['gstin' => '33AAAAA0000A1Z5', 'state_code' => '33', 'state_name' => 'Regression State', 'is_primary' => true]);
 
+        // ---- Ask ERP -------------------------------------------------------
+        $conversation = AskErpConversation::create(['user_id' => $actor->id, 'title' => 'Regression question']);
+
         return $this->fx = compact(
+            'attendanceImport',
             'bottle', 'resin', 'masterbatch', 'carton', 'fg', 'rm', 'batch', 'serial',
             'vendor', 'requisition', 'po', 'grn', 'lot', 'bill',
             'customer', 'order', 'delivery', 'invoice',
@@ -452,6 +470,7 @@ trait RegressionFixtures
             'lead', 'opportunity', 'quotation',
             'gstRate', 'gstRegistration',
             'materialRequest', 'storeIssue',
+            'conversation',
         );
     }
 }

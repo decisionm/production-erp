@@ -1,0 +1,88 @@
+table: ledgers
+module: finance
+label: 'Tally Ledgers'
+purpose: 'One Tally ledger (a leaf account under a ledger group, including every supplier and customer party ledger) mirrored read-only from Tally by the masters pull, with the party details Tally holds. Vendors and customers link to it by tally_ledger_guid.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: tally_guid
+    type: string
+    nullable: true
+    meaning: 'Tally GUID of the ledger; unique, the key vendors.tally_ledger_guid and customers.tally_ledger_guid point at'
+  -
+    name: name
+    type: string
+    meaning: 'Ledger name as in Tally; a party name when the group is Sundry Creditors or Sundry Debtors'
+    sensitive: supplier-identity
+  -
+    name: tally_group_name
+    type: string
+    nullable: true
+    meaning: 'Name of the ledger group as Tally reported it (e.g. Sundry Creditors); used to re-resolve ledger_group_id on each pull'
+  -
+    name: ledger_group_id
+    type: integer
+    nullable: true
+    meaning: 'The ledger group it belongs to (ledger_groups)'
+    references: ledger_groups.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the ledger was first mirrored'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last touched by a pull'
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+    meaning: 'Soft-delete timestamp; NULL means the ledger is live'
+  -
+    name: gstin
+    type: string
+    nullable: true
+    meaning: 'Party GSTIN as held in Tally; NULL when Tally has none'
+    sensitive: supplier-identity
+  -
+    name: state_name
+    type: string
+    nullable: true
+    meaning: "Party state in Tally's own spelling (not the two-digit GST code)"
+    sensitive: supplier-identity
+  -
+    name: email
+    type: string
+    nullable: true
+    meaning: 'Party email as held in Tally; almost always NULL'
+    sensitive: supplier-identity
+  -
+    name: phone
+    type: string
+    nullable: true
+    meaning: 'Party phone as held in Tally; usually NULL'
+    sensitive: supplier-identity
+  -
+    name: tally_synced_at
+    type: datetime
+    nullable: true
+    meaning: 'When the pull that last confirmed these values ran'
+joins:
+  - 'ledgers.ledger_group_id = ledger_groups.id'
+keywords:
+  - 'tally ledger'
+  - ledger
+  - 'party ledger'
+  - 'sundry creditor'
+  - 'sundry debtor'
+  - account
+  - 'ledger master'
+questions:
+  - 'How many Sundry Creditor ledgers does Tally have, and how many are linked to a vendor?'
+  - 'Which Tally party ledgers have no GSTIN?'
+  - 'When were the Tally ledger masters last synced?'

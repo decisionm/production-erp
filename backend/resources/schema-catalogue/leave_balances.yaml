@@ -1,0 +1,55 @@
+table: leave_balances
+module: hrms
+label: 'Leave Balances'
+purpose: 'One row per employee, leave type and year: how many leave days were allocated for that year and how many have been used by approved leave requests. Remaining leave is allocated_days minus used_days.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'row id'
+  -
+    name: employee_id
+    type: integer
+    meaning: 'the employee the balance belongs to (employees)'
+    references: employees.id
+  -
+    name: leave_type_id
+    type: integer
+    meaning: 'the kind of leave (leave_types)'
+    references: leave_types.id
+  -
+    name: year
+    type: integer
+    meaning: 'calendar year the balance is for'
+  -
+    name: allocated_days
+    type: decimal
+    meaning: 'leave days granted for the year'
+  -
+    name: used_days
+    type: decimal
+    meaning: 'leave days consumed by approved leave requests so far'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'when the row was created in the ERP'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'when the row was last edited'
+joins:
+  - 'leave_balances.leave_type_id = leave_types.id'
+  - 'leave_balances.employee_id = employees.id'
+keywords:
+  - 'leave balance'
+  - 'remaining leave'
+  - 'leaves left'
+  - entitlement
+  - CL
+  - SL
+  - EL
+questions:
+  - 'How many leave days does an employee have left this year?'
+  - 'Who has used up all their casual leave?'

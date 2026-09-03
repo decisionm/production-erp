@@ -249,12 +249,15 @@ export async function listStoreProductionMovements(params: {
     itemId?: number;
     page?: number;
     perPage?: number;
+    /** ListStockMovementsRequest::SORTABLE in the ListSort spelling; absent is newest first. */
+    sort?: string;
 }): Promise<Paginated<StockMovement>> {
     const { data } = await api.get<Paginated<StockMovement>>(`${MATERIAL_FLOW_BASE}/stock-movements`, {
         params: {
             purpose: 'issue_to_production,return_from_production',
             warehouse_id: params.wipWarehouseId,
             item_id: params.itemId,
+            sort: params.sort,
             page: params.page,
             per_page: params.perPage,
         },

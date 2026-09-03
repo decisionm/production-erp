@@ -5,6 +5,7 @@ namespace App\Modules\Production\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Production\Http\Controllers\Concerns\ManagesConfigurationRecords;
 use App\Modules\Production\Http\Requests\ArchiveConfigurationRequest;
+use App\Modules\Production\Http\Requests\ListMoldsRequest;
 use App\Modules\Production\Http\Requests\StoreMoldRequest;
 use App\Modules\Production\Http\Requests\UpdateMoldRequest;
 use App\Modules\Production\Http\Resources\MoldResource;
@@ -36,11 +37,11 @@ class MoldController extends Controller
      * states of a three-case status and not each other's complement (see
      * MoldService::configurationActiveColumn). Omitted returns the master.
      */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(ListMoldsRequest $request): AnonymousResourceCollection
     {
         $active = $request->has('active') ? $request->boolean('active') : null;
 
-        $page = $this->molds->paginate($this->perPage($request), $active);
+        $page = $this->molds->paginate($request->perPage(), $active, $request->sort());
 
         $this->withAbilitiesForEach($request, $this->molds, $page->getCollection());
 

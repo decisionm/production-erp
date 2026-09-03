@@ -13,6 +13,11 @@ import {
 import { useState } from 'react';
 import { lookupCartonTrace } from '@/features/production/api';
 import type { CartonInternalTrace, CartonTraceLot } from '@/features/production/types';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
+import { TABLE_STICKY } from '@/lib/tableProps';
+
+/** One line of the batch-costing allocation table, as the server sends it. */
+type CostingAllocation = NonNullable<CartonInternalTrace['costing']['allocations']>[number];
 
 /** "92.0000" → "92"; "—" for null/unparseable. Rates stay strings until display. */
 function fmtDecimal(value: string | null | undefined): string {
@@ -61,14 +66,36 @@ export default function CartonTracePage() {
     const detail =
         (error as { response?: { data?: { message?: string } } } | null)?.response?.data?.message;
 
+    // Every lot of the window is on screen; each column sorts on the value it shows.
     const lotColumns = (quantityTitle: string) => [
-        { title: 'Material', dataIndex: 'material', render: (v: string | null) => v ?? '—' },
-        { title: 'Supplier lot', dataIndex: 'supplier_lot_no', render: (v: string | null) => v ?? '—' },
-        { title: 'GRN reference', dataIndex: 'grn_reference', render: (v: string | null) => v ?? '—' },
-        { title: 'Inward date', dataIndex: 'inward_date', render: (v: string | null) => v ?? '—' },
+        {
+            title: 'Material',
+            dataIndex: 'material',
+            sorter: columnSorter((row: CartonTraceLot) => row.material, 'text'),
+            render: (v: string | null) => v ?? '—',
+        },
+        {
+            title: 'Supplier lot',
+            dataIndex: 'supplier_lot_no',
+            sorter: columnSorter((row: CartonTraceLot) => row.supplier_lot_no, 'text'),
+            render: (v: string | null) => v ?? '—',
+        },
+        {
+            title: 'GRN reference',
+            dataIndex: 'grn_reference',
+            sorter: columnSorter((row: CartonTraceLot) => row.grn_reference, 'text'),
+            render: (v: string | null) => v ?? '—',
+        },
+        {
+            title: 'Inward date',
+            dataIndex: 'inward_date',
+            sorter: columnSorter((row: CartonTraceLot) => row.inward_date, 'date'),
+            render: (v: string | null) => v ?? '—',
+        },
         {
             title: 'Rate (₹/kg)',
             dataIndex: 'rate_per_kg',
+            sorter: columnSorter((row: CartonTraceLot) => row.rate_per_kg, 'number'),
             render: (v: string | null, row: CartonTraceLot) =>
                 v === null ? (
                     <Typography.Text type="secondary">no recorded rate</Typography.Text>
@@ -79,7 +106,12 @@ export default function CartonTracePage() {
                     </>
                 ),
         },
-        { title: quantityTitle, dataIndex: 'loaded_kg', render: fmtDecimal },
+        {
+            title: quantityTitle,
+            dataIndex: 'loaded_kg',
+            sorter: columnSorter((row: CartonTraceLot) => row.loaded_kg, 'number'),
+            render: fmtDecimal,
+        },
     ];
 
     return (
@@ -179,6 +211,7 @@ export default function CartonTracePage() {
                             )}
                             <Table<CartonTraceLot>
                                 size="small"
+                                sticky={TABLE_STICKY}
                                 rowKey={(row) => `${row.supplier_lot_no}-${row.grn_reference}`}
                                 columns={lotColumns('Loaded (kg)')}
                                 dataSource={data.day_bin_attribution.lots}
@@ -226,6 +259,7 @@ export default function CartonTracePage() {
                             )}
                             <Table<CartonTraceLot>
                                 size="small"
+                                sticky={TABLE_STICKY}
                                 rowKey={(row) => `${row.supplier_lot_no}-${row.grn_reference}`}
                                 columns={lotColumns('Issued (kg)')}
                                 dataSource={data.store_issue_attribution.lots}
@@ -266,23 +300,41 @@ export default function CartonTracePage() {
                                 </Descriptions.Item>
                             </Descriptions>
                             {data.costing.allocations !== undefined && data.costing.allocations.length > 0 && (
-                                <Table
+                                <Table<CostingAllocation>
                                     size="small"
+                                    sticky={TABLE_STICKY}
                                     rowKey={(row) => `${row.item_id}-${row.rate_source}-${row.quantity}`}
                                     columns={[
                                         {
                                             title: 'Material',
                                             dataIndex: 'item_name',
+                                            sorter: columnSorter((row: CostingAllocation) => row.item_name, 'text'),
                                             render: (v: string | null) => v ?? '—',
                                         },
-                                        { title: 'Drawn (kg)', dataIndex: 'quantity', render: fmtDecimal },
+                                        {
+                                            title: 'Drawn (kg)',
+                                            dataIndex: 'quantity',
+                                            sorter: columnSorter((row: CostingAllocation) => row.quantity, 'number'),
+                                            render: fmtDecimal,
+                                        },
                                         {
                                             title: 'Pool rate (₹/kg)',
                                             dataIndex: 'pool_rate',
+                                            sorter: columnSorter((row: CostingAllocation) => row.pool_rate, 'number'),
                                             render: fmtDecimal,
                                         },
-                                        { title: 'Amount (₹)', dataIndex: 'amount', render: fmtDecimal },
-                                        { title: 'Rate source', dataIndex: 'rate_source' },
+                                        {
+                                            title: 'Amount (₹)',
+                                            dataIndex: 'amount',
+                                            sorter: columnSorter((row: CostingAllocation) => row.amount, 'number'),
+                                            render: fmtDecimal,
+                                        },
+                                        {
+                                            title: 'Rate source',
+                                            dataIndex: 'rate_source',
+                                            filters: filterOptions(data.costing.allocations, (row) => row.rate_source),
+                                            onFilter: onFilterBy((row: CostingAllocation) => row.rate_source),
+                                        },
                                     ]}
                                     dataSource={data.costing.allocations}
                                     pagination={false}

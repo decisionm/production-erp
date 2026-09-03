@@ -5,6 +5,7 @@ namespace App\Modules\Production\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Production\Http\Controllers\Concerns\ManagesConfigurationRecords;
 use App\Modules\Production\Http\Requests\ArchiveConfigurationRequest;
+use App\Modules\Production\Http\Requests\ListShiftsRequest;
 use App\Modules\Production\Http\Requests\StoreShiftRequest;
 use App\Modules\Production\Http\Requests\UpdateShiftRequest;
 use App\Modules\Production\Http\Resources\ShiftResource;
@@ -37,11 +38,11 @@ class ShiftController extends Controller
      * admin screen and anything resolving history need those. Same shape
      * as WorkCenterController::index, deliberately.
      */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(ListShiftsRequest $request): AnonymousResourceCollection
     {
         $active = $request->has('active') ? $request->boolean('active') : null;
 
-        $page = $this->shifts->paginate(activeOnly: $active);
+        $page = $this->shifts->paginate($request->perPage(), $active, $request->sort());
 
         $this->withAbilitiesForEach($request, $this->shifts, $page->getCollection());
 

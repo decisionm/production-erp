@@ -3,6 +3,7 @@
 namespace App\Modules\Inventory\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Inventory\Http\Requests\ListWarehousesRequest;
 use App\Modules\Inventory\Http\Requests\StoreWarehouseRequest;
 use App\Modules\Inventory\Http\Requests\UpdateWarehouseRequest;
 use App\Modules\Inventory\Http\Resources\WarehouseResource;
@@ -39,11 +40,12 @@ class WarehouseController extends Controller
 
     public function __construct(private readonly WarehouseService $warehouses) {}
 
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(ListWarehousesRequest $request): AnonymousResourceCollection
     {
         return WarehouseResource::collection($this->warehouses->paginate(
             $this->perPage($request),
             $this->searchTerm($request),
+            $request->sort(),
         ))->additional([
             'meta' => [
                 // WHICH ROW IS PRODUCTION/WIP (DEC-20260817-001), resolved

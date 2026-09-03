@@ -1,13 +1,23 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, DatePicker, Descriptions, Drawer, Form, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { listAllEmployees } from '@/features/hrms/api';
 import { createSalaryStructure, listAllSalaryComponents, listSalaryStructures } from '@/features/payroll/api';
-import type { SalaryStructure } from '@/features/payroll/types';
+import {
+    STRUCTURES_DEFAULT_SORT,
+    STRUCTURES_LIST_SPEC,
+    STRUCTURES_SORT_FIELDS,
+    structuresQueryKey,
+    structuresServerFilters,
+} from '@/features/payroll/lists';
+import type { SalaryStructure, SalaryStructureListFilters } from '@/features/payroll/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const lineSchema = z.object({
     salary_component_id: z.number({ error: 'Component is required' }),
@@ -21,12 +31,28 @@ const structureSchema = z.object({
 });
 type StructureFormValues = z.infer<typeof structureSchema>;
 
+/**
+ * THE SALARY STRUCTURE LIST. Sort, page and page size live in the URL
+ * (useListParams) — as does the `employee_id` filter this index has always
+ * taken — and the SERVER orders and pages (ListSalaryStructuresRequest);
+ * the pager is wired to the server's meta — this table drew the server's
+ * first 20 with the pager off, so a 21st structure existed and nothing on
+ * screen said so.
+ */
 export default function SalaryStructuresPage() {
     const [modalOpen, setModalOpen] = useState(false);
     const [detailStructure, setDetailStructure] = useState<SalaryStructure | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['payroll', 'salary-structures'], queryFn: () => listSalaryStructures() });
+    const { params, setParams, setPage } = useListParams<SalaryStructureListFilters>(STRUCTURES_LIST_SPEC);
+    const filters = useMemo(() => structuresServerFilters(params), [params]);
+
+    const { data, isFetching } = useQuery({
+        // Still under the ['payroll', 'salary-structures'] prefix the create invalidates.
+        queryKey: structuresQueryKey(filters),
+        queryFn: () => listSalaryStructures(filters),
+        placeholderData: (previous) => previous,
+    });
     const { data: employees } = useQuery({ queryKey: ['hrms', 'employees', 'all'], queryFn: listAllEmployees });
     const { data: components } = useQuery({ queryKey: ['payroll', 'salary-components', 'all'], queryFn: listAllSalaryComponents });
 
@@ -66,14 +92,30 @@ export default function SalaryStructuresPage() {
             </Space>
 
             <Table<SalaryStructure>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
-                loading={isLoading}
+                loading={isFetching}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queried. The
+                // drawer's component lines keep the structure's own order.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, STRUCTURES_SORT_FIELDS, STRUCTURES_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'structures')}
                 columns={[
+                    // A name through the relation, not a column of this table:
+                    // no server sort. Components and Gross are composed from
+                    // the lines, so neither is a column either.
                     { title: 'Employee', render: (_, row) => row.employee?.name },
-                    { title: 'Effective From', dataIndex: 'effective_from' },
+                    {
+                        title: 'Effective From',
+                        dataIndex: 'effective_from',
+                        key: 'effective_from',
+                        sorter: true,
+                        sortOrder: columnSortOrder('effective_from', params.sort, STRUCTURES_DEFAULT_SORT),
+                    },
                     {
                         title: 'Components',
                         render: (_, row) => row.lines.map((l) => l.component.code).join(', '),

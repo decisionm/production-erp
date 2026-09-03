@@ -4,9 +4,11 @@ namespace App\Modules\Production\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Inventory\Services\StockMovementService;
+use App\Modules\Production\Http\Requests\ListReworkOrdersRequest;
 use App\Modules\Production\Models\Bom;
 use App\Modules\Production\Models\Enums\ReworkOrderStatus;
 use App\Modules\Production\Models\ReworkOrder;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
@@ -28,12 +30,12 @@ class ReworkOrderService
         private readonly StockMovementService $stock,
     ) {}
 
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return ReworkOrder::query()
-            ->with(['item', 'warehouse', 'sourceWorkOrder', 'materials.component'])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+        $query = ReworkOrder::query()
+            ->with(['item', 'warehouse', 'sourceWorkOrder', 'materials.component']);
+
+        return ListSort::apply($query, $sort, ListReworkOrdersRequest::SORTABLE)->paginate($perPage);
     }
 
     /**

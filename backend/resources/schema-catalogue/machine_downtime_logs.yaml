@@ -1,0 +1,87 @@
+table: machine_downtime_logs
+module: production
+label: 'Machine Downtime Logs'
+purpose: 'One row is one machine breakdown / stoppage on one machine during one shift, from the paper Idle & Downtime section: the nature of the problem, the remedy and parts changed, when it started, when it was fixed and how many minutes were lost. A stopwatch record: opened when the machine stops, closed when it runs again. Batch-linked downtime with a reason code is in production_downtime_events.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: work_center_id
+    type: integer
+    meaning: 'The machine (ASB-1..ASB-10) that stopped -> work_centers'
+    references: work_centers.id
+  -
+    name: shift_id
+    type: integer
+    meaning: 'The shift (A/B/C) during which the stoppage happened -> shifts'
+    references: shifts.id
+  -
+    name: production_date
+    type: date
+    meaning: 'Production day the stoppage belongs to (shift day, not the calendar date of to_time for a Night shift)'
+  -
+    name: nature_of_problem
+    type: string
+    meaning: 'What went wrong, as written by the supervisor (free text)'
+  -
+    name: remedy
+    type: string
+    nullable: true
+    meaning: 'What was done to fix it (free text, filled at close)'
+  -
+    name: parts_changed
+    type: string
+    nullable: true
+    meaning: 'Spare parts replaced during the repair (free text, filled at close)'
+  -
+    name: from_time
+    type: datetime
+    meaning: 'When the machine stopped (full datetime)'
+  -
+    name: to_time
+    type: datetime
+    nullable: true
+    meaning: 'When the machine was back running; NULL while still down'
+  -
+    name: total_minutes
+    type: decimal
+    nullable: true
+    meaning: 'Downtime duration in minutes, computed from from_time and to_time at close; NULL while open'
+  -
+    name: status
+    type: string
+    meaning: 'open (machine still down) or closed (repaired, to_time and total_minutes filled)'
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User who logged the stoppage -> users'
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'machine_downtime_logs.created_by = users.id'
+  - 'machine_downtime_logs.shift_id = shifts.id'
+  - 'machine_downtime_logs.work_center_id = work_centers.id'
+keywords:
+  - downtime
+  - breakdown
+  - stoppage
+  - idle
+  - 'machine problem'
+  - repair
+  - 'parts changed'
+questions:
+  - 'Which machine had the most downtime minutes this month?'
+  - 'Which machines are down right now?'
+  - 'What problems did ASB-5 have last week and what parts were changed?'

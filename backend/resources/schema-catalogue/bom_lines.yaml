@@ -1,0 +1,45 @@
+table: bom_lines
+module: production
+label: 'BOM Lines'
+purpose: 'One row is one component line of a bill of material: which component item goes in and how much of it is needed per one unit of the parent item.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: bom_id
+    type: integer
+    meaning: 'The BOM header this line belongs to -> boms'
+    references: boms.id
+  -
+    name: component_item_id
+    type: integer
+    meaning: 'The component (raw material or sub-assembly) consumed -> items'
+    references: items.id
+  -
+    name: quantity_per
+    type: decimal
+    meaning: "Quantity of the component needed per ONE unit of the parent item, in the component item's own unit of measure"
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'bom_lines.component_item_id = items.id'
+  - 'bom_lines.bom_id = boms.id'
+keywords:
+  - 'bom line'
+  - component
+  - 'raw material per unit'
+  - consumption
+  - ingredient
+questions:
+  - 'What components go into this item and how much of each?'
+  - 'Which BOMs use this raw material?'

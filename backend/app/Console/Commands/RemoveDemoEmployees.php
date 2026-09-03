@@ -85,6 +85,7 @@ class RemoveDemoEmployees extends Command
         ['table' => 'salary_structures', 'column' => 'employee_id', 'what' => 'has a salary structure'],
         ['table' => 'payslips', 'column' => 'employee_id', 'what' => 'has a payslip'],
         ['table' => 'employees', 'column' => 'manager_id', 'what' => 'manages another employee'],
+        ['table' => 'attendance_import_lines', 'column' => 'employee_id', 'what' => 'is on a punch-report import'],
     ];
 
     protected $signature = 'hrms:remove-demo-employees

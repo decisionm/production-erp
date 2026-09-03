@@ -11,6 +11,7 @@ import {
     type CecPreviewItem,
 } from '@/features/production/cecPreview';
 import type { CecSums, ShiftKpiReport } from '@/features/production/types';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 
 /**
  * CEC preview (Phase 5.7, WS-C) — the DATA `GET production/cec` returns for
@@ -35,22 +36,53 @@ export interface CecPreviewPanelProps {
 const tabular = { fontVariantNumeric: 'tabular-nums' } as const;
 const right = { align: 'right' as const, onCell: () => ({ style: tabular }) };
 
-const columns = [
-    { title: 'Batch', dataIndex: 'batch', key: 'batch' },
-    { title: 'SKU', dataIndex: 'sku', key: 'sku' },
-    { title: 'Product', dataIndex: 'product', key: 'product' },
-    { title: 'Expected (pcs)', dataIndex: 'expectedPieces', key: 'expectedPieces', ...right },
-    { title: 'Actual (pcs)', dataIndex: 'actualPieces', key: 'actualPieces', ...right },
-    { title: 'Good (kg)', dataIndex: 'goodKg', key: 'goodKg', ...right },
-    { title: 'Reject (kg)', dataIndex: 'rejectionKg', key: 'rejectionKg', ...right },
-    { title: 'QC reject (kg)', dataIndex: 'rejectionKgQc', key: 'rejectionKgQc', ...right },
-    { title: 'Efficiency', dataIndex: 'efficiency', key: 'efficiency', ...right },
-    { title: 'Packs', dataIndex: 'packs', key: 'packs', ...right },
-    { title: 'Downtime (min)', dataIndex: 'downtimeMinutes', key: 'downtimeMinutes', ...right },
-    { title: 'Approval', dataIndex: 'approval', key: 'approval' },
+/** A text column that sorts on what it shows. */
+const text = (title: string, key: keyof CecPreviewBatchRow) => ({
+    title,
+    dataIndex: key,
+    key,
+    sorter: columnSorter((row: CecPreviewBatchRow) => row[key], 'text'),
+});
+
+/** A figure column: right-aligned, tabular, sorted as a number ("—" last). */
+const figure = (title: string, key: keyof CecPreviewBatchRow) => ({
+    title,
+    dataIndex: key,
+    key,
+    ...right,
+    sorter: columnSorter((row: CecPreviewBatchRow) => row[key], 'number'),
+});
+
+/** "46.2%" → 46.2; "—" → null, so it sorts last. */
+const efficiencyValue = (row: CecPreviewBatchRow) => (row.efficiency === '—' ? null : parseFloat(row.efficiency));
+
+/**
+ * One machine's batch table — every batch of the machine is on screen, so
+ * the columns sort and filter here, on the server's figures as shown.
+ */
+const columnsFor = (rows: CecPreviewBatchRow[]) => [
+    text('Batch', 'batch'),
+    text('SKU', 'sku'),
+    text('Product', 'product'),
+    figure('Expected (pcs)', 'expectedPieces'),
+    figure('Actual (pcs)', 'actualPieces'),
+    figure('Good (kg)', 'goodKg'),
+    figure('Reject (kg)', 'rejectionKg'),
+    figure('QC reject (kg)', 'rejectionKgQc'),
+    { title: 'Efficiency', dataIndex: 'efficiency', key: 'efficiency', ...right, sorter: columnSorter(efficiencyValue, 'number') },
+    figure('Packs', 'packs'),
+    figure('Downtime (min)', 'downtimeMinutes'),
+    {
+        title: 'Approval',
+        dataIndex: 'approval',
+        key: 'approval',
+        filters: filterOptions(rows, (row) => row.approval),
+        onFilter: onFilterBy((row: CecPreviewBatchRow) => row.approval),
+    },
     {
         title: 'Tally',
         key: 'tally',
+        sorter: columnSorter((row: CecPreviewBatchRow) => row.tallyStatus, 'text'),
         render: (_: unknown, row: CecPreviewBatchRow) =>
             row.tallyLink ? (
                 <Link to={row.tallyLink}>
@@ -169,7 +201,7 @@ export default function CecPreviewPanel({ productionDate, shiftId, enabled = tru
                                     rowKey="key"
                                     pagination={false}
                                     dataSource={machine.rows}
-                                    columns={columns}
+                                    columns={columnsFor(machine.rows)}
                                     locale={{ emptyText: 'No batches.' }}
                                     style={{ marginTop: 4 }}
                                 />

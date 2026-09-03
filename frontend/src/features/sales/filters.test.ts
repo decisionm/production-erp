@@ -7,6 +7,8 @@ import {
     filtersFromSearchParams,
     hasActiveFilters,
     parseDocumentRef,
+    SALES_DEFAULT_SORT,
+    SALES_SORT_FIELDS,
     searchParamsFromFilters,
     sortOptions,
     statusOptions,
@@ -242,6 +244,17 @@ describe('parseDocumentRef', () => {
 });
 
 describe('sortOptions / statusOptions', () => {
+    it('names the server\'s sortable columns per document, and its default order (newest first)', () => {
+        // The column-header sorters read these directly; they must match the
+        // List*Request::sortableColumns() lists and SalesDocumentQuery::SORT_DEFAULT.
+        expect(SALES_SORT_FIELDS).toEqual({
+            sales_order: ['id', 'order_date', 'expected_date'],
+            delivery: ['id', 'delivered_date'],
+            invoice: ['id', 'invoice_date'],
+        });
+        expect(SALES_DEFAULT_SORT).toBe('-id');
+    });
+
     it('offers each document its own sortable columns, newest first as the first choice', () => {
         expect(sortOptions('sales_order').map((option) => option.value)).toEqual([
             '-id', 'id', '-order_date', 'order_date', '-expected_date', 'expected_date',

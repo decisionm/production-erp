@@ -86,6 +86,14 @@ class PermissionService
         'payroll' => 'Payroll',
         'maintenance' => 'Maintenance',
         'tally-sync' => 'Tally Sync',
+        // ASK ERP — the natural-language query page. Its own catalogue entry
+        // because its audience is a choice the owner makes per role: the page
+        // can read every table of every module the login may view, so
+        // granting it is granting a second, wider window onto those modules.
+        // `.view` is the real half (asking is a read); `.manage` is the
+        // vestigial twin, as with carton-trace. Administrator receives it
+        // through PermissionSeeder; no other role does unless a human grants it.
+        'assistant' => 'Ask ERP',
     ];
 
     /**

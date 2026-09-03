@@ -50,6 +50,9 @@ export async function listVendors(
     // them) — see the Vendors tab and vendorClassification.ts.
     classifications?: VendorClassification[],
     unclassified = false,
+    // ListVendorsRequest::SORTABLE in the ListSort spelling (03-Sep-2026);
+    // trailing and optional for the same reason, absent = name order.
+    sort?: string,
 ): Promise<Paginated<Vendor>> {
     const term = search?.trim() ?? '';
     const { data } = await api.get<Paginated<Vendor>>('/procurement/vendors', {
@@ -59,6 +62,7 @@ export async function listVendors(
             ...(term !== '' ? { q: term } : {}),
             ...(classifications && classifications.length > 0 ? { classification: classifications } : {}),
             ...(unclassified ? { unclassified: 1 } : {}),
+            ...(sort ? { sort } : {}),
         },
     });
     return data;
@@ -265,7 +269,16 @@ export async function cancelPurchaseOrder(id: number, reason: string): Promise<P
  * beside the read they feed, so the render test can seed the exact key the
  * page derives from its URL.
  */
-export const GOODS_RECEIPT_LIST_SPEC: ListParamsSpec = { numbers: ['po', 'grn'] };
+/** The columns the server sorts the register on (ListGoodsReceiptsRequest), besides id. */
+export const GOODS_RECEIPT_SORT_FIELDS: readonly string[] = ['id', 'received_date'];
+/** GoodsReceiptService's order when no sort is asked for: newest first. */
+export const GOODS_RECEIPT_DEFAULT_SORT = '-id';
+
+export const GOODS_RECEIPT_LIST_SPEC: ListParamsSpec = {
+    numbers: ['po', 'grn'],
+    strings: ['sort'],
+    allowed: { sort: GOODS_RECEIPT_SORT_FIELDS.flatMap((field) => [field, `-${field}`]) },
+};
 
 /** The page's URL → the request the server gets. Compacted: `{}` and `{ q: '' }` are one key. */
 export function goodsReceiptServerFilters(params: GoodsReceiptListParams): GoodsReceiptListFilters {

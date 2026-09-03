@@ -2,10 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Col, Empty, Input, InputNumber, Modal, Row, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import { listShifts, listWorkCenters, machineLabel } from '@/features/production/api';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 import { itemLabel } from '@/lib/itemLabel';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { narrowingKeys } from '@/lib/listParams';
 import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { useListParams } from '@/lib/useListParams';
 import {
     apiRefusalMessage,
@@ -18,6 +20,8 @@ import {
 } from '../api';
 import RequestLinesTable from '../components/RequestLinesTable';
 import {
+    MATERIAL_REQUEST_DEFAULT_SORT,
+    MATERIAL_REQUEST_SORT_FIELDS,
     REQUESTS_LIST_SPEC,
     type RequestStatusChoice,
     type RequestsListParams,
@@ -253,6 +257,13 @@ export default function MaterialRequestsPage() {
                 rowKey="id"
                 sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries; the list is paginated, so sorting the loaded
+                // page would misorder the whole result set.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, MATERIAL_REQUEST_SORT_FIELDS, MATERIAL_REQUEST_DEFAULT_SORT) });
+                }}
                 loading={requestsQuery.isFetching}
                 dataSource={requestsQuery.data?.data}
                 pagination={serverPagination(requestsQuery.data?.meta, setPage, 'requests')}
@@ -261,9 +272,18 @@ export default function MaterialRequestsPage() {
                     expandedRowRender: (request) => <RequestLinesTable lines={request.lines} />,
                 }}
                 columns={[
-                    { title: 'Request', dataIndex: 'request_number' },
+                    {
+                        title: 'Request',
+                        key: 'id',
+                        dataIndex: 'request_number',
+                        sorter: true,
+                        sortOrder: columnSortOrder('id', params.sort, MATERIAL_REQUEST_DEFAULT_SORT),
+                    },
                     {
                         title: 'Status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, MATERIAL_REQUEST_DEFAULT_SORT),
                         render: (_, request) => (
                             <Tooltip title={REQUEST_STATUS_HELP[request.status]}>
                                 <Tag color={REQUEST_STATUS_TONE[request.status]}>{REQUEST_STATUS_LABEL[request.status]}</Tag>
@@ -271,7 +291,13 @@ export default function MaterialRequestsPage() {
                         ),
                     },
                     { title: 'Raised by', render: (_, request) => request.requested_by_name ?? '—' },
-                    { title: 'Raised at', render: (_, request) => request.requested_at ?? '—' },
+                    {
+                        title: 'Raised at',
+                        key: 'requested_at',
+                        sorter: true,
+                        sortOrder: columnSortOrder('requested_at', params.sort, MATERIAL_REQUEST_DEFAULT_SORT),
+                        render: (_, request) => request.requested_at ?? '—',
+                    },
                     { title: 'Shift', render: (_, request) => request.shift_name ?? '—' },
                     {
                         title: 'Machine / area',
@@ -329,8 +355,12 @@ export default function MaterialRequestsPage() {
             <Table<ProductionFloorStock>
                 rowKey="item_id"
                 size="small"
+                sticky={TABLE_STICKY}
+                scroll={{ x: 'max-content' }}
                 loading={floorQuery.isLoading}
                 dataSource={floorQuery.data?.data}
+                // The whole floor is here (no pager), so these are honest
+                // client sorters and filters over every row.
                 pagination={false}
                 locale={{
                     emptyText: (
@@ -363,16 +393,28 @@ export default function MaterialRequestsPage() {
                         // display_name carried through: rebuilding the input
                         // by hand is what kept the ERP's own name off this
                         // table while the payload was already sending it.
+                        sorter: columnSorter(
+                            (row) => itemLabel({ sku: row.sku, name: row.name, display_name: row.display_name }),
+                            'text',
+                        ),
                         render: (_, row) => itemLabel({ sku: row.sku, name: row.name, display_name: row.display_name }),
                     },
                     {
                         title: `In ${LOCATION_LABEL.production_wip}`,
                         align: 'right',
+                        sorter: columnSorter((row) => row.quantity, 'number'),
                         render: (_, row) => formatQuantity(row.quantity),
                     },
-                    { title: 'UOM', dataIndex: 'uom', render: (uom: string | null) => uom ?? '—' },
+                    {
+                        title: 'UOM',
+                        dataIndex: 'uom',
+                        filters: filterOptions(floorQuery.data?.data ?? [], (row) => row.uom),
+                        onFilter: onFilterBy((row: ProductionFloorStock) => row.uom),
+                        render: (uom: string | null) => uom ?? '—',
+                    },
                     {
                         title: 'Last issued',
+                        sorter: columnSorter((row) => row.last_issued_at, 'date'),
                         render: (_, row) => (row.last_issued_at ? new Date(row.last_issued_at).toLocaleString() : '—'),
                     },
                     { title: 'Issue', render: (_, row) => row.last_issue_number ?? '—' },

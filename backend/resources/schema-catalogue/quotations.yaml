@@ -1,0 +1,66 @@
+table: quotations
+module: sales
+label: Quotations
+purpose: 'One row is a price quotation offered to a customer against an opportunity. The factory does not record quotations in the ERP and the CRM surface is hidden (DEC-20260902-052), so this table is expected to be empty on the live instance.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Row id'
+  -
+    name: opportunity_id
+    type: integer
+    meaning: 'The CRM opportunity this quotation was raised for'
+    references: opportunities.id
+  -
+    name: customer_id
+    type: integer
+    meaning: 'The customer quoted'
+    references: customers.id
+  -
+    name: status
+    type: string
+    meaning: 'Quotation state: draft, sent, accepted, rejected, expired'
+  -
+    name: quotation_date
+    type: date
+    meaning: 'Date the quotation was issued'
+  -
+    name: valid_until
+    type: date
+    nullable: true
+    meaning: 'Date the quoted prices expire'
+  -
+    name: notes
+    type: string
+    nullable: true
+    meaning: 'Free-text notes on the quotation'
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User who raised the quotation'
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'quotations.created_by = users.id'
+  - 'quotations.customer_id = customers.id'
+  - 'quotations.opportunity_id = opportunities.id'
+keywords:
+  - quotation
+  - quote
+  - proforma
+  - 'price offer'
+  - enquiry
+questions:
+  - 'Which quotations were sent but not accepted?'
+  - 'How many quotations expired without a decision?'

@@ -133,6 +133,8 @@ export interface PurchaseRequisitionListFilters {
     q?: string;
     page?: number;
     per_page?: number;
+    /** id / -id / needed_by_date / -needed_by_date / created_at / -created_at; absent is the server's default (-id). */
+    sort?: string;
 }
 
 export type PurchaseOrderStatus = 'draft' | 'sent' | 'partially_received' | 'closed' | 'cancelled';
@@ -434,6 +436,8 @@ export interface GoodsReceiptNote {
 export interface GoodsReceiptListFilters extends ListParams {
     purchase_order_id?: number;
     id?: number;
+    /** id / -id / received_date / -received_date; absent is the server's default (-id). */
+    sort?: string;
 }
 
 /**
@@ -445,6 +449,7 @@ export interface GoodsReceiptListFilters extends ListParams {
 export interface GoodsReceiptListParams extends ListParams {
     po?: number;
     grn?: number;
+    sort?: string;
 }
 
 // ------------------------------------------------------------ trace (P6-02) --
@@ -731,6 +736,8 @@ export interface SupplierBillListFilters {
     vendor_id?: number;
     page?: number;
     per_page?: number;
+    /** id / -id / bill_date / -bill_date; absent is the server's default (-id). */
+    sort?: string;
 }
 
 /*

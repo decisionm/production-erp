@@ -19,6 +19,7 @@ import {
     ruleDraftChanged,
 } from '@/features/production/factoryRules';
 import type { FactorySetting } from '@/features/production/types';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 import { formatDateTime } from '@/lib/datetime';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { showApiError } from '@/lib/showApiError';
@@ -94,10 +95,13 @@ function FactoryRulesTable() {
                 dataSource={rows}
                 pagination={false}
                 locale={{ emptyText: <ListEmpty state={query} entity="factory rules" empty="No factory rules recorded." /> }}
+                // Every rule is on screen, so the columns sort and filter
+                // here, on the values the cells show.
                 columns={[
                     {
                         title: 'Rule',
                         key: 'rule',
+                        sorter: columnSorter((row: FactorySetting) => row.label ?? row.key, 'text'),
                         render: (_, row) => (
                             <Space direction="vertical" size={0}>
                                 <Typography.Text strong>{row.label ?? row.key}</Typography.Text>
@@ -201,12 +205,15 @@ function FactoryRulesTable() {
                         dataIndex: 'confirmation_status',
                         key: 'confirmation_status',
                         width: 160,
+                        filters: filterOptions(rows, (row) => row.confirmation_status),
+                        onFilter: onFilterBy((row: FactorySetting) => row.confirmation_status),
                         render: (status: string | null) => (status ? <Tag>{status}</Tag> : '—'),
                     },
                     {
                         title: 'Last changed',
                         key: 'changed',
                         width: 220,
+                        sorter: columnSorter((row: FactorySetting) => (row.changed_by ? row.updated_at : null), 'date'),
                         render: (_, row) =>
                             row.changed_by ? (
                                 <Space direction="vertical" size={0}>

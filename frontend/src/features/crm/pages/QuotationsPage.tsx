@@ -2,7 +2,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { DownloadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useFieldArray, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import {
@@ -13,8 +13,19 @@ import {
     rejectQuotation,
     sendQuotation,
 } from '@/features/crm/api';
+import {
+    QUOTATION_DEFAULT_SORT,
+    QUOTATION_LIST_SPEC,
+    QUOTATION_SORT_FIELDS,
+    type QuotationListParams,
+    quotationServerFilters,
+    quotationsQueryKey,
+} from '@/features/crm/quotationList';
 import type { Quotation, QuotationStatus } from '@/features/crm/types';
 import { listAllItems } from '@/features/inventory/api';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const quotationSchema = z.object({
     opportunity_id: z.number({ error: 'Opportunity is required' }),
@@ -50,8 +61,18 @@ export default function QuotationsPage() {
     const [detailQuotation, setDetailQuotation] = useState<Quotation | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['crm', 'quotations'], queryFn: listQuotations });
-    const { data: opportunities } = useQuery({ queryKey: ['crm', 'opportunities'], queryFn: listOpportunities });
+    // THE LIST'S VIEW IS ITS URL: sort, page and page size, sorted and paged
+    // on the SERVER over every quotation.
+    const { params, setParams, setPage } = useListParams<QuotationListParams>(QUOTATION_LIST_SPEC);
+    const filters = useMemo(() => quotationServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: quotationsQueryKey(filters),
+        queryFn: () => listQuotations(filters),
+        placeholderData: (previous) => previous,
+    });
+    // Explicit thunk: listOpportunities now takes list filters, and handed
+    // straight to TanStack it would receive the query context instead.
+    const { data: opportunities } = useQuery({ queryKey: ['crm', 'opportunities'], queryFn: () => listOpportunities() });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
 
     const opportunityOptions =
@@ -101,20 +122,43 @@ export default function QuotationsPage() {
             </Space>
 
             <Table<Quotation>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries every quotation. Customer is a relation's
+                // name: no sorter.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, QUOTATION_SORT_FIELDS, QUOTATION_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'quotations')}
                 columns={[
-                    { title: 'ID', dataIndex: 'id' },
+                    {
+                        title: 'ID',
+                        dataIndex: 'id',
+                        key: 'id',
+                        sorter: true,
+                        sortOrder: columnSortOrder('id', params.sort, QUOTATION_DEFAULT_SORT),
+                    },
                     {
                         title: 'Status',
                         dataIndex: 'status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, QUOTATION_DEFAULT_SORT),
                         render: (status: QuotationStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
                     { title: 'Customer', render: (_, row) => row.customer.name },
-                    { title: 'Quotation Date', dataIndex: 'quotation_date' },
+                    {
+                        title: 'Quotation Date',
+                        dataIndex: 'quotation_date',
+                        key: 'quotation_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('quotation_date', params.sort, QUOTATION_DEFAULT_SORT),
+                    },
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {
                         title: 'Actions',

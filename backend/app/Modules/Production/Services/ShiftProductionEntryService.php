@@ -7,8 +7,10 @@ use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Modules\Inventory\Services\ProductionWipLocationResolver;
 use App\Modules\Inventory\Services\ScrapItemResolver;
 use App\Modules\Inventory\Services\StockMovementService;
+use App\Modules\Inventory\Services\StoreIssueService;
 use App\Modules\Production\Events\ShiftProductionEntryApproved;
 use App\Modules\Production\Events\ShiftProductionEntryCompleted;
 use App\Modules\Production\Exceptions\MachineBusyException;
@@ -23,6 +25,7 @@ use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\ShiftScrap;
 use App\Modules\Production\Models\WorkCenter;
 use App\Modules\TallySync\Services\VoucherPreviewService;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
@@ -48,6 +51,9 @@ use RuntimeException;
  */
 class ShiftProductionEntryService
 {
+    /** The columns paginate() may sort on by name besides id — what the quality queue's headers offer. */
+    public const SORTABLE = ['batch_number', 'quantity_produced', 'production_date'];
+
     public function __construct(
         private readonly StockMovementService $stock,
         private readonly BomService $boms,
@@ -93,6 +99,15 @@ class ShiftProductionEntryService
         // Start, copied to a handover child, so the entry resource never
         // restates a finished batch when a master is fixed later.
         private readonly ProductVariantService $variants,
+        // WHETHER THE STORE ISSUED THE RESIN THIS BATCH NAMES
+        // (DEC-20260903-003): which row is Production/WIP, whether the
+        // store-issue flow is in use and whether this material stands
+        // there — Inventory's own answers, read through its services — and
+        // which lines count as resin, the suggestion service's own pool so
+        // the warning and the pre-fill can never disagree about it.
+        private readonly ProductionWipLocationResolver $productionWip,
+        private readonly StoreIssueService $storeIssues,
+        private readonly RunMaterialSuggestionService $runMaterials,
     ) {}
 
     /**
@@ -142,6 +157,12 @@ class ShiftProductionEntryService
      * and the machine (code / name); `$oldestFirst` reverses the order,
      * because a queue is worked front to back and the oldest batch is the
      * one that has waited longest. Every default keeps the old answer.
+     *
+     * `$sort` (03-Sep-2026): a column the caller's request has validated
+     * against SORTABLE, in the ListSort spelling (`batch_number`,
+     * `-quantity_produced`), replacing the date/id order above with that
+     * column and `id desc` as the tie-break. Null — every existing caller —
+     * keeps the order exactly as it was; the membership is never touched.
      */
     public function paginate(
         int $perPage = 20,
@@ -159,6 +180,7 @@ class ShiftProductionEntryService
         bool $awaitingQualityCheck = false,
         ?string $q = null,
         bool $oldestFirst = false,
+        ?string $sort = null,
     ): LengthAwarePaginator {
         $includeCancelled = $includeCancelled || $batchStatus === BatchStatus::Cancelled;
 
@@ -240,8 +262,18 @@ class ShiftProductionEntryService
             ->when(trim((string) $q) !== '', fn ($query) => $this->whereMatchesTerm($query, trim((string) $q)))
             // The id is the tie-breaker either way: a day's batches share a
             // production_date, and the id is monotonic in creation order.
-            ->orderBy('production_date', $oldestFirst ? 'asc' : 'desc')
-            ->orderBy('id', $oldestFirst ? 'asc' : 'desc')
+            ->when($sort === null, fn ($query) => $query
+                ->orderBy('production_date', $oldestFirst ? 'asc' : 'desc')
+                ->orderBy('id', $oldestFirst ? 'asc' : 'desc'))
+            // A column sort asked for by name (the quality queue's headers,
+            // ListBatchQualityQueueRequest): the ListSort spelling, id desc
+            // as the tie-break. The membership above is untouched by it.
+            ->when($sort !== null, fn ($query) => ListSort::apply(
+                $query,
+                $sort,
+                self::SORTABLE,
+                $oldestFirst ? 'production_date' : '-production_date',
+            ))
             ->paginate($perPage, ['*'], 'page', $page);
     }
 
@@ -870,6 +902,15 @@ class ShiftProductionEntryService
             // permission stays this path's, not every issue's.
             $allowNegative = (bool) config('production.stock.allow_negative_on_completion', true);
             $shortfalls = [];
+            $unissued = [];
+
+            // THE STORE-ISSUE FLOW, once, for the loop below: which row is
+            // Production/WIP and whether the Store has ever handed anything
+            // into it. Null when the factory has never raised a Store Issue
+            // — then there is no handover to have missed and no warning
+            // fires (DEC-20260903-003 catches a split, not a fresh factory).
+            $wipId = $this->productionWip->warehouseId();
+            $issueFlowInUse = $wipId !== null && $this->storeIssues->storeIssueFlowInUse($wipId);
 
             foreach ($data['material_consumptions'] ?? [] as $index => $line) {
                 // WHICH STORE THIS MATERIAL CAME OUT OF, answered per line by
@@ -909,6 +950,41 @@ class ShiftProductionEntryService
                     'substitutes_item_id' => $addedReason === '' ? null : ($line['substitutes_item_id'] ?? null),
                     'created_by' => $completedBy,
                 ]);
+
+                // A RESIN THE STORE NEVER ISSUED (DEC-20260903-003). The
+                // live case: Relpet issued and standing on the floor, every
+                // batch naming "Pet Resin" and drawing it from the Store,
+                // nothing anywhere saying so — no shortfall fires, because
+                // the Store had the stock and nothing of THAT item stood in
+                // Production/WIP (DEC-20260831-009). The owner chose the
+                // warning over the refusal: the batch closes and the line
+                // is stored exactly as submitted (above); what is recorded
+                // here is the fact, with the names frozen, for the approval
+                // desk. Resin lines only — the suggestion service's own
+                // pool decides which those are, so the warning can never
+                // disagree with the pre-fill — and only once the Store has
+                // issued something, so a factory without the flow sees
+                // nothing. Masterbatch is loaded at the machine and packing
+                // stays in its box (DEC-20260902-004): neither is a bin
+                // material, neither is warned about.
+                if ($issueFlowInUse
+                    && ! $this->storeIssues->hasMaterialStandingInProduction((int) $line['item_id'], $wipId)
+                ) {
+                    $material = Item::withTrashed()->find($line['item_id']);
+
+                    if ($material !== null && $this->runMaterials->isResinCandidate($material, (int) $entry->item_id)) {
+                        $unissued[] = [
+                            'item_id' => (int) $line['item_id'],
+                            'item_name' => $material->name,
+                            'item_uom' => $material->uom,
+                            'quantity' => bcadd((string) $line['quantity_issued_kg'], '0', 4),
+                            'warehouse_id' => (int) $warehouseId,
+                            'warehouse_name' => Warehouse::withTrashed()->find($warehouseId)?->name,
+                            'basis' => 'The Store has not issued this material to Production on any open Store Issue, '
+                                .'so the batch drew it from the Store directly.',
+                        ];
+                    }
+                }
 
                 $shortfallKg = null;
 
@@ -981,7 +1057,7 @@ class ShiftProductionEntryService
                 }
             }
 
-            if ($shortfalls !== []) {
+            if ($shortfalls !== [] || $unissued !== []) {
                 // Onto the entry's EXISTING frozen snapshot rather than a
                 // new column — the same least-schema route
                 // material_shortage_override_reason took at Start, and for
@@ -989,10 +1065,13 @@ class ShiftProductionEntryService
                 // immutable per-batch record and already reaches the
                 // resource. save() writes the one dirty attribute, so the
                 // conditional UPDATE above remains the only writer of the
-                // lifecycle columns.
+                // lifecycle columns. Each key is written only when it has
+                // something to say: an absent key reads as "none", and a
+                // snapshot from before either record existed reads the same.
                 $entry->config_snapshot = [
                     ...($entry->config_snapshot ?? []),
-                    'stock_shortfalls' => $shortfalls,
+                    ...($shortfalls !== [] ? ['stock_shortfalls' => $shortfalls] : []),
+                    ...($unissued !== [] ? ['unissued_materials' => $unissued] : []),
                 ];
                 $entry->save();
             }
@@ -1172,7 +1251,7 @@ class ShiftProductionEntryService
             // completeBatch() writes that same column (stock_shortfalls) off
             // the model it is handed.
             $snapshot = $row->config_snapshot ?? [];
-            unset($snapshot['stock_shortfalls']);
+            unset($snapshot['stock_shortfalls'], $snapshot['unissued_materials']);
             $snapshot['amendments'] = [
                 ...array_values(array_filter((array) ($snapshot['amendments'] ?? []), 'is_array')),
                 [
@@ -3517,7 +3596,42 @@ class ShiftProductionEntryService
             // the thing that needs fixing, and the accountant is the person
             // who can fix it. See config/production.php 'stock'.
             'stock_shortfalls' => $this->stockShortfalls($entry),
+            // Resin this batch named that the Store never issued to
+            // Production/WIP (DEC-20260903-003). Beside blocks_approval and
+            // absent from it, for the same reason as the shortfalls: the
+            // batch closed, and the desk that signs it is the desk that
+            // asks why the floor ran on a material the Store did not hand
+            // over.
+            'unissued_materials' => $this->unissuedMaterials($entry),
         ];
+    }
+
+    /**
+     * The un-issued resin lines completeBatch froze onto this entry, read
+     * straight back off its snapshot — the same wire as stockShortfalls(),
+     * and empty (never null) for a batch that has none or a snapshot that
+     * predates the record.
+     *
+     * @return list<array{item_id: ?int, item_name: ?string, item_uom: ?string,
+     *     quantity: string, warehouse_id: ?int, warehouse_name: ?string, basis: ?string}>
+     */
+    private function unissuedMaterials(ShiftProductionEntry $entry): array
+    {
+        $recorded = $entry->config_snapshot['unissued_materials'] ?? [];
+
+        if (! is_array($recorded)) {
+            return [];
+        }
+
+        return array_values(array_map(fn (array $line) => [
+            'item_id' => isset($line['item_id']) ? (int) $line['item_id'] : null,
+            'item_name' => $line['item_name'] ?? null,
+            'item_uom' => $line['item_uom'] ?? null,
+            'quantity' => (string) ($line['quantity'] ?? '0'),
+            'warehouse_id' => isset($line['warehouse_id']) ? (int) $line['warehouse_id'] : null,
+            'warehouse_name' => $line['warehouse_name'] ?? null,
+            'basis' => $line['basis'] ?? null,
+        ], array_filter($recorded, 'is_array')));
     }
 
     /**

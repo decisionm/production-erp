@@ -1,11 +1,22 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Form, Input, Modal, Select, Space, Switch, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { createGLAccount, listGLAccounts, updateGLAccount } from '@/features/finance/api';
+import {
+    GL_ACCOUNT_DEFAULT_SORT,
+    GL_ACCOUNT_LIST_SPEC,
+    GL_ACCOUNT_SORT_FIELDS,
+    type GLAccountListParams,
+    glAccountServerFilters,
+    glAccountsQueryKey,
+} from '@/features/finance/glAccountList';
 import type { GLAccount, GLAccountType } from '@/features/finance/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const accountSchema = z.object({
     code: z.string().min(1, 'Code is required').max(32),
@@ -35,7 +46,15 @@ export default function ChartOfAccountsPage() {
     const [editingAccount, setEditingAccount] = useState<GLAccount | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['finance', 'gl-accounts'], queryFn: listGLAccounts });
+    // THE LIST'S VIEW IS ITS URL: sort, page and page size, sorted and paged
+    // on the SERVER over the whole chart.
+    const { params, setParams, setPage } = useListParams<GLAccountListParams>(GL_ACCOUNT_LIST_SPEC);
+    const filters = useMemo(() => glAccountServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: glAccountsQueryKey(filters),
+        queryFn: () => listGLAccounts(filters),
+        placeholderData: (previous) => previous,
+    });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['finance', 'gl-accounts'] });
 
@@ -84,22 +103,47 @@ export default function ChartOfAccountsPage() {
             </Space>
 
             <Table<GLAccount>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries the whole chart.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, GL_ACCOUNT_SORT_FIELDS, GL_ACCOUNT_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'accounts')}
                 columns={[
-                    { title: 'Code', dataIndex: 'code' },
-                    { title: 'Name', dataIndex: 'name' },
+                    {
+                        title: 'Code',
+                        dataIndex: 'code',
+                        key: 'code',
+                        sorter: true,
+                        sortOrder: columnSortOrder('code', params.sort, GL_ACCOUNT_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, GL_ACCOUNT_DEFAULT_SORT),
+                    },
                     {
                         title: 'Type',
                         dataIndex: 'type',
+                        key: 'type',
+                        sorter: true,
+                        sortOrder: columnSortOrder('type', params.sort, GL_ACCOUNT_DEFAULT_SORT),
                         render: (type: GLAccountType) => <Tag color={typeColor[type]}>{type}</Tag>,
                     },
                     {
                         title: 'Active',
                         dataIndex: 'is_active',
+                        key: 'is_active',
+                        sorter: true,
+                        sortOrder: columnSortOrder('is_active', params.sort, GL_ACCOUNT_DEFAULT_SORT),
                         render: (active: boolean, row) => (
                             <Switch
                                 checked={active}

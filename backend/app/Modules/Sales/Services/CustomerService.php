@@ -2,10 +2,12 @@
 
 namespace App\Modules\Sales\Services;
 
+use App\Modules\Sales\Http\Requests\ListCustomersRequest;
 use App\Modules\Sales\Models\Customer;
 use App\Support\Configuration\DependencyCheck;
 use App\Support\Configuration\HardDeleteAuthority;
 use App\Support\Configuration\ManagesConfigurationLifecycle;
+use App\Support\Lists\ListSort;
 use Closure;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
@@ -13,10 +15,10 @@ class CustomerService
 {
     use ManagesConfigurationLifecycle;
 
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return Customer::query()
-            ->orderBy('name')
+        // Name order unless asked otherwise (ListCustomersRequest::SORTABLE).
+        return ListSort::apply(Customer::query(), $sort, ListCustomersRequest::SORTABLE, 'name')
             ->paginate($perPage);
     }
 

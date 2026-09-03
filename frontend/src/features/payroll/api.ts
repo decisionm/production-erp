@@ -9,12 +9,15 @@ import type {
     SalaryCalculationType,
     SalaryComponent,
     SalaryComponentKind,
+    SalaryComponentListFilters,
     SalaryStructure,
+    SalaryStructureListFilters,
     SkippedEmployee,
 } from './types';
 
-export async function listSalaryComponents(): Promise<Paginated<SalaryComponent>> {
-    const { data } = await api.get<Paginated<SalaryComponent>>('/payroll/salary-components');
+/** ONE page of the component master, sorted and paged on the SERVER (ListSalaryComponentsRequest). */
+export async function listSalaryComponents(filters: SalaryComponentListFilters = {}): Promise<Paginated<SalaryComponent>> {
+    const { data } = await api.get<Paginated<SalaryComponent>>('/payroll/salary-components', { params: compactParams(filters) });
     return data;
 }
 
@@ -41,10 +44,9 @@ export async function createSalaryComponent(payload: CreateSalaryComponentPayloa
     return data.data;
 }
 
-export async function listSalaryStructures(employeeId?: number): Promise<Paginated<SalaryStructure>> {
-    const { data } = await api.get<Paginated<SalaryStructure>>('/payroll/salary-structures', {
-        params: employeeId ? { employee_id: employeeId } : undefined,
-    });
+/** ONE page of structures, filtered, sorted and paged on the SERVER (ListSalaryStructuresRequest). */
+export async function listSalaryStructures(filters: SalaryStructureListFilters = {}): Promise<Paginated<SalaryStructure>> {
+    const { data } = await api.get<Paginated<SalaryStructure>>('/payroll/salary-structures', { params: compactParams(filters) });
     return data;
 }
 

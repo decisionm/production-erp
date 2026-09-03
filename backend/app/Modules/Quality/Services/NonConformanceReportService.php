@@ -6,16 +6,20 @@ use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Quality\Models\Enums\NonConformanceStatus;
 use App\Modules\Quality\Models\IncomingInspection;
 use App\Modules\Quality\Models\NonConformanceReport;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 class NonConformanceReportService
 {
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /** The columns the register sorts on besides id (ListNonConformanceReportsRequest validates the same list). */
+    public const SORTABLE = ['severity', 'status', 'raised_date'];
+
+    /** Newest first unless `$sort` (a validated column, ListSort spelling) says otherwise. */
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return NonConformanceReport::query()
-            ->with(['item', 'incomingInspection', 'raisedBy'])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+        $query = NonConformanceReport::query()->with(['item', 'incomingInspection', 'raisedBy']);
+
+        return ListSort::apply($query, $sort, self::SORTABLE, '-id')->paginate($perPage);
     }
 
     public function openCount(): int

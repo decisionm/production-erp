@@ -7,22 +7,28 @@ import { useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { type IncomingInspectionListParams, createIncomingInspection, listIncomingInspections } from '@/features/quality/api';
 import { ListNoMatch } from '@/features/quality/components/ListNoMatch';
+import {
+    INSPECTION_DEFAULT_SORT,
+    INSPECTION_LIST,
+    INSPECTION_RESULTS as RESULTS,
+    INSPECTION_SORT_FIELDS,
+} from '@/features/quality/qualityLists';
 import type { IncomingInspection, InspectionResult } from '@/features/quality/types';
 import { inspectionPreview, resultTag } from '@/features/quality/words';
 import { listGoodsReceipts } from '@/features/procurement/api';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
-import { type ListParamsSpec, compactParams, narrowingKeys } from '@/lib/listParams';
+import { compactParams, narrowingKeys } from '@/lib/listParams';
 import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { useListParams } from '@/lib/useListParams';
 
-const RESULTS: readonly InspectionResult[] = ['pass', 'partial', 'fail'];
-
 /**
- * The register's URL keys beyond q / page / per_page. A `result` the enum
- * does not know is dropped on read, as the server would refuse it.
- * Module-level: useListParams memoises on it.
+ * The register's URL keys beyond q / page / per_page (INSPECTION_LIST,
+ * qualityLists.ts): a `result` the enum does not know, or a `sort` the
+ * server does not offer, is dropped on read, as the server would refuse
+ * it. Module-level: useListParams memoises on it.
  */
-const INSPECTION_LIST_SPEC: ListParamsSpec = { strings: ['result'], allowed: { result: RESULTS } };
+const INSPECTION_LIST_SPEC = INSPECTION_LIST.spec;
 
 const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
 
@@ -180,6 +186,12 @@ export default function IncomingInspectionsPage() {
                 sticky={TABLE_STICKY}
                 rowKey="id"
                 loading={isLoading}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries the whole register.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, INSPECTION_SORT_FIELDS, INSPECTION_DEFAULT_SORT) });
+                }}
                 dataSource={data?.data}
                 pagination={serverPagination(data?.meta, setPage, 'inspections')}
                 locale={{
@@ -213,18 +225,51 @@ export default function IncomingInspectionsPage() {
                                 '—'
                             ),
                     },
-                    { title: 'Inspected', dataIndex: 'inspected_quantity', align: 'right', render: (v: string) => <span style={numeric}>{v}</span> },
-                    { title: 'Accepted', dataIndex: 'accepted_quantity', align: 'right', render: (v: string) => <span style={numeric}>{v}</span> },
-                    { title: 'Rejected', dataIndex: 'rejected_quantity', align: 'right', render: (v: string) => <span style={numeric}>{v}</span> },
+                    {
+                        title: 'Inspected',
+                        key: 'inspected_quantity',
+                        dataIndex: 'inspected_quantity',
+                        align: 'right',
+                        sorter: true,
+                        sortOrder: columnSortOrder('inspected_quantity', params.sort, INSPECTION_DEFAULT_SORT),
+                        render: (v: string) => <span style={numeric}>{v}</span>,
+                    },
+                    {
+                        title: 'Accepted',
+                        key: 'accepted_quantity',
+                        dataIndex: 'accepted_quantity',
+                        align: 'right',
+                        sorter: true,
+                        sortOrder: columnSortOrder('accepted_quantity', params.sort, INSPECTION_DEFAULT_SORT),
+                        render: (v: string) => <span style={numeric}>{v}</span>,
+                    },
+                    {
+                        title: 'Rejected',
+                        key: 'rejected_quantity',
+                        dataIndex: 'rejected_quantity',
+                        align: 'right',
+                        sorter: true,
+                        sortOrder: columnSortOrder('rejected_quantity', params.sort, INSPECTION_DEFAULT_SORT),
+                        render: (v: string) => <span style={numeric}>{v}</span>,
+                    },
                     {
                         title: 'Result',
+                        key: 'result',
                         dataIndex: 'result',
+                        sorter: true,
+                        sortOrder: columnSortOrder('result', params.sort, INSPECTION_DEFAULT_SORT),
                         render: (result: InspectionResult) => {
                             const tag = resultTag(result);
                             return <Tag color={tag.color}>{tag.label}</Tag>;
                         },
                     },
-                    { title: 'Date', dataIndex: 'inspection_date' },
+                    {
+                        title: 'Date',
+                        key: 'inspection_date',
+                        dataIndex: 'inspection_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('inspection_date', params.sort, INSPECTION_DEFAULT_SORT),
+                    },
                     {
                         title: 'Disposition',
                         render: (_, row) => (

@@ -6,7 +6,17 @@ import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { createCustomer, listCustomers, updateCustomer } from '@/features/sales/api';
+import {
+    CUSTOMER_DEFAULT_SORT,
+    CUSTOMER_LIST_SPEC,
+    CUSTOMER_SORT_FIELDS,
+    type CustomerListParams,
+    customerListRequest,
+} from '@/features/sales/customerList';
 import type { Customer } from '@/features/sales/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const customerSchema = z.object({
     code: z.string().min(1, 'Code is required').max(32),
@@ -28,15 +38,18 @@ export default function CustomersPage() {
     const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
     const queryClient = useQueryClient();
 
-    // Server-side paging. The list is about to hold the factory's real
-    // customer master (hundreds of ledger-derived rows), not a handful of
-    // demo ones, so the page number is part of the query key.
-    const [page, setPage] = useState(1);
-    const [perPage, setPerPage] = useState(50);
+    // Server-side paging AND ordering, both in the URL (useListParams,
+    // customerList.ts). The list holds the factory's real customer master
+    // (hundreds of ledger-derived rows), not a handful of demo ones, so the
+    // page and the sort are part of the query key and a sorter never orders
+    // the loaded page.
+    const { params, setParams, setPage } = useListParams<CustomerListParams>(CUSTOMER_LIST_SPEC);
+    const request = customerListRequest(params);
 
     const { data, isLoading } = useQuery({
-        queryKey: ['sales', 'customers', page, perPage],
-        queryFn: () => listCustomers(page, perPage),
+        queryKey: ['sales', 'customers', request],
+        queryFn: () => listCustomers(request.page, request.per_page, request.sort),
+        placeholderData: (previous) => previous,
     });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['sales', 'customers'] });
@@ -82,31 +95,45 @@ export default function CustomersPage() {
             </Space>
 
             <Table<Customer>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={{
-                    current: page,
-                    pageSize: perPage,
-                    // The server's count, not the page's length — otherwise
-                    // the pager would claim the list ends at the first screen.
-                    total: data?.meta?.total ?? data?.data?.length ?? 0,
-                    showSizeChanger: true,
-                    pageSizeOptions: [20, 50, 100, 200],
-                    showTotal: (total, range) => `${range[0]}-${range[1]} of ${total} customers`,
-                    onChange: (nextPage, nextSize) => {
-                        setPage(nextPage);
-                        setPerPage(nextSize);
-                    },
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queries the
+                // whole master from page 1.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, CUSTOMER_SORT_FIELDS, CUSTOMER_DEFAULT_SORT) });
                 }}
+                // The server's count, not the page's length — otherwise the
+                // pager would claim the list ends at the first screen.
+                pagination={serverPagination(data?.meta, setPage, 'customers')}
                 columns={[
-                    { title: 'Code', dataIndex: 'code' },
-                    { title: 'Name', dataIndex: 'name' },
+                    {
+                        title: 'Code',
+                        dataIndex: 'code',
+                        key: 'code',
+                        sorter: true,
+                        sortOrder: columnSortOrder('code', params.sort, CUSTOMER_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, CUSTOMER_DEFAULT_SORT),
+                    },
                     { title: 'Email', dataIndex: 'email' },
                     { title: 'Phone', dataIndex: 'phone' },
                     { title: 'GSTIN', dataIndex: 'gstin' },
-                    { title: 'State', dataIndex: 'state_code' },
+                    {
+                        title: 'State',
+                        dataIndex: 'state_code',
+                        key: 'state_code',
+                        sorter: true,
+                        sortOrder: columnSortOrder('state_code', params.sort, CUSTOMER_DEFAULT_SORT),
+                    },
                     {
                         /*
                          * WHICH TALLY LEDGER THIS CUSTOMER POSTS AS — read-only
@@ -133,6 +160,9 @@ export default function CustomersPage() {
                     {
                         title: 'Status',
                         dataIndex: 'is_active',
+                        key: 'is_active',
+                        sorter: true,
+                        sortOrder: columnSortOrder('is_active', params.sort, CUSTOMER_DEFAULT_SORT),
                         render: (_: boolean, row) => <ConfigurationStatusTag entity="customer" row={row} />,
                     },
                     {

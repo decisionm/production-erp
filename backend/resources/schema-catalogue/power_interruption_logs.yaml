@@ -1,0 +1,59 @@
+table: power_interruption_logs
+module: production
+label: 'Power Interruption Logs'
+purpose: 'One row is one plant-wide power cut (EB failure) during one shift: when the power went, when it came back and the idle hours lost. Plant-wide, not per machine, because the paper form has no machine column for this section.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: shift_id
+    type: integer
+    meaning: 'The shift (A/B/C) during which the power cut happened -> shifts'
+    references: shifts.id
+  -
+    name: production_date
+    type: date
+    meaning: 'Production day the power cut belongs to (shift day)'
+  -
+    name: from_time
+    type: datetime
+    meaning: 'When the power went off (full datetime)'
+  -
+    name: to_time
+    type: datetime
+    meaning: 'When the power came back (full datetime)'
+  -
+    name: idle_hours
+    type: decimal
+    meaning: 'Duration of the interruption in hours (2 decimals), computed from from_time and to_time'
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User who logged the power cut -> users'
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'power_interruption_logs.created_by = users.id'
+  - 'power_interruption_logs.shift_id = shifts.id'
+keywords:
+  - 'power cut'
+  - 'eb failure'
+  - 'power failure'
+  - generator
+  - 'power interruption'
+  - 'idle hours'
+questions:
+  - 'How many hours of power cuts did we have this month?'
+  - 'Which shift had the most power interruptions last week?'

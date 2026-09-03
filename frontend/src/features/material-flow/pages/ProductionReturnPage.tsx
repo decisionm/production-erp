@@ -2,8 +2,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Card, Input, InputNumber, Select, Space, Table, Tag, Tooltip, Typography, message } from 'antd';
 import { useMemo, useState } from 'react';
 import { listAllWarehouses } from '@/features/inventory/api';
+import { columnSorter } from '@/lib/clientSort';
 import { itemLabel } from '@/lib/itemLabel';
 import { ListEmpty } from '@/lib/ListEmpty';
+import { TABLE_STICKY } from '@/lib/tableProps';
 import { apiRefusalMessage, listProductionReturnable, recordProductionReturn } from '../api';
 import type { ProductionReturnable, ReturnedQualityState } from '../types';
 import { formatQuantity, permitsFractions } from '../words';
@@ -180,10 +182,13 @@ export default function ProductionReturnPage({ embedded = false }: { embedded?: 
         },
     });
 
+    // The whole floor is here (no pager), so these are honest client sorters
+    // over every row. Return and Condition are inputs and carry none.
     const columns = [
         {
             title: 'Material',
             key: 'material',
+            sorter: columnSorter((row: ProductionReturnable) => itemLabel(row), 'text'),
             render: (row: ProductionReturnable) => (
                 <Space size={4}>
                     <span>{itemLabel(row)}</span>
@@ -199,6 +204,7 @@ export default function ProductionReturnPage({ embedded = false }: { embedded?: 
             title: 'In production',
             key: 'on_floor',
             align: 'right' as const,
+            sorter: columnSorter((row: ProductionReturnable) => row.on_floor, 'number'),
             render: (row: ProductionReturnable) => (
                 <Typography.Text type={Number(row.on_floor) < 0 ? 'danger' : undefined}>
                     {formatQuantity(row.on_floor, row.uom)}
@@ -216,6 +222,7 @@ export default function ProductionReturnPage({ embedded = false }: { embedded?: 
             title: 'Free to return',
             key: 'unattributed',
             align: 'right' as const,
+            sorter: columnSorter((row: ProductionReturnable) => row.unattributed, 'number'),
             render: (row: ProductionReturnable) => formatQuantity(row.unattributed, row.uom),
         },
         {
@@ -297,6 +304,8 @@ export default function ProductionReturnPage({ embedded = false }: { embedded?: 
             <Table<ProductionReturnable>
                 rowKey="item_id"
                 size="small"
+                sticky={TABLE_STICKY}
+                scroll={{ x: 'max-content' }}
                 columns={columns}
                 dataSource={floor.data ?? []}
                 loading={floor.isPending}

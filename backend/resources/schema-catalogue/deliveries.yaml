@@ -1,0 +1,64 @@
+table: deliveries
+module: sales
+label: Deliveries
+purpose: 'One row is a dispatch (delivery challan) against a sales order: stock that has actually left the finished-goods store for the customer. Posting a delivery is the one place Sales moves stock; the row is append-only and a wrong dispatch is reversed by a separate document, never edited (DEC-20260902-049).'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Row id'
+  -
+    name: sales_order_id
+    type: integer
+    meaning: 'The sales order being dispatched against'
+    references: sales_orders.id
+  -
+    name: warehouse_id
+    type: integer
+    meaning: 'The warehouse (finished-goods store) the stock was issued from'
+    references: warehouses.id
+  -
+    name: reference
+    type: string
+    nullable: true
+    meaning: 'Delivery challan / dispatch reference typed by the user'
+  -
+    name: delivered_date
+    type: datetime
+    meaning: 'Date and time the goods were dispatched'
+  -
+    name: notes
+    type: string
+    nullable: true
+    meaning: 'Free-text notes on the dispatch'
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User who recorded the dispatch'
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'deliveries.created_by = users.id'
+  - 'deliveries.warehouse_id = warehouses.id'
+  - 'deliveries.sales_order_id = sales_orders.id'
+keywords:
+  - dispatch
+  - delivery
+  - 'delivery challan'
+  - shipment
+  - dc
+  - shipped
+questions:
+  - 'How many dispatches went out last week and to which customers?'
+  - 'Which sales orders were dispatched today?'
+  - 'Which deliveries have no challan reference?'

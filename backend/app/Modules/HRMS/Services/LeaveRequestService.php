@@ -4,9 +4,11 @@ namespace App\Modules\HRMS\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\HRMS\Exceptions\InsufficientLeaveBalanceException;
+use App\Modules\HRMS\Http\Requests\ListLeaveRequestsRequest;
 use App\Modules\HRMS\Models\Enums\LeaveRequestStatus;
 use App\Modules\HRMS\Models\LeaveBalance;
 use App\Modules\HRMS\Models\LeaveRequest;
+use App\Support\Lists\ListSort;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -19,8 +21,8 @@ class LeaveRequestService
     /**
      * The list page's read. Every filter is ListLeaveRequestsRequest's —
      * `q` THROUGH the employee (code, name, department, designation),
-     * `status` and `employee_id` exact. Newest first, as it always was; id
-     * is unique so that order is already stable.
+     * `status` and `employee_id` exact. Ordered by `sort` (ListSort), newest
+     * first as it always was when absent; id breaks every tie.
      *
      * @param  array<string, mixed>  $filters
      */
@@ -40,8 +42,7 @@ class LeaveRequestService
             $query->where('employee_id', (int) $filters['employee_id']);
         }
 
-        return $query
-            ->orderByDesc('id')
+        return ListSort::apply($query, $filters['sort'] ?? null, ListLeaveRequestsRequest::SORTABLE)
             ->paginate($perPage)
             ->withQueryString();
     }
