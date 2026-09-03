@@ -15,7 +15,7 @@ use Illuminate\Validation\Rule;
  */
 class ListAttendanceImportLinesRequest extends FormRequest
 {
-    public const ISSUE_FILTERS = ['open', 'resolved', 'clean'];
+    public const ISSUE_FILTERS = ['open', 'resolved', 'clean', 'report_changed'];
 
     public function authorize(): bool
     {

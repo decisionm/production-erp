@@ -96,6 +96,8 @@ export interface AttendanceImportCounts {
     unknown_employee: number;
     hours_unclear: number;
     worked_on_week_off: number;
+    /** Days a person answered where the punch app has since changed its own figures. */
+    report_changed: number;
     resolved: number;
     clean: number;
 }
@@ -139,12 +141,14 @@ export interface AttendanceImportLine {
     resolved_check_out: string | null;
     resolved_by?: { id: number; name: string };
     resolved_at: string | null;
+    /** Set when the report moved under an answer somebody had already given. */
+    report_changed_at: string | null;
     notes: string | null;
     applied_at: string | null;
 }
 
 /** The review list's `issue` chip — ListAttendanceImportLinesRequest's values. */
-export type AttendanceImportLineFilter = 'open' | AttendanceImportIssue | 'resolved' | 'clean';
+export type AttendanceImportLineFilter = 'open' | AttendanceImportIssue | 'resolved' | 'clean' | 'report_changed';
 
 /**
  * What one square of the month strip draws: the answer a day carries, or

@@ -55,6 +55,7 @@ function line(id: number, overrides: Partial<AttendanceImportLine> = {}): Attend
         resolved_check_in: null,
         resolved_check_out: null,
         resolved_at: null,
+        report_changed_at: null,
         notes: null,
         applied_at: null,
         ...overrides,

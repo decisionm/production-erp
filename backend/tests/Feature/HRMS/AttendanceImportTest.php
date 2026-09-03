@@ -117,6 +117,26 @@ class AttendanceImportTest extends TestCase
         return $this->postJson('/api/v1/hrms/attendance-imports', $this->payload());
     }
 
+    /**
+     * A DIFFERENT month. An upload that overlaps a month already under
+     * review joins it rather than starting a second one, so a test that
+     * wants two runs has to ask for two months.
+     */
+    private function uploadAugust(): TestResponse
+    {
+        return $this->postJson('/api/v1/hrms/attendance-imports', [
+            ...$this->payload(),
+            'period_from' => '2026-08-01',
+            'period_to' => '2026-08-02',
+            'file_name' => 'august.xlsx',
+            'employees' => [[
+                'employee_code' => 'SPP-01', 'name' => 'ANAND',
+                'department' => 'Production Department', 'designation' => 'Packing Staff',
+                'days' => [$this->day('2026-08-01', 'FD', '09:00', '18:00', ['worked_minutes' => 540])],
+            ]],
+        ]);
+    }
+
     private function line(int $importId, string $code, string $date): AttendanceImportLine
     {
         return AttendanceImportLine::query()
@@ -142,7 +162,8 @@ class AttendanceImportTest extends TestCase
             ->assertJsonPath('data.issue_count', 3)
             ->assertJsonPath('data.open_count', 3)
             ->assertJsonPath('data.counts', [
-                'open' => 3, 'in_no_out' => 1, 'out_no_in' => 0, 'no_punch' => 1, 'unknown_employee' => 1, 'resolved' => 0, 'clean' => 4,
+                'open' => 3, 'in_no_out' => 1, 'out_no_in' => 0, 'no_punch' => 1, 'unknown_employee' => 1,
+                'hours_unclear' => 0, 'worked_on_week_off' => 0, 'report_changed' => 0, 'resolved' => 0, 'clean' => 4,
             ])
             ->assertJsonPath('data.file_name', 'july.xlsx');
 
@@ -329,7 +350,7 @@ class AttendanceImportTest extends TestCase
             ->assertUnprocessable()->assertJsonValidationErrors(['check_in']);
 
         // A line of another run is not this run's.
-        $other = (int) $this->upload()->assertCreated()->json('data.id');
+        $other = (int) $this->uploadAugust()->assertCreated()->json('data.id');
         $this->patchJson("/api/v1/hrms/attendance-imports/{$other}/lines/{$nobody->id}", ['resolution' => 'present'])->assertNotFound();
     }
 
@@ -385,18 +406,19 @@ class AttendanceImportTest extends TestCase
     public function test_runs_list_newest_first_with_counts(): void
     {
         $this->actAs(['hrms.manage']);
-        $first = (int) $this->upload()->assertCreated()->json('data.id');
-        $second = (int) $this->upload()->assertCreated()->json('data.id');
+        $july = (int) $this->upload()->assertCreated()->json('data.id');
+        $august = (int) $this->uploadAugust()->assertCreated()->json('data.id');
 
         $list = $this->getJson('/api/v1/hrms/attendance-imports?per_page=1')->assertOk();
         $this->assertSame(2, $list->json('meta.total'));
-        $this->assertSame($second, $list->json('data.0.id'));
-        $this->assertSame(3, $list->json('data.0.open_count'));
-        $this->assertSame($first, $this->getJson('/api/v1/hrms/attendance-imports?per_page=1&page=2')->assertOk()->json('data.0.id'));
+        $this->assertSame($august, $list->json('data.0.id'), 'newest month first');
+        $this->assertSame($july, $this->getJson('/api/v1/hrms/attendance-imports?per_page=1&page=2')->assertOk()->json('data.0.id'));
+        $this->assertSame(3, $this->getJson('/api/v1/hrms/attendance-imports?per_page=1&page=2')->assertOk()->json('data.0.open_count'));
 
-        $this->assertSame(2, $this->getJson('/api/v1/hrms/attendance-imports?q=2026-07')->assertOk()->json('meta.total'), 'by period');
-        $this->assertSame(2, $this->getJson('/api/v1/hrms/attendance-imports?q=JULY')->assertOk()->json('meta.total'), 'by file name, any case');
-        $this->assertSame(0, $this->getJson('/api/v1/hrms/attendance-imports?q=2026-08')->assertOk()->json('meta.total'));
+        $this->assertSame(1, $this->getJson('/api/v1/hrms/attendance-imports?q=2026-07')->assertOk()->json('meta.total'), 'by period');
+        $this->assertSame(1, $this->getJson('/api/v1/hrms/attendance-imports?q=JULY')->assertOk()->json('meta.total'), 'by file name, any case');
+        $this->assertSame(1, $this->getJson('/api/v1/hrms/attendance-imports?q=2026-08')->assertOk()->json('meta.total'));
+        $this->assertSame(0, $this->getJson('/api/v1/hrms/attendance-imports?q=2026-12')->assertOk()->json('meta.total'));
         $this->getJson('/api/v1/hrms/attendance-imports?q='.str_repeat('a', 101))->assertUnprocessable()->assertJsonValidationErrors(['q']);
     }
 }

@@ -28,6 +28,7 @@ class AttendanceImportLine extends Model
             'early_minutes' => 'integer',
             'worked_minutes' => 'integer',
             'resolved_at' => 'datetime',
+            'report_changed_at' => 'datetime',
             'applied_at' => 'datetime',
         ];
     }
