@@ -193,6 +193,32 @@ class AttendanceService
     }
 
     /**
+     * MY OWN RANGE — the same read as one person's, or an EMPTY MONTH when
+     * the login has no employee row behind it.
+     *
+     * Empty rather than an error, and empty rather than a guess: a user
+     * account is not proof of a person on the factory's staff, and matching
+     * a login to an employee by name would be exactly the kind of guess
+     * that puts somebody else's attendance on your screen.
+     *
+     * @return array{employee: array<string, mixed>|null, from: string, to: string, days: list<array<string, mixed>>, summary: array<string, int>}
+     */
+    public function mine(?Employee $employee, string $from, string $to): array
+    {
+        if ($employee === null) {
+            return [
+                'employee' => null,
+                'from' => $from,
+                'to' => $to,
+                'days' => [],
+                'summary' => $this->tally([]),
+            ];
+        }
+
+        return $this->personRange($employee, $from, $to);
+    }
+
+    /**
      * ONE PERSON'S RANGE: who they are, every day recorded in it, and what
      * the range came to.
      *
@@ -270,6 +296,7 @@ class AttendanceService
                 array_count_values(array_filter(array_column($days, 'status'))),
                 needsReview: count(array_filter($days, static fn (array $day) => $day['needs_review'])),
                 fromImport: count(array_filter($days, static fn (array $day) => ($day['provisional'] ?? false) === true)),
+                mismatches: $this->mismatchesFor($employee->id, $from, $to),
             ),
         ];
     }
@@ -475,9 +502,16 @@ class AttendanceService
             $headcount[$name] = ($headcount[$name] ?? 0) + (int) $row->people;
         }
 
+        $mismatches = [];
+        foreach ($this->mismatchesByDepartment($from, $to) as $row) {
+            $name = $this->departmentName($row->department);
+            $mismatches[$name] = ($mismatches[$name] ?? 0) + (int) $row->days;
+            $counted[$name] ??= [];
+        }
+
         $departments = [];
         foreach ($counted as $name => $statuses) {
-            $tally = $this->tally($statuses, $needsReview[$name] ?? 0, $fromImport[$name] ?? 0);
+            $tally = $this->tally($statuses, $needsReview[$name] ?? 0, $fromImport[$name] ?? 0, $mismatches[$name] ?? 0);
             $departments[] = [
                 'department' => $name,
                 ...$tally,
@@ -493,7 +527,7 @@ class AttendanceService
             static fn (array $a, array $b) => [$b['recorded'], $a['department']] <=> [$a['recorded'], $b['department']],
         );
 
-        $factoryTally = $this->tally($factory, array_sum($needsReview), array_sum($fromImport));
+        $factoryTally = $this->tally($factory, array_sum($needsReview), array_sum($fromImport), array_sum($mismatches));
 
         return [
             'from' => $from,
@@ -540,6 +574,56 @@ class AttendanceService
             ->selectRaw('i.status as import_status')
             ->selectRaw('COUNT(*) as days')
             ->get();
+    }
+
+    /**
+     * The days in the range the punch report could not make sense of, for
+     * one person — counted whether or not anybody has since answered them,
+     * and once per day however often the month was re-uploaded.
+     */
+    private function mismatchesFor(int $employeeId, string $from, string $to): int
+    {
+        return $this->newestLines($from, $to)
+            ->where('l.employee_id', $employeeId)
+            ->whereNotNull('l.issue')
+            ->count();
+    }
+
+    /**
+     * The same count for the whole factory, by department. A line with NO
+     * EMPLOYEE is left out for the reason the day counts are: it belongs to
+     * no department, and guessing one files somebody's day under a heading
+     * nobody chose.
+     *
+     * @return Collection<int, object>
+     */
+    private function mismatchesByDepartment(string $from, string $to): Collection
+    {
+        return $this->newestLines($from, $to)
+            ->join('employees', 'employees.id', '=', 'l.employee_id')
+            ->whereNotNull('l.employee_id')
+            ->whereNotNull('l.issue')
+            ->groupBy('employees.department')
+            ->selectRaw('employees.department as department')
+            ->selectRaw('COUNT(*) as days')
+            ->get();
+    }
+
+    /**
+     * The uploaded lines of a range with the SUPERSEDED ones dropped: a
+     * month re-uploaded as it goes carries the same day more than once, and
+     * the newest reading is the one every read here takes.
+     */
+    private function newestLines(string $from, string $to): QueryBuilder
+    {
+        return DB::table('attendance_import_lines as l')
+            ->whereBetween('l.date', [$from, $to])
+            ->whereNotExists(fn ($query) => $query
+                ->selectRaw('1')
+                ->from('attendance_import_lines as l2')
+                ->whereColumn('l2.employee_id', 'l.employee_id')
+                ->whereColumn('l2.date', 'l.date')
+                ->whereColumn('l2.id', '>', 'l.id'));
     }
 
     /** Everybody with a day in the range, applied or merely uploaded. */
@@ -628,7 +712,7 @@ class AttendanceService
      * @param  array<string, int>  $counted
      * @return array<string, int>
      */
-    private function tally(array $counted, int $needsReview = 0, int $fromImport = 0): array
+    private function tally(array $counted, int $needsReview = 0, int $fromImport = 0, int $mismatches = 0): array
     {
         $tally = [];
         foreach (AttendanceStatus::cases() as $status) {
@@ -641,6 +725,13 @@ class AttendanceService
         $tally['week_off'] = (int) ($counted[AttendanceImportResolution::WeekOff->value] ?? 0);
         $tally['needs_review'] = $needsReview;
         $tally['from_import'] = $fromImport;
+        // A MISMATCH is what the punch report could not make sense of — a
+        // punch in with no punch out, no punch at all, hours that do not
+        // add up, work on a week off. It is NOT `needs_review`: answering a
+        // mismatch settles the day without unmaking the fact that the
+        // report was wrong, and the month's figure has to keep counting it
+        // or it will not reconcile against the import review page.
+        $tally['mismatches'] = $mismatches;
 
         return $tally;
     }

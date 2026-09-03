@@ -244,8 +244,12 @@ export const HELP_BY_ROUTE: Record<string, HelpEntry> = {
         actions: ['New Leave Request', 'View', 'Approve', 'Reject'],
     },
     '/hrms/attendance': {
-        what: 'Mark and read daily attendance for employees.',
-        actions: ['Mark Attendance'],
+        what: 'Read your own month, look anybody up, see the factory by department, and mark a day.',
+        actions: ['Mark Attendance', 'Print sheet'],
+    },
+    '/my-attendance': {
+        what: 'Your own attendance for a month: what each day counted as, and what the punch report could not decide.',
+        actions: [],
     },
     '/hrms/attendance-imports': {
         what: 'Upload the Pooja punch report, correct the days it could not decide, apply the month to attendance, and download the month sheet.',

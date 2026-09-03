@@ -1,80 +1,19 @@
 import { PrinterOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { Alert, Button, Card, Empty, Select, Space, Table, Tag, Typography } from 'antd';
-import dayjs from 'dayjs';
+import { Button, Card, Empty, Select, Space } from 'antd';
 import { useMemo, useState } from 'react';
 import { downloadAttendanceSheet, getAttendancePerson, listAllEmployees } from '@/features/hrms/api';
 import type { DateRange } from '@/features/hrms/attendanceRange';
-import { dayLabel } from '@/features/hrms/attendanceReview';
-import type { AttendanceStatus, AttendanceTally } from '@/features/hrms/types';
 import { downloadBlob } from '@/lib/csv';
 import { showApiError } from '@/lib/showApiError';
-
-const STATUS_LABELS: Record<AttendanceStatus | 'week_off', string> = {
-    present: 'Present',
-    absent: 'Absent',
-    half_day: 'Half Day',
-    on_leave: 'On Leave',
-    week_off: 'Week Off',
-};
-
-const STATUS_COLORS: Record<AttendanceStatus | 'week_off', string> = {
-    present: 'green',
-    absent: 'red',
-    half_day: 'orange',
-    on_leave: 'blue',
-    week_off: 'default',
-};
-
-const clock = (value: string | null): string => (value ? dayjs(value).format('HH:mm') : '—');
+import PersonMonth from './PersonMonth';
 
 /**
- * Says the numbers are read from an upload nobody has applied, so nobody
- * treats them as the final word on somebody's month.
- */
-function provisionalLine(summary: AttendanceTally): string {
-    const days = `${summary.from_import} ${summary.from_import === 1 ? 'day' : 'days'}`;
-    const review = summary.needs_review > 0 ? ` ${summary.needs_review} still need an answer.` : '';
-
-    return `${days} read from an attendance upload that has not been applied yet.${review}`;
-}
-
-/** The four counts and the total, as tiles rather than a sentence to parse. */
-function Tally({ summary }: { summary: AttendanceTally }) {
-    const tiles: { label: string; value: number; color?: string }[] = [
-        { label: 'Present', value: summary.present, color: '#2e7d32' },
-        { label: 'Half Day', value: summary.half_day, color: '#ef6c00' },
-        { label: 'Absent', value: summary.absent, color: '#c62828' },
-        { label: 'On Leave', value: summary.on_leave, color: '#1565c0' },
-        { label: 'Week Off', value: summary.week_off },
-        { label: 'Days recorded', value: summary.recorded },
-    ];
-
-    if (summary.needs_review > 0) {
-        tiles.splice(4, 0, { label: 'Needs review', value: summary.needs_review, color: '#b45309' });
-    }
-
-    return (
-        <Space wrap size="middle">
-            {tiles.map((tile) => (
-                <div key={tile.label} style={{ minWidth: 96 }}>
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                        {tile.label}
-                    </Typography.Text>
-                    <div style={{ fontSize: 24, lineHeight: 1.2, color: tile.color }}>{tile.value}</div>
-                </div>
-            ))}
-        </Space>
-    );
-}
-
-/**
- * ONE PERSON'S ATTENDANCE — pick somebody, see their period.
+ * ANYBODY'S ATTENDANCE — pick a person, see their period.
  *
- * A DROPDOWN rather than the logged-in user: the 65 factory staff have no
- * logins, so "my own attendance" would be blank for almost everyone who
- * matters. HR and the supervisors are who open this, and they are always
- * looking somebody ELSE up.
+ * The card ABOVE this one is the reader's own month; this is the one HR and
+ * the supervisors use, and they are always looking somebody ELSE up, which
+ * is why it is a dropdown and why it needs the HRMS permission.
  *
  * It opens on the first name in the list rather than on an empty card, so a
  * page somebody opened to read attendance has attendance in it.
@@ -150,59 +89,11 @@ export default function PersonAttendanceCard({ range }: { range: DateRange }) {
                     description={employees.isFetching ? 'Loading employees…' : 'No active employees.'}
                 />
             ) : (
-                <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
-                    <Space wrap>
-                        <Typography.Text strong>{data?.employee.name}</Typography.Text>
-                        <Typography.Text type="secondary">
-                            {[data?.employee.department, data?.employee.designation].filter(Boolean).join(' · ')}
-                        </Typography.Text>
-                    </Space>
-
-                    {data && data.summary.from_import > 0 ? (
-                        <Alert
-                            type="info"
-                            showIcon
-                            message={provisionalLine(data.summary)}
-                        />
-                    ) : null}
-
-                    {data ? <Tally summary={data.summary} /> : null}
-
-                    <Table
-                        size="small"
-                        rowKey="id"
-                        loading={person.isFetching}
-                        dataSource={data?.days ?? []}
-                        pagination={false}
-                        scroll={{ x: 'max-content', y: 320 }}
-                        locale={{
-                            emptyText: (
-                                <Empty
-                                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                                    description="Nothing recorded for this person in this period."
-                                />
-                            ),
-                        }}
-                        columns={[
-                            { title: 'Day', dataIndex: 'date', render: (date: string) => dayLabel(date) },
-                            {
-                                title: 'Counts as',
-                                render: (_, row) =>
-                                    row.status === null ? (
-                                        // Not present, not absent — nobody has
-                                        // answered it yet, and the screen does
-                                        // not get to pick either.
-                                        <Tag color="gold">Needs review</Tag>
-                                    ) : (
-                                        <Tag color={STATUS_COLORS[row.status]}>{STATUS_LABELS[row.status]}</Tag>
-                                    ),
-                            },
-                            { title: 'In', render: (_, row) => clock(row.check_in) },
-                            { title: 'Out', render: (_, row) => clock(row.check_out) },
-                            { title: 'Note', dataIndex: 'notes' },
-                        ]}
-                    />
-                </Space>
+                <PersonMonth
+                    data={data ?? null}
+                    loading={person.isFetching}
+                    emptyText="Nothing recorded for this person in this period."
+                />
             )}
         </Card>
     );

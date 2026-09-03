@@ -5,12 +5,13 @@ import dayjs from 'dayjs';
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
-import { hasManageAccess } from '@/features/auth/permissions';
+import { hasManageAccess, hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
 import { listAttendance, listAllEmployees, markAttendance } from '@/features/hrms/api';
 import { type DateRange, rangeFor } from '@/features/hrms/attendanceRange';
 import AttendanceRangeBar from '@/features/hrms/components/AttendanceRangeBar';
 import DepartmentAttendanceCard from '@/features/hrms/components/DepartmentAttendanceCard';
+import MyAttendanceCard from '@/features/hrms/components/MyAttendanceCard';
 import PersonAttendanceCard from '@/features/hrms/components/PersonAttendanceCard';
 import { ATTENDANCE_DEFAULT_SORT, ATTENDANCE_LIST_SPEC, ATTENDANCE_SORT_FIELDS, noMatchLine, pageRangeLine } from '@/features/hrms/list';
 import type { Attendance, AttendanceListParams, AttendanceStatus } from '@/features/hrms/types';
@@ -56,7 +57,13 @@ const STATUS_FILTER: { value: AttendanceStatus | ''; label: string }[] = [{ valu
 export default function AttendancePage() {
     const [modalOpen, setModalOpen] = useState(false);
     const queryClient = useQueryClient();
-    const mayManage = hasManageAccess(useAuthStore((state) => state.user), 'hrms');
+    const user = useAuthStore((state) => state.user);
+    const mayManage = hasManageAccess(user, 'hrms');
+    // The list of everybody's marks is HRMS's own table and stays with the
+    // module, view or manage — it is the two CARDS above it that are the
+    // management read. A login with no HRMS rights at all still gets the
+    // page's first card, which is only ever their own month.
+    const mayList = hasModuleAccess(user, 'hrms');
 
     // The page opens on the month in progress: the punch report arrives a
     // month at a time, so that is the period somebody is usually asking about.
@@ -127,12 +134,21 @@ export default function AttendancePage() {
             </div>
 
             <Space orientation="vertical" size="middle" style={{ width: '100%', marginBottom: 24 }}>
-                <PersonAttendanceCard range={range} />
-                {/* The whole factory's numbers are the manager's read, and the
-                    endpoint refuses a view-only login as well as hiding it. */}
+                {/* YOUR OWN MONTH FIRST, for whoever is looking. The read
+                    behind it takes no employee, so it can be shown to any
+                    login without showing anybody else's attendance. */}
+                <MyAttendanceCard range={range} />
+
+                {/* Everybody ELSE'S attendance is a management read: looking
+                    a colleague up, and the factory by department. Both
+                    endpoints refuse a login that lacks the permission as
+                    well — the page does not merely hide them. */}
+                {mayManage ? <PersonAttendanceCard range={range} /> : null}
                 {mayManage ? <DepartmentAttendanceCard range={range} /> : null}
             </Space>
 
+            {!mayList ? null : (
+            <>
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }} wrap>
                 <Typography.Title level={4} style={{ margin: 0 }}>
                     All marks
@@ -234,6 +250,8 @@ export default function AttendancePage() {
                     { title: 'Notes', dataIndex: 'notes' },
                 ]}
             />
+            </>
+            )}
 
             <Modal
                 maskClosable={false}

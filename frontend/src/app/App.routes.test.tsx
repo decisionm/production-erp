@@ -105,6 +105,8 @@ const ROUTE_TABLE = [
     '/hrms/leave-types',
     '/hrms/leave-balances',
     '/hrms/leave-requests',
+    // Outside HRMS on purpose — it needs no HRMS permission.
+    '/my-attendance',
     '/hrms/attendance',
     // The punch-report import: the runs, and one run's review (03-Sep).
     '/hrms/attendance-imports',

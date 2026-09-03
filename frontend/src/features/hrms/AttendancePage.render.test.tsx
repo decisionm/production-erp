@@ -19,6 +19,18 @@ vi.mock('@/lib/api', () => ({
     },
 }));
 
+/**
+ * An HRMS login, because the list of everybody's marks belongs to the
+ * module: a login with no HRMS rights opens this page and sees only its own
+ * month, which is a different test (MyAttendance).
+ */
+const hrDesk = { id: 4, name: 'HR Desk', email: 'hr@example.com', is_active: true, roles: [], permissions: ['hrms.view'] };
+
+vi.mock('@/features/auth/store', () => ({
+    useAuthStore: (selector: (state: { user: unknown; setUser: () => void }) => unknown) =>
+        selector({ user: hrDesk, setUser: () => undefined }),
+}));
+
 import AttendancePage from './pages/AttendancePage';
 
 function mark(id: number, employeeName: string, date: string): Attendance {
