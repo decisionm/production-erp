@@ -344,7 +344,7 @@ class AttendanceImportService
 
         $employees = Employee::query()
             ->whereIn('id', $rows->pluck('employee_id')->filter()->all())
-            ->get(['id', 'department', 'designation'])
+            ->get(['id', 'name', 'department', 'designation'])
             ->keyBy('id');
 
         $days = $this->dayStates($import, $rows->pluck('employee_code')->all());
@@ -354,7 +354,9 @@ class AttendanceImportService
 
             return [
                 'employee_code' => (string) $row->employee_code,
-                'employee_name' => (string) $row->employee_name,
+                // The MASTER's spelling wins over the punch file's, which
+                // shouts every name in capitals.
+                'employee_name' => $employee?->name ?? (string) $row->employee_name,
                 'employee_id' => $row->employee_id === null ? null : (int) $row->employee_id,
                 'known' => $row->employee_id !== null,
                 'department' => $employee?->department,

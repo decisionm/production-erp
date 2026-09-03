@@ -82,13 +82,21 @@ class ImportEmployeesJsonTest extends TestCase
         // The joining date nobody supplied: the placeholder, for everyone.
         $this->assertSame(65, Employee::whereDate('date_of_joining', ImportEmployeesJson::PLACEHOLDER_JOINING_DATE)->count());
 
-        // App wins over paper for B. Suresh's designation.
+        // App wins over paper for B. Suresh's designation. Names are stored
+        // as people write them, not as the punch report shouts them.
         $suresh = Employee::where('employee_code', 'SPP-105')->firstOrFail();
-        $this->assertSame('SURESH', $suresh->name);
+        $this->assertSame('Suresh', $suresh->name);
         $this->assertSame('Production Supervisor', $suresh->designation);
 
         $velvizhi = Employee::where('employee_code', 'SPP-05')->firstOrFail();
         $this->assertSame('inactive', $velvizhi->status->value);
+
+        // Nobody is left in capitals, and an initial keeps its letter.
+        $this->assertSame([], Employee::query()->get(['employee_code', 'name'])
+            ->filter(fn ($e) => $e->name === mb_strtoupper($e->name) && mb_strlen($e->name) > 2)
+            ->pluck('name')->all());
+        $this->assertSame('K. Soniya', Employee::where('employee_code', 'TMP-58')->value('name'));
+        $this->assertSame('Balaji V', Employee::where('employee_code', 'SPP-101')->value('name'));
 
         $this->artisan('hrms:import-employees', ['path' => $path, '--write' => true])
             ->expectsTable(['count', 'value'], [

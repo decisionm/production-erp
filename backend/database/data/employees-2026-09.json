@@ -1,652 +1,652 @@
 [
-  {
-    "serial": 1,
-    "list_name": "V.BALAJI",
-    "employee_code": "SPP-101",
-    "name": "BALAJI V",
-    "department": "Production Department",
-    "designation": "Production Supervisor",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 2,
-    "list_name": "K.ANANTHKUMAR",
-    "employee_code": "SPP-103",
-    "name": "ANANTHKUMAR",
-    "department": "Production Department",
-    "designation": "Production Supervisor",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 3,
-    "list_name": "D.VINNARASU",
-    "employee_code": "SPP-104",
-    "name": "VINNARASU",
-    "department": "Production Department",
-    "designation": "Production Supervisor",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 4,
-    "list_name": "B.SURESH",
-    "employee_code": "SPP-105",
-    "name": "SURESH",
-    "department": "Production Department",
-    "designation": "Production Supervisor",
-    "status": "active",
-    "note": "paper says Plant Manager; punch app says Production Supervisor"
-  },
-  {
-    "serial": 5,
-    "list_name": "S.LOKESH",
-    "employee_code": "SPP-106",
-    "name": "LOKESH",
-    "department": "Production Department",
-    "designation": "Production Manager",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 6,
-    "list_name": "S.VANI",
-    "employee_code": "SPP-20",
-    "name": "VANI",
-    "department": "Accounts Department",
-    "designation": "Accountant",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 7,
-    "list_name": "R.KUMARAKURUBARAN",
-    "employee_code": "SPP-112",
-    "name": "KUMARAKURUBARAN",
-    "department": "Quality Department",
-    "designation": "Quality Incharge",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 8,
-    "list_name": "C.MANJU",
-    "employee_code": "SPP-113",
-    "name": "MANJU",
-    "department": "Production Department",
-    "designation": "Production Supervisor",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 9,
-    "list_name": "V.KARTHIK",
-    "employee_code": "SPP-115",
-    "name": "KARTHIK MANIKANDAN",
-    "department": "Production Department",
-    "designation": "Production Supervisor",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 10,
-    "list_name": "B.VINCENT",
-    "employee_code": "SPP-111",
-    "name": "VINCENT",
-    "department": "Accounts Department",
-    "designation": "Accounts Manager",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 11,
-    "list_name": "R.VIMAL",
-    "employee_code": "SPP-114",
-    "name": "VIMAL",
-    "department": "Human Resource",
-    "designation": "HR",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 12,
-    "list_name": "S.ARUNACHALAM",
-    "employee_code": "SPP-117",
-    "name": "S ARUNACHALAM",
-    "department": "Accounts Department",
-    "designation": "Accountant",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 13,
-    "list_name": "VASANTH",
-    "employee_code": "SPP-118",
-    "name": "Vasanth",
-    "department": "Stores Department",
-    "designation": "Store Incharge",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 14,
-    "list_name": "R.ARUNA",
-    "employee_code": "SPP-119",
-    "name": "R Aruna",
-    "department": "Accounts Department",
-    "designation": "Accountant",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 15,
-    "list_name": "A.VINOTH",
-    "employee_code": "SPP-03",
-    "name": "VINOTH",
-    "department": "Production Department",
-    "designation": "Machine Operator",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 16,
-    "list_name": "N.NATARAJAN",
-    "employee_code": "SPP-09",
-    "name": "NATARAJAN",
-    "department": "Production Department",
-    "designation": "Maintenance",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 17,
-    "list_name": "K.KALAIYARASAN",
-    "employee_code": "SPP-06",
-    "name": "KALAIYARASAN",
-    "department": "Production Department",
-    "designation": "Machine Operator",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 18,
-    "list_name": "R.RAJENDIRAN",
-    "employee_code": "SPP-08",
-    "name": "RAJENDIRAN",
-    "department": "Production Department",
-    "designation": "Machine Operator",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 19,
-    "list_name": "I.BHARATH",
-    "employee_code": "SPP-12",
-    "name": "BHARATH",
-    "department": "Stores Department",
-    "designation": "Store Supervisor",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 20,
-    "list_name": "S.MADHANKUMAR",
-    "employee_code": "SPP-13",
-    "name": "MADANKUMAR",
-    "department": "Production Department",
-    "designation": "Machine Operator",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 21,
-    "list_name": "S.SELVA KUMAR",
-    "employee_code": "SPP-19",
-    "name": "SELVAKUMAR",
-    "department": "Production Department",
-    "designation": "Machine Operator",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 22,
-    "list_name": "M.MUGILAN",
-    "employee_code": "SPP-37",
-    "name": "MUGILAN",
-    "department": "Quality Department",
-    "designation": "Quality Supervisor",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 23,
-    "list_name": "M.SRIDHAR",
-    "employee_code": "SPP-38",
-    "name": "SRIDHAR",
-    "department": "Quality Department",
-    "designation": "Quality Supervisor",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 24,
-    "list_name": "A.SRIRAM",
-    "employee_code": "SPP-39",
-    "name": "SRIRAM",
-    "department": "Logistics&Transportation",
-    "designation": "Driver",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 25,
-    "list_name": "M.PANDIYAN",
-    "employee_code": "SPP-40",
-    "name": "PANDIYAN",
-    "department": "Logistics&Transportation",
-    "designation": "Driver",
-    "status": "active",
-    "note": "31 absent days in July"
-  },
-  {
-    "serial": 26,
-    "list_name": "R.MAYAVATHI",
-    "employee_code": "SPP-01",
-    "name": "MAYAVATHI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 27,
-    "list_name": "M.ETTIYAMMAL",
-    "employee_code": "SPP-02",
-    "name": "ETTIYAMMAL",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 28,
-    "list_name": "VEERASELVI",
-    "employee_code": "SPP-07",
-    "name": "VEERASELVI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 29,
-    "list_name": "E.HARISHA",
-    "employee_code": "SPP-14",
-    "name": "HARISHA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 30,
-    "list_name": "I.SHARMILA",
-    "employee_code": "SPP-16",
-    "name": "SHARMILA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 31,
-    "list_name": "R.SUBA",
-    "employee_code": "SPP-21",
-    "name": "SUBA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 32,
-    "list_name": "V.SABITHA",
-    "employee_code": "SPP-23",
-    "name": "SABITHA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 33,
-    "list_name": "A.PARAMESHWARI",
-    "employee_code": "SPP-22",
-    "name": "PARAMESWARI",
-    "department": "Production Department",
-    "designation": "Housekeeping",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 34,
-    "list_name": "S.ILAVARASI",
-    "employee_code": "SPP-24",
-    "name": "ELAVARASI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 35,
-    "list_name": "S.KALAIVANI",
-    "employee_code": "SPP-25",
-    "name": "KALAIVANI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 36,
-    "list_name": "B.ARUNA",
-    "employee_code": "SPP-26",
-    "name": "B ARUNA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 37,
-    "list_name": "M.KANIMOZHI",
-    "employee_code": "SPP-27",
-    "name": "KANIMOZHI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 38,
-    "list_name": "P.ARUNA",
-    "employee_code": "SPP-28",
-    "name": "P ARUNA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 39,
-    "list_name": "S.SUGUNA",
-    "employee_code": "SPP-29",
-    "name": "SUGUNA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 40,
-    "list_name": "M.RAMYA",
-    "employee_code": "SPP-30",
-    "name": "RAMYA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 41,
-    "list_name": "S.VIJAYALAKSHMI",
-    "employee_code": "SPP-31",
-    "name": "VIJAYALAKSHMI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 42,
-    "list_name": "A.MALA",
-    "employee_code": "SPP-32",
-    "name": "MALA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 43,
-    "list_name": "K.PRIYA",
-    "employee_code": "SPP-33",
-    "name": "K PRIYA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 44,
-    "list_name": "R.MAHESHWARI",
-    "employee_code": "SPP-34",
-    "name": "MAKESHWARI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 45,
-    "list_name": "R.HEMALATHA",
-    "employee_code": "SPP-35",
-    "name": "HEMALATHA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 46,
-    "list_name": "S.SNEHA",
-    "employee_code": "SPP-36",
-    "name": "SNEHA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 47,
-    "list_name": "P.SANGEETHA",
-    "employee_code": "SPP-43",
-    "name": "SANGEETHA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 48,
-    "list_name": "S.SRIVENTHI",
-    "employee_code": "SPP-44",
-    "name": "SRIVENTHI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 49,
-    "list_name": "D.MEENAKSHI",
-    "employee_code": "SPP-45",
-    "name": "MEENATCHI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 50,
-    "list_name": "SARASWATHY",
-    "employee_code": "SPP-47",
-    "name": "SARASWATHI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 51,
-    "list_name": "M.JAYARANI",
-    "employee_code": "SPP-48",
-    "name": "JAYARANI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 52,
-    "list_name": "G.SUBASHANI",
-    "employee_code": "SPP-49",
-    "name": "SUBASHINI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 53,
-    "list_name": "N.POORANI",
-    "employee_code": "SPP-50",
-    "name": "POORANI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 54,
-    "list_name": "SELVAM",
-    "employee_code": "SPP-67",
-    "name": "Selvam",
-    "department": "Logistics&Transportation",
-    "designation": "Driver",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 55,
-    "list_name": "NEELAVATHY",
-    "employee_code": "SPP-55",
-    "name": "NEELAVATHI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 56,
-    "list_name": "ASHOK",
-    "employee_code": "SPP-66",
-    "name": "ASHOK",
-    "department": "Logistics&Transportation",
-    "designation": "Driver",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 57,
-    "list_name": "K.VENUNATHAN",
-    "employee_code": "SPP-58",
-    "name": "VENUNATHAN",
-    "department": "Production Department",
-    "designation": "Machine Operator",
-    "status": "active",
-    "note": null
-  },
-  {
-    "serial": 58,
-    "list_name": "K.SONIYA",
-    "employee_code": "TMP-58",
-    "name": "K.SONIYA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": "no Pooja ID yet — set the real code when HR assigns one"
-  },
-  {
-    "serial": 59,
-    "list_name": "V.SUTHA",
-    "employee_code": "TMP-59",
-    "name": "V.SUTHA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": "no Pooja ID yet — set the real code when HR assigns one"
-  },
-  {
-    "serial": 60,
-    "list_name": "J.GEETHA",
-    "employee_code": "TMP-60",
-    "name": "J.GEETHA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": "no Pooja ID yet — set the real code when HR assigns one"
-  },
-  {
-    "serial": 61,
-    "list_name": "S.SATHIYA",
-    "employee_code": "TMP-61",
-    "name": "S.SATHIYA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": "no Pooja ID yet — set the real code when HR assigns one"
-  },
-  {
-    "serial": 62,
-    "list_name": "R.JANANI",
-    "employee_code": "TMP-62",
-    "name": "R.JANANI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": "no Pooja ID yet — set the real code when HR assigns one"
-  },
-  {
-    "serial": 63,
-    "list_name": "T.SWEETHA",
-    "employee_code": "TMP-63",
-    "name": "T.SWEETHA",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "active",
-    "note": "no Pooja ID yet — set the real code when HR assigns one"
-  },
-  {
-    "serial": null,
-    "list_name": null,
-    "employee_code": "SPP-05",
-    "name": "VELVIZHI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "inactive",
-    "note": "in Pooja app, not on the September list"
-  },
-  {
-    "serial": null,
-    "list_name": null,
-    "employee_code": "SPP-46",
-    "name": "JAYASUNDARI",
-    "department": "Production Department",
-    "designation": "Packing Staff",
-    "status": "inactive",
-    "note": "in Pooja app, not on the September list"
-  }
+    {
+        "serial": 1,
+        "list_name": "V.BALAJI",
+        "employee_code": "SPP-101",
+        "name": "Balaji V",
+        "department": "Production Department",
+        "designation": "Production Supervisor",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 2,
+        "list_name": "K.ANANTHKUMAR",
+        "employee_code": "SPP-103",
+        "name": "Ananthkumar",
+        "department": "Production Department",
+        "designation": "Production Supervisor",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 3,
+        "list_name": "D.VINNARASU",
+        "employee_code": "SPP-104",
+        "name": "Vinnarasu",
+        "department": "Production Department",
+        "designation": "Production Supervisor",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 4,
+        "list_name": "B.SURESH",
+        "employee_code": "SPP-105",
+        "name": "Suresh",
+        "department": "Production Department",
+        "designation": "Production Supervisor",
+        "status": "active",
+        "note": "paper says Plant Manager; punch app says Production Supervisor"
+    },
+    {
+        "serial": 5,
+        "list_name": "S.LOKESH",
+        "employee_code": "SPP-106",
+        "name": "Lokesh",
+        "department": "Production Department",
+        "designation": "Production Manager",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 6,
+        "list_name": "S.VANI",
+        "employee_code": "SPP-20",
+        "name": "Vani",
+        "department": "Accounts Department",
+        "designation": "Accountant",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 7,
+        "list_name": "R.KUMARAKURUBARAN",
+        "employee_code": "SPP-112",
+        "name": "Kumarakurubaran",
+        "department": "Quality Department",
+        "designation": "Quality Incharge",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 8,
+        "list_name": "C.MANJU",
+        "employee_code": "SPP-113",
+        "name": "Manju",
+        "department": "Production Department",
+        "designation": "Production Supervisor",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 9,
+        "list_name": "V.KARTHIK",
+        "employee_code": "SPP-115",
+        "name": "Karthik Manikandan",
+        "department": "Production Department",
+        "designation": "Production Supervisor",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 10,
+        "list_name": "B.VINCENT",
+        "employee_code": "SPP-111",
+        "name": "Vincent",
+        "department": "Accounts Department",
+        "designation": "Accounts Manager",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 11,
+        "list_name": "R.VIMAL",
+        "employee_code": "SPP-114",
+        "name": "Vimal",
+        "department": "Human Resource",
+        "designation": "HR",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 12,
+        "list_name": "S.ARUNACHALAM",
+        "employee_code": "SPP-117",
+        "name": "S Arunachalam",
+        "department": "Accounts Department",
+        "designation": "Accountant",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 13,
+        "list_name": "VASANTH",
+        "employee_code": "SPP-118",
+        "name": "Vasanth",
+        "department": "Stores Department",
+        "designation": "Store Incharge",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 14,
+        "list_name": "R.ARUNA",
+        "employee_code": "SPP-119",
+        "name": "R Aruna",
+        "department": "Accounts Department",
+        "designation": "Accountant",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 15,
+        "list_name": "A.VINOTH",
+        "employee_code": "SPP-03",
+        "name": "Vinoth",
+        "department": "Production Department",
+        "designation": "Machine Operator",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 16,
+        "list_name": "N.NATARAJAN",
+        "employee_code": "SPP-09",
+        "name": "Natarajan",
+        "department": "Production Department",
+        "designation": "Maintenance",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 17,
+        "list_name": "K.KALAIYARASAN",
+        "employee_code": "SPP-06",
+        "name": "Kalaiyarasan",
+        "department": "Production Department",
+        "designation": "Machine Operator",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 18,
+        "list_name": "R.RAJENDIRAN",
+        "employee_code": "SPP-08",
+        "name": "Rajendiran",
+        "department": "Production Department",
+        "designation": "Machine Operator",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 19,
+        "list_name": "I.BHARATH",
+        "employee_code": "SPP-12",
+        "name": "Bharath",
+        "department": "Stores Department",
+        "designation": "Store Supervisor",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 20,
+        "list_name": "S.MADHANKUMAR",
+        "employee_code": "SPP-13",
+        "name": "Madankumar",
+        "department": "Production Department",
+        "designation": "Machine Operator",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 21,
+        "list_name": "S.SELVA KUMAR",
+        "employee_code": "SPP-19",
+        "name": "Selvakumar",
+        "department": "Production Department",
+        "designation": "Machine Operator",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 22,
+        "list_name": "M.MUGILAN",
+        "employee_code": "SPP-37",
+        "name": "Mugilan",
+        "department": "Quality Department",
+        "designation": "Quality Supervisor",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 23,
+        "list_name": "M.SRIDHAR",
+        "employee_code": "SPP-38",
+        "name": "Sridhar",
+        "department": "Quality Department",
+        "designation": "Quality Supervisor",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 24,
+        "list_name": "A.SRIRAM",
+        "employee_code": "SPP-39",
+        "name": "Sriram",
+        "department": "Logistics & Transportation",
+        "designation": "Driver",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 25,
+        "list_name": "M.PANDIYAN",
+        "employee_code": "SPP-40",
+        "name": "Pandiyan",
+        "department": "Logistics & Transportation",
+        "designation": "Driver",
+        "status": "active",
+        "note": "31 absent days in July"
+    },
+    {
+        "serial": 26,
+        "list_name": "R.MAYAVATHI",
+        "employee_code": "SPP-01",
+        "name": "Mayavathi",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 27,
+        "list_name": "M.ETTIYAMMAL",
+        "employee_code": "SPP-02",
+        "name": "Ettiyammal",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 28,
+        "list_name": "VEERASELVI",
+        "employee_code": "SPP-07",
+        "name": "Veeraselvi",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 29,
+        "list_name": "E.HARISHA",
+        "employee_code": "SPP-14",
+        "name": "Harisha",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 30,
+        "list_name": "I.SHARMILA",
+        "employee_code": "SPP-16",
+        "name": "Sharmila",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 31,
+        "list_name": "R.SUBA",
+        "employee_code": "SPP-21",
+        "name": "Suba",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 32,
+        "list_name": "V.SABITHA",
+        "employee_code": "SPP-23",
+        "name": "Sabitha",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 33,
+        "list_name": "A.PARAMESHWARI",
+        "employee_code": "SPP-22",
+        "name": "Parameswari",
+        "department": "Production Department",
+        "designation": "Housekeeping",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 34,
+        "list_name": "S.ILAVARASI",
+        "employee_code": "SPP-24",
+        "name": "Elavarasi",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 35,
+        "list_name": "S.KALAIVANI",
+        "employee_code": "SPP-25",
+        "name": "Kalaivani",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 36,
+        "list_name": "B.ARUNA",
+        "employee_code": "SPP-26",
+        "name": "B Aruna",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 37,
+        "list_name": "M.KANIMOZHI",
+        "employee_code": "SPP-27",
+        "name": "Kanimozhi",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 38,
+        "list_name": "P.ARUNA",
+        "employee_code": "SPP-28",
+        "name": "P Aruna",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 39,
+        "list_name": "S.SUGUNA",
+        "employee_code": "SPP-29",
+        "name": "Suguna",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 40,
+        "list_name": "M.RAMYA",
+        "employee_code": "SPP-30",
+        "name": "Ramya",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 41,
+        "list_name": "S.VIJAYALAKSHMI",
+        "employee_code": "SPP-31",
+        "name": "Vijayalakshmi",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 42,
+        "list_name": "A.MALA",
+        "employee_code": "SPP-32",
+        "name": "Mala",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 43,
+        "list_name": "K.PRIYA",
+        "employee_code": "SPP-33",
+        "name": "K Priya",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 44,
+        "list_name": "R.MAHESHWARI",
+        "employee_code": "SPP-34",
+        "name": "Makeshwari",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 45,
+        "list_name": "R.HEMALATHA",
+        "employee_code": "SPP-35",
+        "name": "Hemalatha",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 46,
+        "list_name": "S.SNEHA",
+        "employee_code": "SPP-36",
+        "name": "Sneha",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 47,
+        "list_name": "P.SANGEETHA",
+        "employee_code": "SPP-43",
+        "name": "Sangeetha",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 48,
+        "list_name": "S.SRIVENTHI",
+        "employee_code": "SPP-44",
+        "name": "Sriventhi",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 49,
+        "list_name": "D.MEENAKSHI",
+        "employee_code": "SPP-45",
+        "name": "Meenatchi",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 50,
+        "list_name": "SARASWATHY",
+        "employee_code": "SPP-47",
+        "name": "Saraswathi",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 51,
+        "list_name": "M.JAYARANI",
+        "employee_code": "SPP-48",
+        "name": "Jayarani",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 52,
+        "list_name": "G.SUBASHANI",
+        "employee_code": "SPP-49",
+        "name": "Subashini",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 53,
+        "list_name": "N.POORANI",
+        "employee_code": "SPP-50",
+        "name": "Poorani",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 54,
+        "list_name": "SELVAM",
+        "employee_code": "SPP-67",
+        "name": "Selvam",
+        "department": "Logistics & Transportation",
+        "designation": "Driver",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 55,
+        "list_name": "NEELAVATHY",
+        "employee_code": "SPP-55",
+        "name": "Neelavathi",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 56,
+        "list_name": "ASHOK",
+        "employee_code": "SPP-66",
+        "name": "Ashok",
+        "department": "Logistics & Transportation",
+        "designation": "Driver",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 57,
+        "list_name": "K.VENUNATHAN",
+        "employee_code": "SPP-58",
+        "name": "Venunathan",
+        "department": "Production Department",
+        "designation": "Machine Operator",
+        "status": "active",
+        "note": null
+    },
+    {
+        "serial": 58,
+        "list_name": "K.SONIYA",
+        "employee_code": "TMP-58",
+        "name": "K. Soniya",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": "no Pooja ID yet — set the real code when HR assigns one"
+    },
+    {
+        "serial": 59,
+        "list_name": "V.SUTHA",
+        "employee_code": "TMP-59",
+        "name": "V. Sutha",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": "no Pooja ID yet — set the real code when HR assigns one"
+    },
+    {
+        "serial": 60,
+        "list_name": "J.GEETHA",
+        "employee_code": "TMP-60",
+        "name": "J. Geetha",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": "no Pooja ID yet — set the real code when HR assigns one"
+    },
+    {
+        "serial": 61,
+        "list_name": "S.SATHIYA",
+        "employee_code": "TMP-61",
+        "name": "S. Sathiya",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": "no Pooja ID yet — set the real code when HR assigns one"
+    },
+    {
+        "serial": 62,
+        "list_name": "R.JANANI",
+        "employee_code": "TMP-62",
+        "name": "R. Janani",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": "no Pooja ID yet — set the real code when HR assigns one"
+    },
+    {
+        "serial": 63,
+        "list_name": "T.SWEETHA",
+        "employee_code": "TMP-63",
+        "name": "T. Sweetha",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "active",
+        "note": "no Pooja ID yet — set the real code when HR assigns one"
+    },
+    {
+        "serial": null,
+        "list_name": null,
+        "employee_code": "SPP-05",
+        "name": "Velvizhi",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "inactive",
+        "note": "in Pooja app, not on the September list"
+    },
+    {
+        "serial": null,
+        "list_name": null,
+        "employee_code": "SPP-46",
+        "name": "Jayasundari",
+        "department": "Production Department",
+        "designation": "Packing Staff",
+        "status": "inactive",
+        "note": "in Pooja app, not on the September list"
+    }
 ]
