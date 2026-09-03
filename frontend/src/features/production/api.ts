@@ -526,14 +526,23 @@ export async function listAwaitingCorrectionEntries(): Promise<EntryWalk> {
  * newest — which is exactly the request the old `listCorrectableEntries()`
  * always sent (`status=pending&correctable=1`), so the DEFAULT view is
  * unchanged: every correctable batch, newest first, nothing hidden by a
- * filter nobody set. `correctableQuery` (correctableFilters.ts) builds the
- * params; this function's only job is the one request.
+ * filter nobody set.
+ *
+ * `today` is REQUIRED, not defaulted — the page's own production day
+ * (`productionDateFor(...)`, the same value it already passes to
+ * `listCompletedEntriesForDay`), never a fresh clock read here. It caps
+ * `date_to` (post-review fix, 03-Sep-2026): the entries index scopes THIS
+ * read to strictly before `today`, so a same-day batch can never fill this
+ * page and hide a real earlier-days backlog behind it — see
+ * `correctableQuery` (correctableFilters.ts) for the cap arithmetic, which
+ * builds the rest of the params too.
  */
 export async function listCorrectableEntries(
+    today: string,
     filters: CorrectableFilters = {},
     page: number = 1,
 ): Promise<Paginated<ShiftProductionEntry>> {
-    return listShiftProductionEntries(correctableQuery(filters, page));
+    return listShiftProductionEntries(correctableQuery(filters, page, today));
 }
 
 /**

@@ -25,6 +25,24 @@ import { canAmendCompletion, isAwaitingCorrection, type ShiftProductionEntry } f
  * ask for) the panel still shows exactly the right batches rather than every
  * pending batch on the floor.
  *
+ * WHY "TODAY" IS NO LONGER SUBTRACTED HERE (post-review fix, 03-Sep-2026,
+ * correctable-filters Task 2). `correctableEarlier` used to drop whatever id
+ * the Completed Today read already held (`shownToday`), so the two sections
+ * never showed the same row twice. That was safe while `correctable=1` came
+ * back as ONE unpaginated walk of up to 500 rows (§walkEntryPages) —
+ * subtracting today's handful still left the rest visible. It stopped being
+ * safe the moment that read became a real 25-row PAGE: today's batches
+ * satisfy `correctable=1` and sort first under the default `newest`, so on a
+ * busy day they could fill page 1 entirely, `shownToday` would drop every
+ * row on it, and the whole section — heading, control row and pager
+ * together, since all three are gated on this list being non-empty — would
+ * read as empty with a real earlier-days backlog sitting unreachable on
+ * page 2. The disjointness this existed for is now enforced AT THE SOURCE
+ * instead: `correctableQuery()` (correctableFilters.ts) sends `date_to`
+ * capped to the day before the page's own production day, so the server
+ * never returns a today-dated row here in the first place. This module no
+ * longer needs to know what Completed Today is showing.
+ *
  * Pure, so vitest pins the walk and the derivation without rendering the
  * page or touching the network.
  */
@@ -75,17 +93,17 @@ export interface CorrectionReads {
     awaiting: ShiftProductionEntry[] | undefined;
     /** The `correctable=1` read — undefined while loading or refused. */
     correctable: ShiftProductionEntry[] | undefined;
-    /** What the Completed Today table is already showing — those need no second listing. */
-    completedToday: ShiftProductionEntry[];
 }
 
 export interface CorrectionLists {
     /** Sent back by quality and not yet re-submitted — the amber panel, in server order. */
     awaitingCorrection: ShiftProductionEntry[];
     /**
-     * Still amendable by the floor, not sent back, and not on Completed
-     * Today — the "completed earlier and still correctable" line (the
-     * night shift's paperwork at 06:45 files under yesterday's date).
+     * Still amendable by the floor and not sent back — the "completed
+     * earlier and still correctable" line. Date-disjoint from Completed
+     * Today by construction of the `correctable` READ itself
+     * (correctableQuery's `date_to` cap, correctableFilters.ts), not by
+     * anything filtered here — see the module docblock.
      */
     correctableEarlier: ShiftProductionEntry[];
 }
@@ -95,15 +113,16 @@ export interface CorrectionLists {
  * are the entry's OWN fields (isAwaitingCorrection / canAmendCompletion) —
  * the same rule the server applied, kept here as the parity guard the
  * module docblock describes; the sent-back exclusion reads the entry's own
- * flag too, so a batch never appears in both lists.
+ * flag too, so a batch never appears in both lists. Does NOT know or care
+ * what Completed Today is showing — that boundary is the caller's query,
+ * not this function's job (see "WHY 'TODAY' IS NO LONGER SUBTRACTED HERE"
+ * above).
  */
 export function correctionLists(reads: CorrectionReads): CorrectionLists {
-    const shownToday = new Set(reads.completedToday.map((entry) => entry.id));
-
     return {
         awaitingCorrection: (reads.awaiting ?? []).filter(isAwaitingCorrection),
         correctableEarlier: (reads.correctable ?? []).filter(
-            (entry) => canAmendCompletion(entry) && !isAwaitingCorrection(entry) && !shownToday.has(entry.id),
+            (entry) => canAmendCompletion(entry) && !isAwaitingCorrection(entry),
         ),
     };
 }

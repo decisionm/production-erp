@@ -1757,16 +1757,10 @@ export default function ShiftProductionEntryPage() {
         // that must leave the rest of the floor screen working.
         retry: false,
     });
-    const { data: correctableRead } = useQuery({
-        queryKey: ['production', 'shift-production-entries', 'correctable', correctableFilters, correctablePage],
-        queryFn: () => listCorrectableEntries(correctableFilters, correctablePage),
-        refetchInterval: 60000,
-        retry: false,
-        // Keeps the current page's cards on screen while a filter change or
-        // the 60s poll fetches the next answer, instead of the list
-        // flashing empty between requests.
-        placeholderData: (previous) => previous,
-    });
+    // `correctableRead` (the "Earlier batches" query) moved below `today` is
+    // computed — it caps its own read to strictly before `today`
+    // (correctableFilters.ts's `date_to`), so it needs that value before it
+    // can run. See the query beside `completedTodayPage`.
     // Authoritative machine-running state — every in-progress batch across
     // all shifts/dates, unpaginated. Distinct from `completedToday` (the
     // server's today-scoped, completed-only page below) so a batch left
@@ -2131,6 +2125,29 @@ export default function ShiftProductionEntryPage() {
         return map;
     }, [moldChangeLogs]);
 
+    /**
+     * "Earlier batches — still correctable" (03-Sep-2026, Task 2), and
+     * capped to strictly BEFORE `today` (post-review fix, same day): the two
+     * sections are meant to be date-disjoint from Completed Today below, and
+     * that boundary is now the QUERY's job, not a client-side subtraction —
+     * see correctableFilters.ts's `date_to` cap and correctionReads.ts's
+     * updated docblock for why the old client-side subtraction broke once
+     * this read became a real page instead of a full walk. `today` here is
+     * the SAME production day passed to `listCompletedEntriesForDay` below,
+     * not a fresh clock read — a night shift's batches, filed under
+     * yesterday, are correctly still "earlier" until the day itself rolls.
+     */
+    const { data: correctableRead } = useQuery({
+        queryKey: ['production', 'shift-production-entries', 'correctable', correctableFilters, correctablePage, today],
+        queryFn: () => listCorrectableEntries(today, correctableFilters, correctablePage),
+        refetchInterval: 60000,
+        retry: false,
+        // Keeps the current page's cards on screen while a filter change or
+        // the 60s poll fetches the next answer, instead of the list
+        // flashing empty between requests.
+        placeholderData: (previous) => previous,
+    });
+
     // COMPLETED TODAY, SERVER-SIDE (Phase 5.5, WS-C). The server answers
     // exactly today's completed batches — production_date = the shift-aware
     // factory day (`today`), batch_status = completed, up to 100 rows — so
@@ -2162,6 +2179,14 @@ export default function ShiftProductionEntryPage() {
      * that disappears at 06:45 for the shift that is still writing its
      * paperwork.
      *
+     * Date-disjoint from Completed Today by the READ itself now, not by
+     * anything filtered here — `correctableRead` above already asked the
+     * server for strictly-before-`today` rows (correctableFilters.ts's
+     * `date_to` cap), so `completedToday` is no longer passed into
+     * correctionLists() at all (post-review fix, 03-Sep-2026; see
+     * correctionReads.ts's docblock for why the old client-side subtraction
+     * broke once this read became a real page).
+     *
      * The client predicates (isAwaitingCorrection / canAmendCompletion) still
      * run inside correctionLists() as a PARITY GUARD: the server filtered by
      * the same fields, so they drop nothing on a matching backend — and on one
@@ -2170,7 +2195,6 @@ export default function ShiftProductionEntryPage() {
     const { awaitingCorrection, correctableEarlier } = correctionLists({
         awaiting: awaitingCorrectionRead?.entries,
         correctable: correctableRead?.data,
-        completedToday,
     });
     // The control row's Clear button, and whether the (now server-paged,
     // server-filtered) section has anything to show for the current
@@ -6258,6 +6282,15 @@ export default function ShiftProductionEntryPage() {
                                     date_to: range?.[1]?.format('YYYY-MM-DD'),
                                 })
                             }
+                            // This section is "earlier than today" by definition
+                            // (correctableQuery's date_to cap) — today itself and
+                            // beyond belong to Completed Today, never here, so the
+                            // calendar does not offer them. Without this, picking
+                            // today/a future date as `date_to` would silently get
+                            // clamped back by the query, and picking it as
+                            // `date_from` alongside the clamp could ask the server
+                            // for date_from > date_to and 422.
+                            disabledDate={(date) => !date.isBefore(dayjs(today), 'day')}
                         />
                         <Space size={4}>
                             <Typography.Text>Returned</Typography.Text>
