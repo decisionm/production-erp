@@ -107,12 +107,39 @@ function listOf(node: unknown): any[] {
 }
 
 /** Tally's `20260701` → `2026-07-01`; also accepts an already-ISO date. Anything else is null. */
+const MONTHS: Record<string, string> = {
+    jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+    jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
+};
+
 export function parseTallyDate(raw: unknown): string | null {
     const text = textOf(raw);
 
     if (/^\d{8}$/.test(text)) return `${text.slice(0, 4)}-${text.slice(4, 6)}-${text.slice(6, 8)}`;
 
-    return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+
+    // THE FORM A HUMAN-READABLE TALLY REPORT USES: `3-Aug-26`, `27-Jul-26`,
+    // `26-Jul-24`. Measured on the factory's own Group Outstandings export
+    // (03-Sep-2026). Until this, every due date on that report parsed as null
+    // and the whole ageing spine stayed empty even when Tally had stated the
+    // date plainly.
+    //
+    // The two-digit year is windowed 2000-2099. That is not a guess about the
+    // factory: Tally writes the century-less form only in a report whose own
+    // period is set by the caller, and this agent asks for a window that
+    // begins in 1990 — a bill from 1926 is not a thing this system can hold.
+    const dmy = /^(\d{1,2})-([A-Za-z]{3})-(\d{2}|\d{4})$/.exec(text);
+
+    if (dmy === null) return null;
+
+    const month = MONTHS[dmy[2].toLowerCase()];
+
+    if (month === undefined) return null;
+
+    const year = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
+
+    return `${year}-${month}-${dmy[1].padStart(2, '0')}`;
 }
 
 /**
@@ -331,6 +358,162 @@ export function dueDateOf(node: Record<string, unknown> | null | undefined, bill
     return addDays(billDate, days);
 }
 
+/**
+ * THE SHAPE THE FACTORY'S TALLY ACTUALLY RETURNS — measured 03-Sep-2026 from a
+ * Group Outstandings → Sundry Debtors → Pending Bills export of the live
+ * company (621 bills across 135 parties).
+ *
+ * IT IS A FLAT, ORDERED STREAM, NOT A TREE. Every value belongs to the
+ * `BILLFIXED` that PRECEDES it, as a SIBLING:
+ *
+ *     BILLFIXED  date=""        ref=""         party="A. ABUSHAHIR"   <- party header
+ *     BILLOP ""  BILLCL ""  BILLDUE ""  BILLOVERDUE ""                <- header has no values
+ *     BILLFIXED  date="3-Aug-26"  ref="567"    party=""               <- a bill
+ *     BILLOP "13977.000"  BILLCL "13977.000"  BILLDUE "3-Aug-26"      <- ITS values, as siblings
+ *     BILLFIXED  date=""        ref=""         party=""               <- subtotal separator
+ *     LEDBILLOP ...  LEDBILLCL ...                                    <- the party's totals
+ *
+ * WHY THIS IS THE WHOLE BUG. The reader above looks for BILLCL as a CHILD of
+ * BILLFIXED. In this shape BILLFIXED's only children are BILLDATE, BILLREF and
+ * BILLPARTY — so every row failed the `closing === null` guard and was dropped,
+ * and the pull posted zero. The ERP then correctly refused to wipe a standing
+ * position on an empty answer, and the page stayed empty while Tally had been
+ * answering with 621 bills, each carrying a due date, all along.
+ *
+ * THE PARTY IS CARRIED FORWARD. Only the header row names it; the bills under
+ * it repeat nothing. So a party is remembered until the next header — and a
+ * bill found before any header is emitted with no party rather than attached
+ * to the wrong one.
+ *
+ * ORDER IS THE ONLY THING THAT ASSOCIATES A VALUE WITH ITS BILL, which is why
+ * this parses with `preserveOrder` instead of the shared parser: the ordinary
+ * one collapses repeated siblings into per-tag arrays, and those arrays do not
+ * line up — this export holds 891 BILLFIXED against 756 BILLCL. Zipping them
+ * would attach one client's money to another client's name.
+ *
+ * LEDBILL* ROWS ARE IGNORED. They are Tally's own per-party subtotals; keeping
+ * them would double every party's balance.
+ */
+const orderedParser = new XMLParser({
+    ignoreAttributes: false,
+    parseTagValue: false,
+    trimValues: true,
+    preserveOrder: true,
+});
+
+/** The tag name of a preserveOrder node, ignoring its attribute bag. */
+function orderedName(node: Record<string, unknown>): string {
+    return Object.keys(node).filter((key) => key !== ':@')[0] ?? '';
+}
+
+/** The text of a preserveOrder leaf node. */
+function orderedText(node: Record<string, unknown>): string {
+    const value = node[orderedName(node)];
+
+    if (!Array.isArray(value)) return '';
+
+    const leaf = value.find((child: Record<string, unknown>) => '#text' in child);
+
+    return leaf === undefined ? '' : clean(leaf['#text']);
+}
+
+/** Every node in the document, in document order, flattened depth-first. */
+function orderedNodes(nodes: unknown, depth = 0): Record<string, unknown>[] {
+    if (!Array.isArray(nodes) || depth > 14) return [];
+
+    const out: Record<string, unknown>[] = [];
+
+    for (const node of nodes) {
+        if (node === null || typeof node !== 'object') continue;
+
+        const record = node as Record<string, unknown>;
+        const key = orderedName(record);
+
+        if (key === '' || key === '#text') continue;
+
+        out.push(record);
+
+        // BILLFIXED's own children are read by the caller; anything else may
+        // be a wrapper (ENVELOPE, BODY, an export container) whose children
+        // are the real stream.
+        if (key !== 'BILLFIXED') out.push(...orderedNodes(record[key], depth + 1));
+    }
+
+    return out;
+}
+
+export function parseGroupOutstandings(xml: string): ReceivableBill[] {
+    const nodes = orderedNodes(orderedParser.parse(xml));
+
+    const bills: ReceivableBill[] = [];
+
+    let party: string | null = null;
+    let current: ReceivableBill | null = null;
+
+    const flush = (): void => {
+        // A row Tally gave no closing amount for is a header or a separator,
+        // not an outstanding. Never emitted, never counted as zero.
+        if (current !== null && current.closing_amount !== null) bills.push(current);
+        current = null;
+    };
+
+    for (const node of nodes) {
+        const key = orderedName(node);
+
+        if (key === 'BILLFIXED') {
+            flush();
+
+            const fields: Record<string, string> = {};
+
+            for (const child of orderedNodes(node.BILLFIXED, 14)) {
+                fields[orderedName(child)] = orderedText(child);
+            }
+
+            // A header names the party for everything beneath it and is not
+            // itself a bill.
+            if (fields.BILLPARTY !== undefined && fields.BILLPARTY !== '') {
+                party = fields.BILLPARTY;
+
+                continue;
+            }
+
+            // No party, no reference and no date: the separator that precedes
+            // a party's LEDBILL* subtotals.
+            if ((fields.BILLREF ?? '') === '' && (fields.BILLDATE ?? '') === '') continue;
+
+            current = {
+                party_ledger_name: party ?? '',
+                party_ledger_guid: null,
+                bill_reference: fields.BILLREF || null,
+                bill_date: parseTallyDate(fields.BILLDATE),
+                due_date: null,
+                // Filled from the siblings below; null until one says so.
+                closing_amount: null as unknown as number,
+                opening_amount: null,
+            };
+
+            continue;
+        }
+
+        if (current === null) continue;
+
+        const value = orderedText(node);
+
+        // Tally states a receivable DEBIT as negative here (measured: a Sales
+        // bill of 11,597 Dr arrives as -11597.000). The page contract is
+        // positive-means-owed, so the sign crosses once, here, exactly as the
+        // other readers do it.
+        if (key === 'BILLCL') current.closing_amount = receivableAmount(value) as number;
+        if (key === 'BILLOP') current.opening_amount = receivableAmount(value);
+        if (key === 'BILLDUE') current.due_date = parseTallyDate(value);
+    }
+
+    flush();
+
+    // A bill nobody can be chased for is not reportable.
+    return bills.filter((bill) => bill.party_ledger_name !== '');
+}
+
 /** Every outstanding bill in a Bills Receivable export's XML. */
 export function parseBillsReceivable(xml: string): ReceivableBill[] {
     const document = parser.parse(xml);
@@ -363,10 +546,21 @@ export function parseBillsReceivable(xml: string): ReceivableBill[] {
         });
     }
 
-    // A Tally build returning real bill rows wins because it carries dates and
-    // references. The factory's measured response has no valid nested rows,
-    // so it falls through to the paired balance-only summary instead.
-    return bills.length > 0 ? bills : parsePartySummary(document);
+    // A Tally build returning real NESTED bill rows wins because it carries
+    // dates and references as children.
+    if (bills.length > 0) return bills;
+
+    // Then the shape this factory's Tally actually returns: the same fields,
+    // but as a flat ordered stream with the party on a header row. This is
+    // where 03-Sep-2026's 621 bills live, and reading it is what turned a
+    // permanently empty page into a real position.
+    const grouped = parseGroupOutstandings(xml);
+
+    if (grouped.length > 0) return grouped;
+
+    // Last, 0.4.6's measured all-parties summary: balances with no bill
+    // detail. Honest, but it can age nothing.
+    return parsePartySummary(document);
 }
 
 /**
