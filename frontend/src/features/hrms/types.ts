@@ -138,6 +138,39 @@ export interface AttendanceImportLine {
 /** The review list's `issue` chip — ListAttendanceImportLinesRequest's values. */
 export type AttendanceImportLineFilter = 'open' | AttendanceImportIssue | 'resolved' | 'clean';
 
+/**
+ * What one square of the month strip draws: the answer a day carries, or
+ * the fact that it carries none yet. `needs_fix` is the only state that
+ * asks anything of the reviewer.
+ */
+export type DayState = AttendanceImportResolution | 'needs_fix';
+
+/** One person's month in a run — the review's other grain. */
+export interface AttendanceImportEmployee {
+    employee_code: string;
+    employee_name: string;
+    employee_id: number | null;
+    /** False when the report's code is not in the employee master. */
+    known: boolean;
+    department: string | null;
+    designation: string | null;
+    day_count: number;
+    open_count: number;
+    resolved_count: number;
+    clean_count: number;
+    days: { date: string; state: DayState }[];
+}
+
+/** What one bulk answer did, skips named rather than counted away. */
+export interface BulkResolveResult {
+    resolved: number;
+    skipped: number;
+    skipped_codes: string[];
+    import: AttendanceImport;
+}
+
+export type AttendanceImportEmployeeListParams = ListParams;
+
 export type AttendanceImportListParams = ListParams;
 
 export type AttendanceImportLineListParams = ListParams & { issue?: AttendanceImportLineFilter };
