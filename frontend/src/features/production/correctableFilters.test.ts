@@ -105,6 +105,41 @@ describe('correctableQuery', () => {
             expect(correctableQuery({}, 1, TODAY)).toHaveProperty('date_to');
         });
     });
+
+    describe('date_from — clamped to the resolved date_to (second post-review fix)', () => {
+        // The shift-switch scenario: `today` is recomputed on every shift
+        // change (productionDateFor(effectiveShift)), so a `date_from` the
+        // control row picked under an earlier `today` can end up AFTER the
+        // newly-recomputed `date_to`. Sent as-is the server 422s
+        // (after_or_equal:date_from on date_to) with retry:false, and the
+        // section rendered "No batches match these filters." — a
+        // validation error disguised as an empty result. The produced
+        // params must never have date_from after date_to.
+
+        it('clamps date_from to an EXPLICIT date_to when date_from is later than it', () => {
+            const params = correctableQuery({ date_from: '2026-08-25', date_to: '2026-08-20' }, 1, TODAY);
+            expect(params.date_from).toBe('2026-08-20');
+            expect(params.date_to).toBe('2026-08-20');
+            expect((params.date_from as string) <= params.date_to).toBe(true);
+        });
+
+        it('clamps date_from to the day-before-today cap when date_to is ABSENT and date_from is later than that cap', () => {
+            const params = correctableQuery({ date_from: '2026-09-05' }, 1, TODAY);
+            expect(params.date_from).toBe(YESTERDAY);
+            expect(params.date_to).toBe(YESTERDAY);
+        });
+
+        it('does not touch date_from when it is already on or before the resolved date_to', () => {
+            expect(correctableQuery({ date_from: '2026-08-15', date_to: '2026-08-20' }, 1, TODAY).date_from).toBe(
+                '2026-08-15',
+            );
+            expect(correctableQuery({ date_from: YESTERDAY }, 1, TODAY).date_from).toBe(YESTERDAY);
+        });
+
+        it('omits date_from entirely when the caller never set it, even though date_to is always sent', () => {
+            expect(correctableQuery({}, 1, TODAY)).not.toHaveProperty('date_from');
+        });
+    });
 });
 
 describe('correctableFiltersActive', () => {

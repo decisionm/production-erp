@@ -40,6 +40,21 @@
  * `correctionLists()` (correctionReads.ts) no longer subtracts Completed
  * Today's rows at all; the server now returns the disjoint set directly.
  *
+ * `date_from` is clamped THE SAME WAY, to whatever `date_to` above just
+ * resolved to (second fix, same review pass, 03-Sep-2026). Switching the
+ * shift tab recomputes `today` — for an overnight shift `today` is
+ * yesterday for most of the day — so a `date_from` the control row picked
+ * under an earlier `today` can end up AFTER the newly-recomputed `date_to`.
+ * Sent as-is, the server refuses with 422 (`after_or_equal:date_from`);
+ * the query has `retry: false`, so that 422 was rendering as an honest-
+ * looking "No batches match these filters." — a validation error disguised
+ * as an empty result. When the caller's `date_from` is later than the
+ * resolved `date_to`, both ends collapse to that same `date_to` value
+ * (never the raw un-clamped `date_to`, which may itself have been clamped
+ * down from the caller's own choice) — a single-day range at the cap, the
+ * same recovery `date_to` alone already gets, rather than a 422 the UI
+ * cannot show honestly.
+ *
  * `correctableFiltersActive` is the Clear control's condition: true the
  * moment any CONTROL-ROW filter differs from its default, including an
  * explicit switch to oldest (the control row treats "away from the default
@@ -61,7 +76,7 @@ export interface CorrectableFilters {
     item_id?: number;
     work_center_id?: number;
     shift_id?: number;
-    /** Factory-day (Y-m-d), same as every other date filter on this endpoint. */
+    /** Factory-day (Y-m-d); clamped in `correctableQuery` to never land after the resolved `date_to`. */
     date_from?: string;
     /** Factory-day (Y-m-d); clamped in `correctableQuery` to never reach `today` or later. */
     date_to?: string;
@@ -109,13 +124,20 @@ function dayBefore(date: string): string {
  * → the request params for `listShiftProductionEntries`. Every set filter
  * appears exactly once; an unset one is not sent (never sent as `undefined`,
  * `0`, or `false` — a key the server would rather not see than misread).
- * `date_to` is the one exception: always present, the earlier of the
- * caller's own `date_to` and the day before `today`.
+ *
+ * `date_to` is one exception: always present, the earlier of the caller's
+ * own `date_to` and the day before `today`. `date_from` is the other: when
+ * set, it is clamped down to that same resolved `date_to` if it would
+ * otherwise land after it — never sent later than `date_to`, so the server
+ * never sees an inverted range (`after_or_equal:date_from` on `date_to`
+ * would 422 it) no matter how stale the caller's `date_from` has gone
+ * relative to a `today` that changed since it was picked.
  */
 export function correctableQuery(filters: CorrectableFilters, page: number, today: string): CorrectableQueryParams {
     const q = filters.q?.trim();
     const cap = dayBefore(today);
     const dateTo = filters.date_to && filters.date_to < cap ? filters.date_to : cap;
+    const dateFrom = filters.date_from && filters.date_from > dateTo ? dateTo : filters.date_from;
 
     return {
         status: 'pending',
@@ -124,7 +146,7 @@ export function correctableQuery(filters: CorrectableFilters, page: number, toda
         ...(q ? { q } : {}),
         ...(filters.work_center_id ? { work_center_id: filters.work_center_id } : {}),
         ...(filters.shift_id ? { shift_id: filters.shift_id } : {}),
-        ...(filters.date_from ? { date_from: filters.date_from } : {}),
+        ...(dateFrom ? { date_from: dateFrom } : {}),
         date_to: dateTo,
         ...(filters.returned ? { returned: 1 } : {}),
         sort: filters.sort === 'oldest' ? 'oldest' : 'newest',
