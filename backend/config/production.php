@@ -207,6 +207,7 @@ return [
          * nothing for a posting gate to protect. Refusing its approval would
          * strand a real batch over a post that was never going to happen.
          */
+        // DEC-20260902-018: switched on only after the voucher preview is checked against real batches on live.
         'require_postable_voucher' => (bool) env('PROD_REQUIRE_POSTABLE_VOUCHER', false),
     ],
 
@@ -551,6 +552,7 @@ return [
      * should not be arrived at by forgetting to set an .env line.
      */
     'readiness' => [
+        // DEC-20260902-017: switched on only after every active production product shows Ready on live.
         'enforced' => (bool) env('PROD_READINESS_ENFORCED', false),
 
         'checks' => [
