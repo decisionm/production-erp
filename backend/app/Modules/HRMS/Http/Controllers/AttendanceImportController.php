@@ -86,6 +86,17 @@ class AttendanceImportController extends Controller
         ]);
     }
 
+    /** Re-judge the days nobody has answered under the current hours rule. */
+    public function recheck(Request $request, AttendanceImport $attendance_import): JsonResponse
+    {
+        $result = $this->imports->recheck($attendance_import);
+
+        return response()->json([
+            ...$result,
+            'import' => AttendanceImportResource::make($this->imports->fresh($attendance_import))->resolve(),
+        ]);
+    }
+
     public function resolveLine(
         ResolveAttendanceImportLineRequest $request,
         AttendanceImport $attendance_import,

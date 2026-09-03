@@ -227,6 +227,14 @@ export async function bulkResolveAttendanceImportLines(id: number, payload: Bulk
     return data;
 }
 
+/** Re-judge the days nobody has answered under the current hours rule. */
+export async function recheckAttendanceImport(id: number): Promise<{ changed: number; checked: number; import: AttendanceImport }> {
+    const { data } = await api.post<{ changed: number; checked: number; import: AttendanceImport }>(
+        `/hrms/attendance-imports/${id}/recheck`,
+    );
+    return data;
+}
+
 export interface ResolveAttendanceImportLinePayload {
     resolution: AttendanceImportResolution;
     check_in?: string | null;

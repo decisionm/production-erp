@@ -58,9 +58,22 @@ class AttendanceImportTest extends TestCase
     }
 
     /** @return array<string, mixed> */
+    /**
+     * A day as the report prints it. `worked_minutes` defaults to a full
+     * eight-hour shift when both punches are there, because that is what a
+     * worked day looks like and the classifier now judges by the clock
+     * (DEC-20260903-005); a case that wants a different length passes one.
+     */
     private function day(string $date, string $status, ?string $in, ?string $out, array $extra = []): array
     {
-        return ['date' => $date, 'status' => $status, 'first_in' => $in, 'last_out' => $out, ...$extra];
+        return [
+            'date' => $date,
+            'status' => $status,
+            'first_in' => $in,
+            'last_out' => $out,
+            'worked_minutes' => $in !== null && $out !== null ? 480 : 0,
+            ...$extra,
+        ];
     }
 
     /**

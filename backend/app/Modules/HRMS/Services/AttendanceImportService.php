@@ -44,6 +44,29 @@ class AttendanceImportService
     /** Lines answered per pass in a bulk sweep — a month is ~600 of them. */
     private const RESOLVE_CHUNK = 200;
 
+    /**
+     * WHAT A DAY IS WORTH, IN MINUTES ON THE CLOCK (DEC-20260903-005).
+     *
+     * The owner set two anchors: an eight-hour shift is a full day, four
+     * hours is a half day. FULL_DAY_MINUTES is one hour under the shift
+     * because a shift is worked, not clocked to the second: in July 2026,
+     * 238 days ran between seven and eight hours and every one of them was
+     * somebody's whole shift. Reading the punch app's own Full/Half label
+     * instead would have paid 232 of those as halves.
+     *
+     * IMPLAUSIBLE_MINUTES is the other end. The app sometimes pairs an
+     * in-punch with an out-punch from the wrong day and credits twenty-two
+     * hours; a day longer than this is a data fault, not a long shift, and
+     * is asked about rather than counted.
+     */
+    public const SHIFT_MINUTES = 480;
+
+    public const FULL_DAY_MINUTES = 420;
+
+    public const HALF_DAY_MINUTES = 240;
+
+    public const IMPLAUSIBLE_MINUTES = 960;
+
     public function __construct(
         private readonly HrmsListQuery $query,
         private readonly AttendanceService $attendance,
@@ -58,8 +81,13 @@ class AttendanceImportService
      *
      * @return array{issue: ?Issue, resolution: ?Resolution}
      */
-    public static function classify(string $rawStatus, ?string $firstIn, ?string $lastOut, bool $employeeKnown): array
-    {
+    public static function classify(
+        string $rawStatus,
+        ?string $firstIn,
+        ?string $lastOut,
+        int $workedMinutes,
+        bool $employeeKnown,
+    ): array {
         if (! $employeeKnown) {
             return ['issue' => Issue::UnknownEmployee, 'resolution' => null];
         }
@@ -67,10 +95,10 @@ class AttendanceImportService
         $raw = strtolower(trim($rawStatus));
         $in = $firstIn !== null && trim($firstIn) !== '';
         $out = $lastOut !== null && trim($lastOut) !== '';
+        $weekOff = in_array($raw, ['week off', 'weekoff', 'wo'], true);
 
-        if (in_array($raw, ['week off', 'weekoff', 'wo'], true)) {
-            return ['issue' => null, 'resolution' => Resolution::WeekOff];
-        }
+        // A missing punch is asked about before anything else: without both
+        // ends of the day there are no hours to judge.
         if ($in && ! $out) {
             return ['issue' => Issue::InNoOut, 'resolution' => null];
         }
@@ -78,10 +106,39 @@ class AttendanceImportService
             return ['issue' => Issue::OutNoIn, 'resolution' => null];
         }
         if (! $in && ! $out) {
-            return ['issue' => Issue::NoPunch, 'resolution' => null];
+            return $weekOff
+                ? ['issue' => null, 'resolution' => Resolution::WeekOff]
+                : ['issue' => Issue::NoPunch, 'resolution' => null];
         }
 
-        return ['issue' => null, 'resolution' => $raw === 'hd' ? Resolution::HalfDay : Resolution::Present];
+        // An in and an out at the SAME MINUTE is a broken pair, whatever
+        // hours the app then credited against it. One such day in July
+        // 2026 carried 7h30m against two identical punches.
+        if (trim((string) $firstIn) === trim((string) $lastOut)) {
+            return ['issue' => Issue::HoursUnclear, 'resolution' => null];
+        }
+
+        // Both punches are here, so the CLOCK decides — never the app's
+        // Full/Half label (DEC-20260903-005).
+        if ($workedMinutes >= self::FULL_DAY_MINUTES && $workedMinutes <= self::IMPLAUSIBLE_MINUTES) {
+            return $weekOff
+                ? ['issue' => Issue::WorkedOnWeekOff, 'resolution' => null]
+                : ['issue' => null, 'resolution' => Resolution::Present];
+        }
+
+        if ($workedMinutes >= self::HALF_DAY_MINUTES && $workedMinutes <= self::IMPLAUSIBLE_MINUTES) {
+            return $weekOff
+                ? ['issue' => Issue::WorkedOnWeekOff, 'resolution' => null]
+                : ['issue' => null, 'resolution' => Resolution::HalfDay];
+        }
+
+        // Under half a shift, or a length no shift can be. A week off with
+        // a few minutes on it stays a week off: nobody worked it.
+        if ($weekOff && $workedMinutes < self::HALF_DAY_MINUTES) {
+            return ['issue' => null, 'resolution' => Resolution::WeekOff];
+        }
+
+        return ['issue' => Issue::HoursUnclear, 'resolution' => null];
     }
 
     // ---- runs --------------------------------------------------------------------
@@ -169,7 +226,8 @@ class AttendanceImportService
 
                 $firstIn = $this->time($day['first_in'] ?? null);
                 $lastOut = $this->time($day['last_out'] ?? null);
-                $verdict = self::classify((string) $day['status'], $firstIn, $lastOut, $employeeId !== null);
+                $workedMinutes = (int) ($day['worked_minutes'] ?? 0);
+                $verdict = self::classify((string) $day['status'], $firstIn, $lastOut, $workedMinutes, $employeeId !== null);
 
                 $rows[] = [
                     'employee_id' => $employeeId,
@@ -182,7 +240,7 @@ class AttendanceImportService
                     'ot_minutes' => (int) ($day['ot_minutes'] ?? 0),
                     'late_minutes' => (int) ($day['late_minutes'] ?? 0),
                     'early_minutes' => (int) ($day['early_minutes'] ?? 0),
-                    'worked_minutes' => (int) ($day['worked_minutes'] ?? 0),
+                    'worked_minutes' => $workedMinutes,
                     'issue' => $verdict['issue']?->value,
                     'resolution' => $verdict['resolution']?->value,
                     'resolved_check_in' => $verdict['resolution'] === null ? null : $firstIn,
@@ -465,6 +523,69 @@ class AttendanceImportService
     }
 
     /**
+     * RE-JUDGE A RUN under the current rule, for the days NOBODY HAS
+     * ANSWERED.
+     *
+     * The July 2026 month was imported while the code read the punch app's
+     * Full / Half label, so 245 days went in as half days that the clock
+     * says were whole shifts. The rule changed (DEC-20260903-005) and the
+     * month should not have to be uploaded again to benefit from it.
+     *
+     * A day a PERSON answered is never touched — `resolved_by` is the
+     * mark of a human decision, and re-judging is not allowed to overrule
+     * one. An APPLIED run is refused outright: those days are already in
+     * `attendances`, and moving them belongs on the Attendance screen
+     * where the change is visible, not behind a re-check button.
+     *
+     * @return array{changed: int, checked: int}
+     */
+    public function recheck(AttendanceImport $import): array
+    {
+        if ($import->status === AttendanceImportStatus::Applied) {
+            throw ValidationException::withMessages([
+                'status' => 'This run has been applied, so its days are already attendance. Change those on the Attendance screen.',
+            ]);
+        }
+
+        $changed = 0;
+        $checked = 0;
+
+        DB::transaction(function () use ($import, &$changed, &$checked) {
+            $import->lines()
+                ->whereNull('resolved_by')
+                ->orderBy('id')
+                ->chunkById(self::RESOLVE_CHUNK, function ($lines) use (&$changed, &$checked) {
+                    foreach ($lines as $line) {
+                        $checked++;
+                        $verdict = self::classify(
+                            $line->raw_status,
+                            $line->first_in,
+                            $line->last_out,
+                            (int) $line->worked_minutes,
+                            $line->employee_id !== null,
+                        );
+
+                        $wasIssue = $line->issue?->value;
+                        $wasResolution = $line->resolution?->value;
+                        if ($wasIssue === $verdict['issue']?->value && $wasResolution === $verdict['resolution']?->value) {
+                            continue;
+                        }
+
+                        $line->fill([
+                            'issue' => $verdict['issue'],
+                            'resolution' => $verdict['resolution'],
+                            'resolved_check_in' => $verdict['resolution'] === null ? null : $line->first_in,
+                            'resolved_check_out' => $verdict['resolution'] === null ? null : $line->last_out,
+                        ])->save();
+                        $changed++;
+                    }
+                });
+        });
+
+        return ['changed' => $changed, 'checked' => $checked];
+    }
+
+    /**
      * The write behind both resolve() and resolveMany(), without the
      * transaction so the bulk path can hold one for the whole sweep. A
      * time the caller did not give falls back to what the report printed.
@@ -572,7 +693,7 @@ class AttendanceImportService
             return $line;
         }
 
-        $verdict = self::classify($line->raw_status, $line->first_in, $line->last_out, true);
+        $verdict = self::classify($line->raw_status, $line->first_in, $line->last_out, (int) $line->worked_minutes, true);
         $line->fill([
             'employee_id' => $employee->id,
             'issue' => $verdict['issue'],

@@ -84,6 +84,8 @@ export const ATTENDANCE_IMPORT_LINE_FILTERS: readonly AttendanceImportLineFilter
     'out_no_in',
     'no_punch',
     'unknown_employee',
+    'hours_unclear',
+    'worked_on_week_off',
     'resolved',
     'clean',
 ];
@@ -101,6 +103,8 @@ export const ISSUE_LABELS: Record<AttendanceImportIssue, string> = {
     out_no_in: 'Out without In',
     no_punch: 'No punch',
     unknown_employee: 'Unknown employee',
+    hours_unclear: 'Hours do not add up',
+    worked_on_week_off: 'Worked on a week off',
 };
 
 export const RESOLUTION_LABELS: Record<AttendanceImportResolution, string> = {
@@ -128,6 +132,8 @@ export function lineFilterChips(
         { value: 'out_no_in', label: `${ISSUE_LABELS.out_no_in}${n('out_no_in')}` },
         { value: 'no_punch', label: `${ISSUE_LABELS.no_punch}${n('no_punch')}` },
         { value: 'unknown_employee', label: `${ISSUE_LABELS.unknown_employee}${n('unknown_employee')}` },
+        { value: 'hours_unclear', label: `${ISSUE_LABELS.hours_unclear}${n('hours_unclear')}` },
+        { value: 'worked_on_week_off', label: `${ISSUE_LABELS.worked_on_week_off}${n('worked_on_week_off')}` },
         { value: 'resolved', label: `Resolved${n('resolved')}` },
         { value: 'clean', label: `Clean${n('clean')}` },
     ];
@@ -141,6 +147,8 @@ export function lineFilterChips(
 export function defaultResolution(line: Pick<AttendanceImportLine, 'issue' | 'resolution'>): AttendanceImportResolution {
     if (line.resolution) return line.resolution;
 
+    // A day nobody punched opens on Absent; a week off somebody worked
+    // opens on Present, since they were here; everything else on Present.
     return line.issue === 'no_punch' ? 'absent' : 'present';
 }
 

@@ -57,9 +57,21 @@ class AttendanceImportReviewTest extends TestCase
     }
 
     /** @return array<string, mixed> */
-    private function day(string $date, string $status, ?string $in, ?string $out): array
+    /**
+     * A day as the report prints it. `worked_minutes` defaults to a full
+     * eight-hour shift when both punches are there, because that is what a
+     * worked day looks like and the classifier now judges by the clock
+     * (DEC-20260903-005).
+     */
+    private function day(string $date, string $status, ?string $in, ?string $out, ?int $workedMinutes = null): array
     {
-        return ['date' => $date, 'status' => $status, 'first_in' => $in, 'last_out' => $out];
+        return [
+            'date' => $date,
+            'status' => $status,
+            'first_in' => $in,
+            'last_out' => $out,
+            'worked_minutes' => $workedMinutes ?? ($in !== null && $out !== null ? 480 : 0),
+        ];
     }
 
     /**
@@ -295,6 +307,63 @@ class AttendanceImportReviewTest extends TestCase
         $this->postJson("/api/v1/hrms/attendance-imports/{$import->id}/lines/bulk-resolve", [
             'issue' => 'no_punch', 'resolution' => 'absent',
         ])->assertForbidden();
+    }
+
+    // ---- re-judging a run under the hours rule ---------------------------
+
+    public function test_rechecking_hours_rejudges_the_days_nobody_has_answered(): void
+    {
+        $this->actAs();
+
+        // A shift that clocked out at 7h50m: the report called it a half
+        // day, the clock says it was the shift (DEC-20260903-005).
+        $this->postJson('/api/v1/hrms/attendance-imports', [
+            'period_from' => '2026-07-01',
+            'period_to' => '2026-07-02',
+            'source' => 'pooja',
+            'employees' => [[
+                'employee_code' => 'SPP-01', 'name' => 'ANAND',
+                'days' => [
+                    $this->day('2026-07-01', 'HD', '06:25', '14:13', 470),
+                    $this->day('2026-07-02', 'HD', '10:00', '14:00', 240),
+                ],
+            ]],
+        ])->assertCreated();
+        $import = AttendanceImport::query()->latest('id')->firstOrFail();
+
+        // Pretend the month was imported under the old label-reading rule.
+        AttendanceImportLine::query()->where('attendance_import_id', $import->id)
+            ->update(['resolution' => 'half_day', 'issue' => null]);
+
+        $response = $this->postJson("/api/v1/hrms/attendance-imports/{$import->id}/recheck")->assertOk();
+
+        $this->assertSame(1, $response->json('changed'));
+        $lines = AttendanceImportLine::query()->where('attendance_import_id', $import->id)->orderBy('date')->get();
+        $this->assertSame('present', $lines[0]->resolution->value);
+        $this->assertSame('half_day', $lines[1]->resolution->value);
+    }
+
+    public function test_rechecking_never_overwrites_a_day_a_person_answered(): void
+    {
+        $this->actAs();
+        $import = $this->upload();
+
+        $line = AttendanceImportLine::query()->where('attendance_import_id', $import->id)
+            ->where('issue', 'no_punch')->orderBy('id')->firstOrFail();
+        $this->patchJson("/api/v1/hrms/attendance-imports/{$import->id}/lines/{$line->id}", ['resolution' => 'on_leave'])->assertOk();
+
+        $this->postJson("/api/v1/hrms/attendance-imports/{$import->id}/recheck")->assertOk();
+
+        $this->assertSame('on_leave', $line->fresh()->resolution->value);
+    }
+
+    public function test_an_applied_run_is_not_rejudged(): void
+    {
+        $this->actAs();
+        $import = $this->upload();
+        $import->update(['status' => 'applied', 'applied_at' => now()]);
+
+        $this->postJson("/api/v1/hrms/attendance-imports/{$import->id}/recheck")->assertUnprocessable();
     }
 
     public function test_an_applied_run_takes_no_further_bulk_answer(): void

@@ -76,7 +76,13 @@ export interface Attendance {
 
 export type AttendanceImportStatus = 'review' | 'applied';
 
-export type AttendanceImportIssue = 'in_no_out' | 'out_no_in' | 'no_punch' | 'unknown_employee';
+export type AttendanceImportIssue =
+    | 'in_no_out'
+    | 'out_no_in'
+    | 'no_punch'
+    | 'unknown_employee'
+    | 'hours_unclear'
+    | 'worked_on_week_off';
 
 /** The four attendance statuses plus week_off, which stays on the line. */
 export type AttendanceImportResolution = AttendanceStatus | 'week_off';
@@ -88,6 +94,8 @@ export interface AttendanceImportCounts {
     out_no_in: number;
     no_punch: number;
     unknown_employee: number;
+    hours_unclear: number;
+    worked_on_week_off: number;
     resolved: number;
     clean: number;
 }

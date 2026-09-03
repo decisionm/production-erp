@@ -19,6 +19,8 @@ const counts = (over: Partial<AttendanceImportCounts> = {}): AttendanceImportCou
     out_no_in: 0,
     no_punch: 0,
     unknown_employee: 0,
+    hours_unclear: 0,
+    worked_on_week_off: 0,
     ...over,
 });
 
