@@ -1347,29 +1347,86 @@ class StoreIssueService
         $holding = StockBalance::query()
             ->where('item_id', $itemId)
             ->where('quantity', '>', 0)
-            ->limit(3)
             ->get();
 
         // Production/WIP is not a candidate to issue FROM — material already
-        // standing with production is not the store's to hand over again —
-        // but it is excluded here rather than in SQL so that "the only place
-        // holding this is Production/WIP itself" gets its own plain answer
-        // instead of reading as "no store has any".
-        $candidates = $holding->where('warehouse_id', '!=', $wip->id)->values();
+        // standing with production is not the store's to hand over again.
+        $offWip = $holding->where('warehouse_id', '!=', $wip->id)->values();
+
+        // ONLY A STORE SOMEBODY COULD PICK IS A CANDIDATE, and this filter is
+        // the whole of a live defect. The factory carries balances in RETIRED
+        // locations — DISPATCH-BAY held 360 Kgs. of Pet Resin, left from the
+        // rehearsal era and classified MIXED by PreviewWarehouseStockRecovery,
+        // which withholds exactly those rows because moving them would credit
+        // the Store with material the factory never received. Counting that
+        // row as a second "store" turned an unambiguous handover into
+        // "Several stores hold this material — name the one it is coming out
+        // of", on a screen with no field to name one: resin could not be
+        // issued at all.
+        //
+        // PICKABLE IS is_active AND NOT TRASHED — the same test
+        // PreviewWarehouseStockRecovery applies, and Warehouse's SoftDeletes
+        // scope supplies the second half. The two must agree: a location this
+        // method issues from while that report calls its stock stranded is
+        // the contradiction that produced the dead end.
+        //
+        // NOT A SHORTCUT PAST is_active EITHER WAY: Production/WIP is itself
+        // an INACTIVE row on live (DEC-20260830-002 — a stock state, not a
+        // second building), which is why it is taken out above by identity
+        // and never by this filter.
+        $names = Warehouse::query()
+            ->whereIn('id', $offWip->pluck('warehouse_id')->unique()->all())
+            ->where('is_active', true)
+            ->pluck('name', 'id');
+
+        $candidates = $offWip->filter(fn ($balance) => $names->has((int) $balance->warehouse_id))->values();
 
         if ($candidates->count() === 1) {
             return (int) $candidates->first()->warehouse_id;
         }
 
-        if ($candidates->isEmpty() && $holding->isNotEmpty()) {
+        // Nothing anywhere but Production/WIP itself. Its own plain answer,
+        // rather than "no store has any".
+        if ($offWip->isEmpty() && $holding->isNotEmpty()) {
             $this->assertNotIntoItself($wip->id, $wip, $field);
         }
 
+        if ($candidates->count() > 1) {
+            throw ValidationException::withMessages([
+                // NAMED, not counted. "Several stores" told the storekeeper
+                // nothing they could act on; the stores themselves are the one
+                // fact that makes the question answerable.
+                $field => sprintf(
+                    'This material is held in more than one store (%s) — name the one it is coming out of.',
+                    $candidates
+                        ->map(fn ($balance) => (string) $names->get((int) $balance->warehouse_id))
+                        ->unique()->sort()->values()->implode(', '),
+                ),
+            ]);
+        }
+
+        // Held, but only in locations no picker offers. Saying "no store holds
+        // this" would send the storekeeper to look for material the balance
+        // says is there; the honest answer names where it is standing and
+        // why that is not an answer.
+        if ($offWip->isNotEmpty()) {
+            $retired = Warehouse::withTrashed()
+                ->whereIn('id', $offWip->pluck('warehouse_id')->unique()->all())
+                ->pluck('name', 'id');
+
+            throw ValidationException::withMessages([
+                $field => sprintf(
+                    'This material is only recorded in %s, which no longer offers stock for issue. Move it into a '
+                    .'live store first, or name the store this is coming out of.',
+                    $offWip->map(fn ($balance) => (string) $retired->get((int) $balance->warehouse_id, 'a retired location'))
+                        ->unique()->sort()->values()->implode(', '),
+                ),
+            ]);
+        }
+
         throw ValidationException::withMessages([
-            $field => $candidates->isEmpty()
-                ? 'No store is recorded as holding this material, so there is nothing to issue. Check the stock '
-                    .'balance, or name the store this is coming out of.'
-                : 'Several stores hold this material — name the one it is coming out of.',
+            $field => 'No store is recorded as holding this material, so there is nothing to issue. Check the stock '
+                .'balance, or name the store this is coming out of.',
         ]);
     }
 
