@@ -5822,7 +5822,7 @@ export default function ShiftProductionEntryPage() {
                                             style={{
                                                 padding: '6px 8px',
                                                 borderRadius: 6,
-                                                background: '#fafafa',
+                                                background: 'var(--app-inset)',
                                             }}
                                         >
                                             <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
@@ -6023,7 +6023,7 @@ export default function ShiftProductionEntryPage() {
                 buttons in a bare <Space>, floating between the grid and the
                 table with nothing to say they belonged together or what they
                 applied to. */}
-            <Card size="small" style={{ marginBottom: 32, background: '#fafafa' }} styles={{ body: { padding: 12 } }}>
+            <Card size="small" style={{ marginBottom: 32, background: 'var(--app-inset)' }} styles={{ body: { padding: 12 } }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
                     <Typography.Text type="secondary" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.6, marginInlineEnd: 4 }}>
                         Floor actions

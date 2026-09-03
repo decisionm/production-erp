@@ -157,7 +157,7 @@ export default function AgentTokensPage() {
                     copyable={{ text: issuedToken ?? '' }}
                     style={{
                         fontFamily: 'monospace',
-                        background: '#f5f5f5',
+                        background: 'var(--app-inset)',
                         padding: 12,
                         borderRadius: 4,
                         wordBreak: 'break-all',

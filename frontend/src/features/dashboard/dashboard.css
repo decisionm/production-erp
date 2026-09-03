@@ -22,6 +22,10 @@
     --dash-hold: #ad6800;
     --dash-stop: #cf1322;
     --dash-mono: var(--brand-font);
+    /* The current shift is a SOLID fill. Its own two values, because "ink as
+       the fill, white on top" cannot survive a mode where ink is near-white. */
+    --dash-active-bg: var(--dash-ink);
+    --dash-active-fg: #ffffff;
     color: var(--dash-ink);
 }
 
@@ -106,8 +110,8 @@
 }
 
 .dash-shiftseg.is-active {
-    background: var(--dash-ink);
-    color: #fff;
+    background: var(--dash-active-bg);
+    color: var(--dash-active-fg);
 }
 
 .dash-shiftseg-name {
@@ -488,4 +492,33 @@
 
 .dash-recent {
     margin-top: 12px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dark mode (03-Sep-2026, owner: the dashboard in dark is "pathetic"). */
+/*                                                                      */
+/* Every value above is a LIGHT value, and this sheet is scoped to      */
+/* .dash, so none of it followed the app's theme: the machine names and */
+/* the production date are near-black navy (--dash-ink) painted on a    */
+/* dark page, and the day-bin faceplate is literally #ffffff — the      */
+/* white patch. The whole palette is restated here, nothing else about  */
+/* the resin-path design changes.                                       */
+/*                                                                      */
+/* The three state colours are lifted the same way the machine cards'   */
+/* are (features/production/machineStateStyle.tsx), so running means    */
+/* one green on both screens.                                           */
+/* ------------------------------------------------------------------ */
+
+:root[data-theme='dark'] .dash {
+    --dash-ink: #e9edf7;
+    --dash-steel: #afb9d0;
+    --dash-hairline: #2a3450;
+    --dash-panel: #171f33;
+    --dash-run: #35b06b;
+    --dash-hold: #e8a72b;
+    --dash-stop: #e8604b;
+    /* A lifted navy rather than the near-white ink: white on it reads at
+       10:1, and the current shift still looks filled in rather than outlined. */
+    --dash-active-bg: #30406f;
+    --dash-active-fg: #ffffff;
 }
