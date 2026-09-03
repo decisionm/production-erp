@@ -129,7 +129,10 @@ export default function ClientOutstandingPage() {
     const [importOutcome, setImportOutcome] = useState<OutstandingImportOutcome | null>(null);
 
     const importPosition = useMutation({
-        mutationFn: importClientOutstanding,
+        // Wrapped, not passed by reference: useMutation calls mutationFn with a
+        // second argument (its context), which would land in this function's
+        // optional `asOf` and file the position under an object.
+        mutationFn: (file: File) => importClientOutstanding(file),
         onSuccess: async (result) => {
             setImportOutcome(outstandingImportOutcome(result));
 
@@ -414,7 +417,16 @@ export default function ClientOutstandingPage() {
                     type="warning"
                     showIcon
                     title="No outstanding position has been pulled from Tally yet"
-                    description="Ask the operator to press “Pull Outstandings from Tally” in the Tally Sync Agent tray on the factory PC. Until then this page has nothing to show — it does not fall back to the ERP's own invoices, which would report a fraction of the real position as the whole of it."
+                    // The sentence that used to sit here sent the reader to the
+                    // factory PC to press the tray button. It was written when
+                    // that was the only road, and the Import control above is
+                    // here precisely BECAUSE that road can be closed — a dark
+                    // machine is the likeliest reason anyone is reading this.
+                    // Pointing at it was the one instruction guaranteed not to
+                    // work. Replaced with nothing rather than with a sentence
+                    // about the button: the control is right there, and this
+                    // page does not explain its own buttons.
+                    description="This page has nothing to show yet. It does not fall back to the ERP's own invoices, which would report a fraction of the real position as the whole of it."
                 />
             )}
 
