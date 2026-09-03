@@ -18,7 +18,6 @@ const everything: Counts = {
     pm: 2,
     accounts: 1,
     requisitions: 4,
-    deliveries: 3,
     ncrs: 1,
     tally: 0,
 };
@@ -44,6 +43,20 @@ describe('membership comes from the counts, never from the role name', () => {
 
     it('shows nothing rather than an empty frame when no count arrived', () => {
         expect(waitingOnYou({})).toEqual([]);
+    });
+
+    /*
+     * A COUNT WITH NOWHERE HONEST TO GO IS NOT A TILE. `orders_awaiting_
+     * delivery` is the obvious "to dispatch" figure and the Office band
+     * already prints it — but it counts SALES ORDERS, and no list page can
+     * open exactly those rows: /sales/deliveries shows dispatches already
+     * made, and /sales/sales-orders cannot express the status pair in its
+     * URL. Offering it anyway would teach the floor that a tile's number and
+     * the page behind it need not agree, which is the one thing this strip
+     * cannot afford.
+     */
+    it('ignores a count no tile can honestly open', () => {
+        expect(waitingOnYou({ deliveries: 3 })).toEqual([]);
     });
 });
 
@@ -79,7 +92,7 @@ describe('colour is the only signal besides the number', () => {
         const byKey = Object.fromEntries(waitingOnYou(everything).map((t) => [t.key, t.tone]));
 
         expect(byKey.issue).toBe('act');
-        expect(byKey.deliveries).toBe('wait');
+        expect(byKey.accounts).toBe('wait');
         // Zero outranks the spec's tone — nothing is owed, so nothing is red.
         expect(byKey.tally).toBe('calm');
     });

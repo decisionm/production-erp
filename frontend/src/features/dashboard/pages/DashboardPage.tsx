@@ -322,7 +322,6 @@ export default function DashboardPage() {
         }),
         ...(canProduction && { pm: pmCount, accounts: accountsCount }),
         ...(summary?.procurement && { requisitions: summary.procurement.pending_requisitions }),
-        ...(summary?.sales && { deliveries: summary.sales.orders_awaiting_delivery }),
         ...(summary?.quality && { ncrs: summary.quality.open_ncrs }),
         ...(canTally && { tally: tallyFailed }),
     };

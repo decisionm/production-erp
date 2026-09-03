@@ -99,12 +99,22 @@ const CATALOGUE: readonly TileSpec[] = [
         to: '/procurement/purchase-requisitions',
         tone: 'act',
     },
-    {
-        key: 'deliveries',
-        label: 'To dispatch',
-        to: '/sales/deliveries',
-        tone: 'wait',
-    },
+    /*
+     * NO "TO DISPATCH" TILE, AND IT IS NOT AN OVERSIGHT.
+     *
+     * The obvious figure for it is `sales.orders_awaiting_delivery`, which the
+     * Office band already prints. But DeliveryService::pendingCount() counts
+     * SALES ORDERS in confirmed/partially_delivered — a Delivery row has no
+     * status, because one only ever represents stock that has already gone
+     * out — so the rows behind that number are ORDERS. /sales/deliveries would
+     * open a list of dispatches already made, and /sales/sales-orders cannot
+     * express "confirmed or partially delivered" in its URL at all.
+     *
+     * A tile whose number and destination disagree is worse than no tile: it
+     * teaches the floor that the figures do not mean anything. Sales' queue is
+     * one of the five Q99 asks about, so this waits for that answer rather
+     * than shipping a link that lands somewhere else.
+     */
     {
         key: 'ncrs',
         label: 'Open NCRs',
@@ -131,7 +141,7 @@ export const DEFAULT_ORDER: readonly string[] = CATALOGUE.map((tile) => tile.key
  * role an administrator creates on live — falls through to DEFAULT_ORDER.
  */
 const ROLE_FIRST: Readonly<Record<string, readonly string[]>> = {
-    Store: ['issue', 'fulfil', 'deliveries', 'requisitions'],
+    Store: ['issue', 'fulfil', 'requisitions'],
     'Plant Manager': ['pm', 'issue', 'fulfil'],
     Accounts: ['accounts', 'requisitions', 'tally'],
     Administrator: [],
