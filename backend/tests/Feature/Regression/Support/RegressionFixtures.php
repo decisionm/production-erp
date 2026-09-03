@@ -81,6 +81,7 @@ use App\Modules\Quality\Models\NonConformanceReport;
 use App\Modules\Quality\Models\SpcCharacteristic;
 use App\Modules\Sales\Models\Customer;
 use App\Modules\Sales\Models\Delivery;
+use App\Modules\Sales\Models\Enums\InvoiceStatus;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\Invoice;
 use App\Modules\Sales\Models\SalesOrder;
@@ -249,12 +250,22 @@ trait RegressionFixtures
         ])->assertSuccessful()->json('data.id');
         $delivery = Delivery::findOrFail($deliveryId);
 
-        $invoiceId = $this->postJson('/api/v1/sales/invoices', [
+        // An invoice as HISTORY. The ERP raises none any more
+        // (DEC-20260903-004) and the API-surface smoke test still has to be
+        // able to READ one, so the row is written through the models — which
+        // is exactly the shape of every invoice left on live.
+        $invoice = Invoice::create([
             'sales_order_id' => $order->id,
+            'customer_id' => $order->customer_id,
+            'status' => InvoiceStatus::Draft,
             'invoice_date' => '2026-08-13',
-            'lines' => [['sales_order_line_id' => $line->id, 'quantity' => '100', 'unit_price' => '1.00']],
-        ])->assertSuccessful()->json('data.id');
-        $invoice = Invoice::findOrFail($invoiceId);
+        ]);
+        $invoice->lines()->create([
+            'sales_order_line_id' => $line->id,
+            'item_id' => $line->item_id,
+            'quantity' => '100',
+            'unit_price' => '1.00',
+        ]);
 
         // ---- Production ---------------------------------------------------
         $shift = Shift::create(['name' => 'Regression Day', 'start_time' => '06:00', 'end_time' => '14:00', 'is_active' => true]);

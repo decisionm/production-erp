@@ -193,23 +193,12 @@ export async function getInvoice(id: number): Promise<Invoice> {
     return unwrapShowResponse(data) as Invoice;
 }
 
-export interface CreateInvoicePayload {
-    sales_order_id: number;
-    invoice_date: string;
-    due_date?: string;
-    notes?: string;
-    lines: { sales_order_line_id: number; quantity: number; unit_price: number }[];
-}
-
-export async function createInvoice(payload: CreateInvoicePayload): Promise<Invoice> {
-    const { data } = await api.post<{ data: Invoice }>('/sales/invoices', payload);
-    return data.data;
-}
-
-export async function issueInvoice(id: number): Promise<Invoice> {
-    const { data } = await api.post<{ data: Invoice }>(`/sales/invoices/${id}/issue`);
-    return data.data;
-}
+// createInvoice() and issueInvoice() stood here and are GONE with the routes
+// behind them: the ERP's own sales invoice is retired (DEC-20260903-004).
+// Tally originates the invoice, the e-invoice and the IRN
+// (DEC-20260831-012) and the ERP imports and matches that voucher
+// (DEC-20260902-046). The reads above stay — the rows already written are
+// still listed and opened — and no proforma writer replaces these.
 
 /**
  * WHAT THE DESK MAY PROMISE, for the items on the order being typed.

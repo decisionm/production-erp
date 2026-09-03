@@ -18,6 +18,7 @@ use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Tests\Support\SeedsSalesTallyMasterData;
+use Tests\Support\WritesInvoiceHistory;
 use Tests\TestCase;
 
 /**
@@ -48,6 +49,7 @@ class TallyMirrorHonestyTest extends TestCase
 {
     use RefreshDatabase;
     use SeedsSalesTallyMasterData;
+    use WritesInvoiceHistory;
 
     private const URL = '/api/v1/sales/tally-mirror';
 
@@ -140,18 +142,17 @@ class TallyMirrorHonestyTest extends TestCase
         $bottle = Item::create(['sku' => 'BTL-500', 'name' => '500ml PET Bottle', 'uom' => 'Nos', 'tally_stock_item_guid' => 'itm-bottle']);
         $customer = Customer::create(['code' => 'CUST-1', 'name' => 'Aqua Traders', 'gstin' => '33AAACA1111A1Z5']);
         $order = SalesOrder::create(['customer_id' => $customer->id, 'status' => SalesOrderStatus::Confirmed, 'order_date' => '2026-08-09']);
-        $line = $order->lines()->create(['item_id' => $bottle->id, 'quantity' => '2000', 'unit_price' => '4.50', 'quantity_delivered' => 0]);
+        $order->lines()->create(['item_id' => $bottle->id, 'quantity' => '2000', 'unit_price' => '4.50', 'quantity_delivered' => 0]);
         // The item and the customer are minted HERE, after setUp's seeding ran,
         // so complete them — an HSN with a rate behind it, the customer's Tally
         // ledger name and state — before the voucher is assembled. Neither the
         // GSTIN nor anything else set above is overwritten.
         $this->completeSalesTallyMastersOnExistingRows();
-        $invoiceId = $this->postJson('/api/v1/sales/invoices', [
-            'sales_order_id' => $order->id,
-            'invoice_date' => '2026-08-10',
-            'lines' => [['sales_order_line_id' => $line->id, 'quantity' => '2000', 'unit_price' => '4.50']],
-        ])->assertSuccessful()->json('data.id');
-        $this->postJson("/api/v1/sales/invoices/{$invoiceId}/issue")->assertSuccessful()->assertJsonPath('data.status', 'issued');
+        // An ERP invoice as HISTORY, issued through the transition the Tally
+        // listener watches: the ERP raises no new invoice (DEC-20260903-004),
+        // and this test is about what the MIRROR says when such a row and its
+        // queued voucher exist — which the rows already on live still do.
+        $this->issuedInvoiceHistory($order->fresh('lines'), '2000', null, '2026-08-10');
         $entry = TallySyncEntry::query()->sole();
 
         $this->assertHonest($this->body($this->getJson(self::URL)));

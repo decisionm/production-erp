@@ -690,8 +690,21 @@ Route::prefix('v1')->group(function () {
             // only where an approved batch really stands behind it. Read-only.
             Route::get('sales-orders/{sales_order}/cost-insight', [SalesCostInsightController::class, 'show']);
 
-            Route::apiResource('invoices', InvoiceController::class)->only(['index', 'store', 'show']);
-            Route::post('invoices/{invoice}/issue', [InvoiceController::class, 'issue']);
+            // INVOICES — READ ONLY, and retired (DEC-20260903-004).
+            //
+            // Tally originates the sales invoice, the e-invoice and the IRN
+            // (DEC-20260831-012); the ERP imports that voucher and matches it
+            // to a confirmed order (DEC-20260902-046). So the ERP raises no
+            // invoice of its own and there is no `store` and no `issue` here
+            // any more, and no proforma replaces them (DEC-20260902-052 puts
+            // quotations out of scope).
+            //
+            // The rows already written stay exactly as they are — listable,
+            // readable, on the order's trace, never edited or deleted — which
+            // is why index and show survive rather than the whole resource
+            // going. The GST breakdown read under `compliance` reads the same
+            // history and survives with them.
+            Route::apiResource('invoices', InvoiceController::class)->only(['index', 'show']);
         });
 
         /*

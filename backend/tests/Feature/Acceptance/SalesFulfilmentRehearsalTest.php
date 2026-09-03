@@ -9,11 +9,13 @@ use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Sales\Models\Customer;
+use App\Modules\Sales\Models\SalesOrder;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Tests\Support\SeedsSalesTallyMasterData;
+use Tests\Support\WritesInvoiceHistory;
 use Tests\TestCase;
 
 /**
@@ -43,6 +45,7 @@ class SalesFulfilmentRehearsalTest extends TestCase
 {
     use RefreshDatabase;
     use SeedsSalesTallyMasterData;
+    use WritesInvoiceHistory;
 
     public function test_the_whole_chain_walks_and_each_step_names_the_next_actor(): void
     {
@@ -152,20 +155,19 @@ class SalesFulfilmentRehearsalTest extends TestCase
         $this->assertCount(1, $issues, 'a dispatch writes ONE issue movement, never two');
         $this->assertSame('600.0000', (string) $issues->first()->quantity);
 
-        // ---- 6. SALES bills it ---------------------------------------------
-        // The invoice is Sales' act and stays Sales': only the DISPATCH moved
-        // to the Store (DEC-20260901-005). A store login is refused here.
-        $this->postJson('/api/v1/sales/invoices', [])->assertForbidden();
+        // ---- 6. THE BILL ---------------------------------------------------
+        // The ERP no longer raises one (DEC-20260903-004): Tally originates
+        // the sales invoice and the ERP imports and matches it. The rehearsal
+        // keeps the step because the FIGURE the fulfilment desk reads is
+        // computed from invoice rows, and those rows still exist — so the row
+        // is written as history and the desk is read exactly as before. A
+        // store login is refused the Sales READ, which is what is left of
+        // "the invoice is Sales' and stays Sales'" (DEC-20260901-005).
+        $this->getJson('/api/v1/sales/invoices')->assertForbidden();
 
         $this->actingWith(['sales.view', 'sales.manage']);
 
-        $invoiceId = $this->postJson('/api/v1/sales/invoices', [
-            'sales_order_id' => $orderId,
-            'invoice_date' => '2026-08-31',
-            'lines' => [['sales_order_line_id' => $lineId, 'quantity' => '600', 'unit_price' => '4.50']],
-        ])->assertSuccessful()->json('data.id');
-
-        $this->postJson("/api/v1/sales/invoices/{$invoiceId}/issue")->assertSuccessful();
+        $this->issuedInvoiceHistory(SalesOrder::findOrFail($orderId), '600', null, '2026-08-31');
 
         $row = $this->getJson('/api/v1/sales/fulfilment-control')->assertOk()->json('data.0');
         $this->assertSame('600.0000', $row['invoiced']);
@@ -235,15 +237,12 @@ class SalesFulfilmentRehearsalTest extends TestCase
 
         $this->actingWith(['sales.view', 'sales.manage']);
 
-        $invoiceId = $this->postJson('/api/v1/sales/invoices', [
-            'sales_order_id' => $orderId,
-            'invoice_date' => '2026-08-31',
-            'lines' => [['sales_order_line_id' => $lineId, 'quantity' => '100', 'unit_price' => '4.50']],
-        ])->assertSuccessful()->json('data.id');
-
-        $this->postJson("/api/v1/sales/invoices/{$invoiceId}/issue")
-            ->assertSuccessful()
-            ->assertJsonPath('data.status', 'issued');
+        // An issued invoice as history (DEC-20260903-004) — this test's point
+        // is that on the SHIPPED defaults the whole chain stages nothing for
+        // Tally, and an issued invoice is the one step that would, so it has
+        // to be reached the way it can still be reached: the transition the
+        // staging listener watches.
+        $this->issuedInvoiceHistory(SalesOrder::findOrFail($orderId), '100', null, '2026-08-31');
 
         $this->assertSame(
             0,

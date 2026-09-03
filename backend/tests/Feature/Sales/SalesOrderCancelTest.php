@@ -10,6 +10,7 @@ use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Sales\Models\Customer;
 use App\Modules\Sales\Models\Delivery;
+use App\Modules\Sales\Models\Enums\InvoiceStatus;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\Invoice;
 use App\Modules\Sales\Models\SalesOrder;
@@ -19,6 +20,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Tests\Support\SeedsSalesTallyMasterData;
+use Tests\Support\WritesInvoiceHistory;
 use Tests\TestCase;
 
 /**
@@ -46,6 +48,7 @@ class SalesOrderCancelTest extends TestCase
 {
     use RefreshDatabase;
     use SeedsSalesTallyMasterData;
+    use WritesInvoiceHistory;
 
     private Item $bottle;
 
@@ -129,15 +132,6 @@ class SalesOrderCancelTest extends TestCase
             'warehouse_id' => $this->fg->id,
             'delivered_date' => '2026-08-11',
             'lines' => [['sales_order_line_id' => $order->lines->first()->id, 'quantity' => $quantity]],
-        ]);
-    }
-
-    private function invoice(SalesOrder $order, string $quantity)
-    {
-        return $this->postJson('/api/v1/sales/invoices', [
-            'sales_order_id' => $order->id,
-            'invoice_date' => '2026-08-12',
-            'lines' => [['sales_order_line_id' => $order->lines->first()->id, 'quantity' => $quantity, 'unit_price' => '4.50']],
         ]);
     }
 
@@ -242,15 +236,21 @@ class SalesOrderCancelTest extends TestCase
         // Confirmed, nothing delivered — the status alone would allow it —
         // but a DRAFT invoice already hangs off the order. An invoice is a
         // document someone may act on; the order underneath it stays.
+        // The invoice is HISTORY now — the ERP raises no new one
+        // (DEC-20260903-004) — but the rule this test protects is about an
+        // order that CARRIES one, and every invoice on live is such a row.
         $order = $this->confirmedOrder('2000');
-        $invoiceId = $this->invoice($order, '2000')->assertSuccessful()->assertJsonPath('data.status', 'draft')->json('data.id');
+        $invoice = $this->invoiceHistory($order, '2000');
 
         $this->assertRefusedTransition($order, SalesOrderStatus::Confirmed);
-        $this->assertSame('draft', Invoice::query()->findOrFail($invoiceId)->status->value, 'The refusal touches the invoice as little as the order');
+        $this->assertSame('draft', $invoice->fresh()->status->value, 'The refusal touches the invoice as little as the order');
 
         // Issued: refused all the same (and now a Sales voucher is queued
-        // that the cancel must not disturb).
-        $this->postJson("/api/v1/sales/invoices/{$invoiceId}/issue")->assertSuccessful()->assertJsonPath('data.status', 'issued');
+        // that the cancel must not disturb). Moved by the transition the
+        // Tally listener watches, since the endpoint that used to do it is
+        // withdrawn.
+        $invoice->update(['status' => InvoiceStatus::Issued]);
+        $this->assertSame('issued', $invoice->fresh()->status->value);
         $this->assertSame(1, TallySyncEntry::query()->count());
 
         $this->assertRefusedTransition($order, SalesOrderStatus::Confirmed);
@@ -276,10 +276,11 @@ class SalesOrderCancelTest extends TestCase
         $this->assertSame(0, Delivery::query()->count());
         $this->assertSame(0, StockMovement::query()->where('type', 'issue')->count());
 
-        // Invoice creation: refused (Phase 3.5 closes this door — a cancelled
-        // order must not grow a bill), and no draft is left behind.
-        $this->invoice($order, '100')->assertStatus(422);
-        $this->assertSame(0, Invoice::query()->count(), 'A refused invoice leaves no draft row');
+        // Invoice creation: the door is not merely closed for a cancelled
+        // order, it is gone for every order (DEC-20260903-004). Phase 3.5's
+        // 422 guard went with the writer; what is left to assert here is that
+        // no invoice can appear, which InvoiceRetiredTest proves in full.
+        $this->assertSame(0, Invoice::query()->count(), 'A cancelled order grows no bill, because nothing can write one');
 
         // Cancelling twice: cancelled is not draft or confirmed.
         $this->assertRefusedTransition($order, SalesOrderStatus::Cancelled);

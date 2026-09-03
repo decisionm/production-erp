@@ -12,7 +12,9 @@ use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
 use App\Modules\Sales\Models\Customer;
+use App\Modules\Sales\Models\Enums\InvoiceStatus;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
+use App\Modules\Sales\Models\Invoice;
 use App\Modules\Sales\Models\SalesOrder;
 use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\TallySyncService;
@@ -21,6 +23,7 @@ use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Tests\Support\SeedsSalesTallyMasterData;
+use Tests\Support\WritesInvoiceHistory;
 use Tests\TestCase;
 
 /**
@@ -54,6 +57,7 @@ class SalesDocumentShowTest extends TestCase
 {
     use RefreshDatabase;
     use SeedsSalesTallyMasterData;
+    use WritesInvoiceHistory;
 
     private const TALLY_LINK_KEYS = ['entry_id', 'voucher_type', 'status', 'voucher_number', 'synced_at', 'flags', 'link'];
 
@@ -103,9 +107,8 @@ class SalesDocumentShowTest extends TestCase
         // (300) — and two invoices: one issued (500), one still draft (200).
         $scanned = $this->dispatchByScan($order, ['20260802-M01-001-C01', '20260802-M01-001-C02'])->json('data');
         $typed = $this->dispatchTyped($order, '300')->json('data');
-        $issued = $this->invoice($order, '500', '2026-08-11')->json('data');
-        $this->postJson("/api/v1/sales/invoices/{$issued['id']}/issue")->assertSuccessful();
-        $draft = $this->invoice($order, '200', '2026-08-12')->json('data');
+        $issued = $this->issuedInvoiceHistory($order, '500', null, '2026-08-11');
+        $draft = $this->invoice($order, '200', '2026-08-12');
 
         $show = $this->getJson("/api/v1/sales/sales-orders/{$order->id}")->assertOk();
         $data = $show->json('data');
@@ -146,12 +149,12 @@ class SalesDocumentShowTest extends TestCase
         // --- trace.invoices: the issued one carries a Sales link with the
         // DEC-20260809-003 warning; the draft has no entry and says null.
         $invoices = $data['trace']['invoices'];
-        $this->assertSame([$issued['id'], $draft['id']], array_column($invoices, 'id'));
-        $this->assertSame("INV-{$issued['id']}", $invoices[0]['document_number']);
+        $this->assertSame([$issued->id, $draft->id], array_column($invoices, 'id'));
+        $this->assertSame("INV-{$issued->id}", $invoices[0]['document_number']);
         $this->assertSame('issued', $invoices[0]['status']);
         $this->assertSame('2026-08-11', $invoices[0]['invoice_date']);
         $this->assertSame([['item' => ['id' => $this->bottle->id, 'name' => '500ml PET Bottle'], 'quantity' => '500.0000', 'unit_price' => '4.5000']], $invoices[0]['lines']);
-        $this->assertTallyLink($invoices[0]['tally'], 'Sales', "INV-{$issued['id']}", 'pending');
+        $this->assertTallyLink($invoices[0]['tally'], 'Sales', "INV-{$issued->id}", 'pending');
         $this->assertSame('DEC-20260831-007', $invoices[0]['tally']['flags']['unvalidated_builder']['decision']);
         $this->assertSame('draft', $invoices[1]['status']);
         $this->assertNull($invoices[1]['tally']);
@@ -268,28 +271,29 @@ class SalesDocumentShowTest extends TestCase
     public function test_an_invoice_links_null_while_draft_and_to_its_sales_entry_once_issued(): void
     {
         $order = $this->confirmedOrder('2000', '0');
-        $invoice = $this->invoice($order, '500', '2026-08-11')->json('data');
+        $invoice = $this->invoice($order, '500', '2026-08-11');
 
-        $this->assertSame("INV-{$invoice['id']}", $invoice['document_number']);
-        $this->assertNull($invoice['tally']);
-
-        $draft = $this->getJson("/api/v1/sales/invoices/{$invoice['id']}")->assertOk()->json('data');
+        $draft = $this->getJson("/api/v1/sales/invoices/{$invoice->id}")->assertOk()->json('data');
+        $this->assertSame("INV-{$invoice->id}", $draft['document_number']);
         $this->assertSame(['id' => $order->id, 'document_number' => "SO-{$order->id}", 'status' => 'confirmed'], $draft['sales_order']);
         $this->assertNull($draft['tally']);
         $this->assertSame(['id', 'document_number', 'status', 'customer'], array_keys($draft['trace']['sales_order']));
         $this->assertNull($draft['trace']['tally']);
         $this->assertSame('Aqua Traders', $draft['customer']['name']);
 
-        $issued = $this->postJson("/api/v1/sales/invoices/{$invoice['id']}/issue")->assertSuccessful()->json('data');
-        $this->assertTallyLink($issued['tally'], 'Sales', "INV-{$invoice['id']}", 'pending');
+        // The issue TRANSITION, not the retired endpoint: the Tally staging
+        // listener hangs off Invoice::updated, so a history row moved to
+        // issued reaches the same listener the withdrawn route reached, and
+        // the link this test is about is still the one the domain enqueued.
+        $invoice->update(['status' => InvoiceStatus::Issued]);
 
-        $shown = $this->getJson("/api/v1/sales/invoices/{$invoice['id']}")->assertOk()->json('data');
-        $this->assertTallyLink($shown['tally'], 'Sales', "INV-{$invoice['id']}", 'pending');
+        $shown = $this->getJson("/api/v1/sales/invoices/{$invoice->id}")->assertOk()->json('data');
+        $this->assertTallyLink($shown['tally'], 'Sales', "INV-{$invoice->id}", 'pending');
         $this->assertSame('DEC-20260831-007', $shown['tally']['flags']['unvalidated_builder']['decision']);
         $this->assertSame($shown['tally'], $shown['trace']['tally']);
 
-        $row = collect($this->getJson('/api/v1/sales/invoices')->assertOk()->json('data'))->firstWhere('id', $invoice['id']);
-        $this->assertSame("INV-{$invoice['id']}", $row['document_number']);
+        $row = collect($this->getJson('/api/v1/sales/invoices')->assertOk()->json('data'))->firstWhere('id', $invoice->id);
+        $this->assertSame("INV-{$invoice->id}", $row['document_number']);
         $this->assertSame('pending', $row['tally']['status']);
         $this->assertSame("SO-{$order->id}", $row['sales_order']['document_number']);
         $this->assertArrayNotHasKey('trace', $row);
@@ -317,10 +321,10 @@ class SalesDocumentShowTest extends TestCase
             'sales_order_id' => $draft->id, 'warehouse_id' => $this->fg->id,
             'lines' => [['sales_order_line_id' => $draft->lines()->first()->id, 'quantity' => '1']],
         ])->assertStatus(422)->assertJsonPath('message', 'Cannot transition sales order from "cancelled" to "delivered".');
-        $this->postJson('/api/v1/sales/invoices', [
-            'sales_order_id' => $draft->id, 'invoice_date' => '2026-08-11',
-            'lines' => [['sales_order_line_id' => $draft->lines()->first()->id, 'quantity' => '1', 'unit_price' => '4.50']],
-        ])->assertStatus(422)->assertJsonPath('message', 'Cannot transition sales order from "cancelled" to "invoiced".');
+        // The "a cancelled order is closed to BILLING" probe stood here and is
+        // gone with the thing it probed: the ERP raises no invoice at all now
+        // (DEC-20260903-004), so there is no act left for a cancelled order to
+        // refuse. InvoiceRetiredTest holds the door shut for every order alike.
         $this->postJson("/api/v1/sales/sales-orders/{$draft->id}/cancel")->assertStatus(422)
             ->assertJsonPath('message', 'Cannot transition sales order from "cancelled" to "cancelled".');
 
@@ -389,7 +393,7 @@ class SalesDocumentShowTest extends TestCase
     {
         $order = $this->confirmedOrder('2000', '5000');
         $delivery = $this->dispatchTyped($order, '300')->json('data');
-        $invoice = $this->invoice($order, '500', '2026-08-11')->json('data');
+        $invoice = $this->invoice($order, '500', '2026-08-11');
 
         $this->getJson('/api/v1/sales/sales-orders/999999')->assertNotFound();
         $this->getJson('/api/v1/sales/deliveries/999999')->assertNotFound();
@@ -400,14 +404,14 @@ class SalesDocumentShowTest extends TestCase
         Sanctum::actingAs($viewer);
         $this->getJson("/api/v1/sales/sales-orders/{$order->id}")->assertOk();
         $this->getJson("/api/v1/sales/deliveries/{$delivery['id']}")->assertOk();
-        $this->getJson("/api/v1/sales/invoices/{$invoice['id']}")->assertOk();
+        $this->getJson("/api/v1/sales/invoices/{$invoice->id}")->assertOk();
 
         $outsider = User::factory()->create(['is_active' => true]);
         $outsider->givePermissionTo('production.view');
         Sanctum::actingAs($outsider);
         $this->getJson("/api/v1/sales/sales-orders/{$order->id}")->assertForbidden();
         $this->getJson("/api/v1/sales/deliveries/{$delivery['id']}")->assertForbidden();
-        $this->getJson("/api/v1/sales/invoices/{$invoice['id']}")->assertForbidden();
+        $this->getJson("/api/v1/sales/invoices/{$invoice->id}")->assertForbidden();
     }
 
     // ---- helpers ----------------------------------------------------------
@@ -505,12 +509,14 @@ class SalesDocumentShowTest extends TestCase
         ])->assertSuccessful();
     }
 
-    private function invoice(SalesOrder $order, string $quantity, string $date): TestResponse
+    /**
+     * A historic invoice row. The ERP raises no invoice any more
+     * (DEC-20260903-004) and there is no route to post to, so what these
+     * tests need — an invoice EXISTING, so the order's trace, totals and
+     * cancel rule can be read — is written straight through the models.
+     */
+    private function invoice(SalesOrder $order, string $quantity, string $date): Invoice
     {
-        return $this->postJson('/api/v1/sales/invoices', [
-            'sales_order_id' => $order->id,
-            'invoice_date' => $date,
-            'lines' => [['sales_order_line_id' => $order->lines()->first()->id, 'quantity' => $quantity, 'unit_price' => '4.50']],
-        ])->assertSuccessful();
+        return $this->invoiceHistory($order, $quantity, InvoiceStatus::Draft, null, $date);
     }
 }

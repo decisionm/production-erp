@@ -201,7 +201,11 @@ class DispatchQualityGateTest extends TestCase
         // The same login, immediately after dispatching, is still refused the
         // Sales desk's own work.
         $this->postJson('/api/v1/sales/sales-orders', [])->assertForbidden();
-        $this->postJson('/api/v1/sales/invoices', [])->assertForbidden();
+        // Invoice HISTORY, not the writing of one: the ERP raises no invoice
+        // any more (DEC-20260903-004), so the probe that used to POST here
+        // reads the retired document instead — still Sales' to see, still
+        // refused to the Store.
+        $this->getJson('/api/v1/sales/invoices')->assertForbidden();
         $this->getJson('/api/v1/sales/customers')->assertForbidden();
     }
 

@@ -15,6 +15,12 @@ use App\Modules\Sales\Services\InvoiceService;
  */
 class AccountsReceivableService
 {
+    // WHAT THIS FIGURE STANDS ON is InvoiceService::BASIS, deliberately not
+    // a second constant here: the ERP's own sales invoice is retired
+    // (DEC-20260903-004), that is a fact about the SALES document, and
+    // Compliance's GSTR-1 has to print the same words. One source, one
+    // sentence.
+
     public function __construct(private readonly InvoiceService $invoices) {}
 
     /**
