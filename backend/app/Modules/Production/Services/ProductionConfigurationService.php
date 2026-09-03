@@ -844,42 +844,38 @@ class ProductionConfigurationService
     }
 
     /**
-     * DEC-20260902-021: a cycle-time override outside the approved
-     * CONFIGURATION's own cycle_time_min/cycle_time_max is refused, whatever
-     * the reason given — this is the "future factory decision" the method
-     * was kept empty for. Scoped to the configuration's own bounds only,
-     * never a machine- or workbook-level fallback: the GLOBAL workbook range
-     * (the GLOBAL_CYCLE_TIME_MIN/MAX factory-rules rows, which nothing else
-     * reads either — see FactorySetting::READ_BY_SOFTWARE) stays advisory
-     * via cycleTimeWarning() above, because the factory's own product master
-     * carries 48 approved standards above that global range.
+     * DEC-20260902-021: an override outside the effective cycle-time bounds
+     * is refused, whatever the reason given — the "future factory decision"
+     * this method was kept empty for. The effective bound is the
+     * CONFIGURATION's own cycle_time_min/cycle_time_max, falling back to the
+     * MACHINE's when the configuration leaves it unset — the same
+     * precedence assertCavitiesAllowed() below uses for
+     * cavities_min/cavities_max, so the configuration's own figure wins
+     * where both exist. cycleTimeWarning() above is left untouched: the
+     * GLOBAL workbook range (the GLOBAL_CYCLE_TIME_MIN/MAX factory-rules
+     * rows, which nothing else reads either — see
+     * FactorySetting::READ_BY_SOFTWARE) stays advisory, because the
+     * factory's own product master carries 48 approved standards above that
+     * global range.
      */
     private function assertCycleTimeAllowed(string $value, ?ProductionConfiguration $configuration): void
     {
-        if ($configuration === null) {
+        $min = $configuration?->cycle_time_min ?? $configuration?->workCenter?->cycle_time_min;
+        $max = $configuration?->cycle_time_max ?? $configuration?->workCenter?->cycle_time_max;
+
+        if ($min === null && $max === null) {
             return;
         }
 
-        $min = $configuration->cycle_time_min;
-        $max = $configuration->cycle_time_max;
-
-        $belowMin = $min !== null && (float) $value < (float) $min;
-        $aboveMax = $max !== null && (float) $value > (float) $max;
-
-        if (! $belowMin && ! $aboveMax) {
-            return;
-        }
-
-        $machine = $configuration->workCenter ?? WorkCenter::find($configuration->work_center_id);
+        $machine = $configuration?->workCenter ?? WorkCenter::find($configuration?->work_center_id);
         $name = $machine->name ?? 'This machine';
 
-        $message = match (true) {
-            $min !== null && $max !== null => "{$name} allows a cycle time between {$min}s and {$max}s.",
-            $min !== null => "{$name} has a minimum cycle time of {$min}s.",
-            default => "{$name} has a maximum cycle time of {$max}s.",
-        };
-
-        throw ValidationException::withMessages(['cycle_time_override' => $message]);
+        if ($min !== null && (float) $value < (float) $min) {
+            throw ValidationException::withMessages(['cycle_time_override' => "{$name} has a minimum cycle time of {$min}s."]);
+        }
+        if ($max !== null && (float) $value > (float) $max) {
+            throw ValidationException::withMessages(['cycle_time_override' => "{$name} has a maximum cycle time of {$max}s."]);
+        }
     }
 
     private function assertCavitiesAllowed(int $value, ?ProductionConfiguration $configuration): void
