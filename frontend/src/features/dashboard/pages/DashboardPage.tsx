@@ -1,12 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { Skeleton, Table, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
 import { getDashboardSummary } from '@/features/dashboard/api';
 import type { DemandRow, IncomingStockRow, RecentSalesOrder } from '@/features/dashboard/types';
+import { queueTileStyle } from '@/features/dashboard/queueTileStyle';
+import { waitingOnYou } from '@/features/dashboard/waitingOnYou';
 import {
     getFactoryDayBin,
     listActiveBatches,
@@ -28,6 +30,7 @@ import { listAllTallySyncEntries } from '@/features/tally-sync/api';
 import { ADOPTED_MODULES } from '@/lib/adoptedModules';
 import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 import { itemLabel } from '@/lib/itemLabel';
+import { useDisplayStore } from '@/theme/store';
 import '../dashboard.css';
 
 /**
@@ -165,6 +168,7 @@ function LedgerCell({ figure, label, to, warn }: { figure: string; label: string
 
 export default function DashboardPage() {
     const user = useAuthStore((state) => state.user);
+    const themeMode = useDisplayStore((state) => state.mode);
     // Same double gate as the sidebar: the factory must have adopted the
     // module AND the user must hold its permission. Cells for HRMS and CRM
     // are already wired below — the day either module joins ADOPTED_MODULES
@@ -302,6 +306,33 @@ export default function DashboardPage() {
 
     const binMaterials = (dayBin?.summary ?? []).filter((row) => parseFloat(row.bin_kg) !== 0).slice(0, 3);
 
+    /**
+     * WHAT THIS LOGIN OWES, ABOVE EVERYTHING ELSE (chapter 1 §1).
+     *
+     * A key is offered only when its figure is this reader's to see, because
+     * an ABSENT count means "not yours" and a zero means "yours, and clear" —
+     * the strip draws those two differently and must not be handed one for
+     * the other. The server has already gated the summary blocks; the two
+     * production figures ride the same `canProduction` gate their band does.
+     */
+    const counts = {
+        ...(summary?.inventory && {
+            issue: summary.inventory.material_requests_to_issue,
+            fulfil: summary.inventory.order_lines_awaiting_store,
+        }),
+        ...(canProduction && { pm: pmCount, accounts: accountsCount }),
+        ...(summary?.procurement && { requisitions: summary.procurement.pending_requisitions }),
+        ...(summary?.sales && { deliveries: summary.sales.orders_awaiting_delivery }),
+        ...(summary?.quality && { ncrs: summary.quality.open_ncrs }),
+        ...(canTally && { tally: tallyFailed }),
+    };
+    const tiles = waitingOnYou(
+        counts,
+        (user?.roles ?? []).map((role) => role.name),
+    );
+    // The three tone colours follow light/dark — see queueTileStyle().
+    const tileStyles = useMemo(() => queueTileStyle(themeMode), [themeMode]);
+
     return (
         <div className="dash">
             <div className="dash-masthead">
@@ -316,6 +347,33 @@ export default function DashboardPage() {
                 </div>
                 {canProduction && shiftList.length > 0 && <ShiftRail shifts={shiftList} now={now} />}
             </div>
+
+            {tiles.length > 0 && (
+                <section className="dash-band">
+                    <div className="dash-eyebrow">Waiting on you</div>
+                    <div className="dash-queue">
+                        {tiles.map((tile) => {
+                            const tone = tileStyles[tile.tone];
+
+                            return (
+                                <Link
+                                    key={tile.key}
+                                    to={tile.to}
+                                    className="dash-tile"
+                                    style={{ background: tone.background, borderColor: tone.borderColor }}
+                                >
+                                    <span className="dash-tile-count" style={{ color: tone.figure }}>
+                                        {tile.count}
+                                    </span>
+                                    <span className="dash-tile-label" style={{ color: tone.label }}>
+                                        {tile.label}
+                                    </span>
+                                </Link>
+                            );
+                        })}
+                    </div>
+                </section>
+            )}
 
             {canProduction && (
                 <section className="dash-band">

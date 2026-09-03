@@ -52,6 +52,10 @@ export interface DashboardSummary {
         total_items: number;
         total_warehouses: number;
         low_stock_items: number;
+        /** Requests still to issue — the store issue queue's default view. */
+        material_requests_to_issue: number;
+        /** Order lines the store still has to act on — the fulfilment queue's default view. */
+        order_lines_awaiting_store: number;
     };
     procurement?: {
         open_purchase_orders: number;

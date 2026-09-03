@@ -52,6 +52,78 @@
 }
 
 /* ------------------------------------------------------------------ */
+/* Waiting on you: this login's own queue, above everything else        */
+/* ------------------------------------------------------------------ */
+
+/* Wraps rather than scrolls. An Administrator sees eight of these and a
+   storekeeper two, and neither should have to drag a strip sideways to find
+   out what it is owed — sideways scrolling on a wide table is already the
+   floor's standing complaint. */
+.dash-queue {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+    gap: 12px;
+}
+
+/* A TARGET, NOT A STATISTIC. Big enough to hit with a thumb on a tablet in
+   a factory, and the whole tile is the link — not the number inside it. */
+.dash-tile {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 14px;
+    min-height: 108px;
+    padding: 16px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    text-decoration: none;
+    transition:
+        transform 120ms ease,
+        box-shadow 120ms ease,
+        border-color 120ms ease;
+}
+
+.dash-tile:hover {
+    transform: translateY(-2px);
+    border-color: var(--dash-steel);
+    box-shadow: 0 6px 18px rgb(10 20 91 / 12%);
+}
+
+/* Keyboard reaches these in the same order they read. */
+.dash-tile:focus-visible {
+    outline: 2px solid var(--dash-ink);
+    outline-offset: 2px;
+}
+
+/* FILL, EDGE, FIGURE AND LABEL ARRIVE FROM queueTileStyle(mode). Colour is
+   the one part of a tile that has to be PROVEN — a near-white fill in dark is
+   this dashboard's own history — so it lives where a test can compute its
+   contrast. A stylesheet cannot be asked what ratio it produces. Everything
+   in this section is layout; nothing here paints. */
+.dash-tile-count {
+    font-family: var(--dash-mono);
+    font-size: 40px;
+    font-weight: 600;
+    line-height: 1;
+    letter-spacing: -0.01em;
+}
+
+.dash-tile-label {
+    font-size: 13px;
+    font-weight: 500;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dash-tile {
+        transition: none;
+    }
+
+    .dash-tile:hover {
+        transform: none;
+    }
+}
+
+/* ------------------------------------------------------------------ */
 /* Masthead: production day + shift rail                                */
 /* ------------------------------------------------------------------ */
 
