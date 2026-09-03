@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
+import { workboxOptions } from './src/pwa/workboxOptions';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 
@@ -89,21 +90,13 @@ export default defineConfig(({ command }) => ({
                     { src: '/build/swaashpet-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
                 ],
             },
-            workbox: {
-                // Only the built app shell (JS/CSS/HTML/icons) is precached.
-                // API responses are deliberately never cached by the service
-                // worker — this is business data (stock, orders, invoices)
-                // where a stale cached read is actively misleading, not just
-                // slow. Installability/fast loads come from the shell being
-                // cached; every /api and /sanctum request always hits the
-                // network, same as a normal tab.
-                navigateFallbackDenylist: [/^\/api\//, /^\/sanctum\//],
-                // The main bundle is a few MB (see the existing code-splitting
-                // warning at build time, pre-dating PWA support) — raised
-                // past Workbox's 2MB default so it actually gets precached
-                // instead of silently falling back to network-only.
-                maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-            },
+            // Only the built app shell (JS/CSS/HTML/icons) is precached. API
+            // responses are deliberately never cached by the service worker —
+            // this is business data (stock, orders, invoices) where a stale
+            // cached read is actively misleading, not just slow. The options
+            // themselves live in src/pwa/workboxOptions.ts, where a test pins
+            // the one that governs whether the floor sees a deploy at all.
+            workbox: workboxOptions,
         }),
     ],
     define: {
