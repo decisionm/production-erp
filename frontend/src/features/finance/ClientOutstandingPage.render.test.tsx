@@ -132,6 +132,28 @@ describe('ClientOutstandingPage', () => {
         expect(cellCount(html, 'tfoot')).toBe(cellCount(html, 'thead'));
     });
 
+    /**
+     * The reminder control is a PLACEHOLDER, and the thing that makes it safe
+     * is that it cannot be pressed. A live-looking button that silently does
+     * nothing lets an accounts clerk believe a client was chased when nobody
+     * was — so "disabled" is the assertion, not a detail. When reminders are
+     * really wired up, this test is what says so out loud.
+     */
+    it('offers a send-reminder seat that cannot yet be pressed', () => {
+        const html = renderPage();
+
+        expect(html).toContain('Send reminder');
+        // The button element itself carries the attribute — matched together
+        // so an unrelated disabled control elsewhere cannot satisfy this.
+        expect(html).toMatch(/<button[^>]*\bdisabled\b[^>]*>(?:(?!<\/button>).)*Send reminder/s);
+    });
+
+    it('keeps the footer aligned once the reminder column is present', () => {
+        // Belt and braces beside the count above: the hand-written summary row
+        // needs a spacer for every column added, and this one was added last.
+        expect(cellCount(renderPage(), 'tfoot')).toBe(cellCount(renderPage(), 'thead'));
+    });
+
     it('shows an outstanding-days figure rather than a bare zero', () => {
         // React separates adjacent interpolated text nodes with an HTML
         // comment on a server render, so the tag reads `29<!-- --> days`.
