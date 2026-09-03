@@ -5,7 +5,13 @@ import dayjs from 'dayjs';
 import { useEffect, useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { hasManageAccess } from '@/features/auth/permissions';
+import { useAuthStore } from '@/features/auth/store';
 import { listAttendance, listAllEmployees, markAttendance } from '@/features/hrms/api';
+import { type DateRange, rangeFor } from '@/features/hrms/attendanceRange';
+import AttendanceRangeBar from '@/features/hrms/components/AttendanceRangeBar';
+import DepartmentAttendanceCard from '@/features/hrms/components/DepartmentAttendanceCard';
+import PersonAttendanceCard from '@/features/hrms/components/PersonAttendanceCard';
 import { ATTENDANCE_DEFAULT_SORT, ATTENDANCE_LIST_SPEC, ATTENDANCE_SORT_FIELDS, noMatchLine, pageRangeLine } from '@/features/hrms/list';
 import type { Attendance, AttendanceListParams, AttendanceStatus } from '@/features/hrms/types';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
@@ -49,6 +55,11 @@ const STATUS_FILTER: { value: AttendanceStatus | ''; label: string }[] = [{ valu
 export default function AttendancePage() {
     const [modalOpen, setModalOpen] = useState(false);
     const queryClient = useQueryClient();
+    const mayManage = hasManageAccess(useAuthStore((state) => state.user), 'hrms');
+
+    // The page opens on the month in progress: the punch report arrives a
+    // month at a time, so that is the period somebody is usually asking about.
+    const [range, setRange] = useState<DateRange>(() => rangeFor('this_month'));
 
     const { params, setParams, setPage, reset } = useListParams<AttendanceListParams>(ATTENDANCE_LIST_SPEC);
     const listParams = useMemo(() => compactParams(params), [params]);
@@ -105,8 +116,26 @@ export default function AttendancePage() {
 
     return (
         <>
+            <Typography.Title level={3} style={{ margin: '0 0 12px' }}>
+                Attendance
+            </Typography.Title>
+
+            {/* One period drives both halves — see AttendanceRangeBar. */}
+            <div style={{ marginBottom: 16 }}>
+                <AttendanceRangeBar range={range} onChange={setRange} />
+            </div>
+
+            <Space orientation="vertical" size="middle" style={{ width: '100%', marginBottom: 24 }}>
+                <PersonAttendanceCard range={range} />
+                {/* The whole factory's numbers are the manager's read, and the
+                    endpoint refuses a view-only login as well as hiding it. */}
+                {mayManage ? <DepartmentAttendanceCard range={range} /> : null}
+            </Space>
+
             <Space style={{ marginBottom: 16, justifyContent: 'space-between', width: '100%' }} wrap>
-                <Typography.Title level={3} style={{ margin: 0 }}>Attendance</Typography.Title>
+                <Typography.Title level={4} style={{ margin: 0 }}>
+                    All marks
+                </Typography.Title>
                 <Space wrap>
                     <Input.Search
                         allowClear

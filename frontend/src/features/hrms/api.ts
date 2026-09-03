@@ -13,6 +13,8 @@ import type {
     AttendanceImportListParams,
     AttendanceImportResolution,
     AttendanceListParams,
+    AttendancePersonRange,
+    AttendanceSummary,
     BulkResolveResult,
     Employee,
     EmployeeListParams,
@@ -161,6 +163,20 @@ export interface MarkAttendancePayload {
 
 export async function markAttendance(payload: MarkAttendancePayload): Promise<Attendance> {
     const { data } = await api.post<{ data: Attendance }>('/hrms/attendance/mark', payload);
+    return data.data;
+}
+
+/** One person's days over one range — the Attendance page's top half. */
+export async function getAttendancePerson(employeeId: number, from: string, to: string): Promise<AttendancePersonRange> {
+    const { data } = await api.get<{ data: AttendancePersonRange }>('/hrms/attendance/person', {
+        params: { employee_id: employeeId, from, to },
+    });
+    return data.data;
+}
+
+/** The factory by department for one range — needs hrms.manage. */
+export async function getAttendanceSummary(from: string, to: string): Promise<AttendanceSummary> {
+    const { data } = await api.get<{ data: AttendanceSummary }>('/hrms/attendance/summary', { params: { from, to } });
     return data.data;
 }
 

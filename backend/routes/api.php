@@ -980,6 +980,12 @@ Route::prefix('v1')->group(function () {
             Route::post('leave-requests/{leave_request}/reject', [LeaveRequestController::class, 'reject']);
 
             Route::get('attendance', [AttendanceController::class, 'index']);
+            // The Attendance page's two reads: one person's range, and the
+            // factory by department. `person` before nothing else could
+            // shadow it; `summary` asks for hrms.manage inside the
+            // controller, since module:hrms lets any GET through on .view.
+            Route::get('attendance/person', [AttendanceController::class, 'person']);
+            Route::get('attendance/summary', [AttendanceController::class, 'summary']);
             Route::post('attendance/mark', [AttendanceController::class, 'mark']);
 
             // The punch-report import (03-Sep design, Track 2): the browser
