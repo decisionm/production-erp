@@ -272,7 +272,7 @@ export const HELP_BY_ROUTE: Record<string, HelpEntry> = {
     // Finance
     '/finance/client-outstanding': {
         what: 'See what every client owes, how long they have owed it, and what is still to ship.',
-        actions: ['All clients', 'Overdue only', 'Has pending orders'],
+        actions: ['Import Tally export', 'All clients', 'Overdue only', 'Has pending orders'],
         rule: 'Every number is Tally’s, and only as current as the last pull by the Tally Sync Agent.',
     },
     '/finance/chart-of-accounts': {

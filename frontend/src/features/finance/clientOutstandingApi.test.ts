@@ -16,8 +16,11 @@ import { describe, expect, it, vi } from 'vitest';
  */
 
 const get = vi.fn(async () => ({ data: { data: null } }));
+const post = vi.fn(async () => ({
+    data: { data: { bills: 0, orders: 0, parties: 0, as_of: '2026-09-30', skipped_empty: false } },
+}));
 
-vi.mock('@/lib/api', () => ({ api: { get, post: vi.fn(), put: vi.fn() } }));
+vi.mock('@/lib/api', () => ({ api: { get, post, put: vi.fn() } }));
 
 describe('getClientOutstanding', () => {
     it('requests the finance route, not the retired CRM one', async () => {
@@ -26,5 +29,44 @@ describe('getClientOutstanding', () => {
         await getClientOutstanding();
 
         expect(get).toHaveBeenCalledWith('/finance/client-outstanding');
+    });
+});
+
+/**
+ * THE UPLOAD SENDS THE FIELD THE BACKEND VALIDATES.
+ *
+ * Same class of bug as the CRM path above, one layer deeper. The contract is
+ * `multipart/form-data` with a SINGLE field named `file`; name it anything
+ * else and Laravel answers 422 "The file field is required." on a request that
+ * plainly carried a file. A typecheck cannot see a string key inside a
+ * FormData, and the render test never runs this function — so the field name
+ * is asserted here, by reading it back off the body that was actually sent.
+ * `expect.any(FormData)` would pass with the field called `xml`.
+ */
+describe('importClientOutstanding', () => {
+    it('posts the file to the import route as multipart, under the key `file`', async () => {
+        const { importClientOutstanding } = await import('@/features/finance/api');
+
+        const file = new File(['<ENVELOPE/>'], 'outstandings.xml', { type: 'text/xml' });
+
+        await importClientOutstanding(file);
+
+        expect(post).toHaveBeenCalledTimes(1);
+        const [url, body, config] = post.mock.calls[0] as unknown as [string, FormData, { headers: Record<string, string> }];
+
+        expect(url).toBe('/finance/client-outstanding/import');
+        expect(body).toBeInstanceOf(FormData);
+        // The key itself, read back off the body — not merely "a FormData".
+        expect(body.get('file')).toBe(file);
+        expect([...body.keys()]).toEqual(['file']);
+        expect(config.headers['Content-Type']).toBe('multipart/form-data');
+    });
+
+    it('returns the counts the server sent, unwrapped from the Resource envelope', async () => {
+        const { importClientOutstanding } = await import('@/features/finance/api');
+
+        const result = await importClientOutstanding(new File(['<ENVELOPE/>'], 'outstandings.xml'));
+
+        expect(result).toEqual({ bills: 0, orders: 0, parties: 0, as_of: '2026-09-30', skipped_empty: false });
     });
 });
