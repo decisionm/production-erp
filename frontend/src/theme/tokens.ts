@@ -63,6 +63,17 @@ export const dark = {
     rowHover: '#232E4C',
 } as const;
 
+/**
+ * The Ask ERP question bubble: white text on a solid fill, at normal size, so
+ * both values must clear WCAG AA. Its OWN value rather than `brand.navy`,
+ * which lifts to #5B7BD6 in dark where white measures 4.00:1 — it looked
+ * perfectly fine on screen, which is why askBubbleBg is contrast-tested.
+ */
+export const askBubbleBg: Record<ThemeMode, string> = {
+    light: '#12256B',
+    dark: '#3A55A8',
+};
+
 /** Archivo is bundled (`@fontsource-variable/archivo`), so no request leaves the factory network for a font. */
 export const FONT_FAMILY =
     "'Archivo Variable', 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";

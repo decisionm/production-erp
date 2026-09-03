@@ -616,3 +616,230 @@ body.is-panning-table * {
 
 /* A device that asked for less motion still pans; there is nothing here
    that animates on its own. */
+
+/* ------------------------------------------------------------------ */
+/* Ask ERP — a chat surface (03-Sep-2026, owner: it does "not look like  */
+/* a modern chat window").                                              */
+/*                                                                      */
+/* What makes one, and what this page lacked: the thread OWNS the        */
+/* height and scrolls on its own, and the composer is PINNED to the      */
+/* bottom where a hand rests. It had a one-line box floating near the    */
+/* top and a page-sized void beneath it.                                 */
+/*                                                                      */
+/* What it keeps: an answer here carries a table and a chart, so the     */
+/* assistant's turn stays FULL WIDTH rather than a bubble. Only the      */
+/* question is a bubble. That is the same choice every assistant that    */
+/* returns wide content makes, and it preserves this page's own reason   */
+/* for existing — the evidence under the answer.                        */
+/* ------------------------------------------------------------------ */
+
+.ask-shell {
+    display: flex;
+    flex-direction: column;
+    /* The app bar is 64 and the content padding is 24 top and bottom. */
+    height: calc(100vh - 112px);
+    min-height: 420px;
+}
+
+.ask-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex: 0 0 auto;
+    padding-bottom: 12px;
+}
+
+/* The thread: the only thing that scrolls. */
+.ask-thread {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 4px 8px 8px 0;
+    scroll-behavior: smooth;
+}
+
+.ask-turns {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+}
+
+/* A QUESTION is a bubble, and it is the person's own, so it sits at the end. */
+.ask-question {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.ask-question > span {
+    max-width: min(680px, 78%);
+    padding: 10px 14px;
+    border-radius: 14px 14px 4px 14px;
+    /* The fill comes from theme/tokens.ts (askBubbleBg), which is
+       contrast-tested; only the shape lives here. */
+    color: #ffffff;
+    font-weight: 500;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+}
+
+/* AN ANSWER is not a bubble: it carries a table, a chart and its SQL. */
+.ask-answer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.ask-answer-by {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--app-text-secondary);
+}
+
+.ask-answer-by::before {
+    content: '';
+    width: 18px;
+    height: 18px;
+    border-radius: 6px;
+    background: var(--brand-orange);
+    clip-path: polygon(0 0, 100% 50%, 0 100%, 35% 50%);
+    flex: 0 0 18px;
+}
+
+/* Waiting: said where the answer will appear, not on the button. */
+.ask-thinking {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--app-text-secondary);
+}
+
+.ask-thinking i {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    display: inline-block;
+    animation: ask-blink 1.25s ease-in-out infinite;
+}
+
+.ask-thinking i:nth-child(2) {
+    animation-delay: 0.18s;
+}
+
+.ask-thinking i:nth-child(3) {
+    animation-delay: 0.36s;
+}
+
+@keyframes ask-blink {
+    0%, 80%, 100% {
+        opacity: 0.25;
+    }
+    40% {
+        opacity: 1;
+    }
+}
+
+/* The empty thread is an invitation, centred, not a void. */
+.ask-empty {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    text-align: center;
+    padding: 24px 0;
+}
+
+/* The brand chevron, set in a tile so it reads as a mark rather than as a
+   stray play arrow floating in the middle of the page. */
+.ask-empty-mark {
+    width: 52px;
+    height: 52px;
+    border-radius: 16px;
+    background: var(--brand-orange-soft);
+    border: 1px solid var(--app-rule);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ask-empty-mark::before {
+    content: '';
+    width: 18px;
+    height: 24px;
+    background: var(--brand-orange);
+    clip-path: polygon(0 0, 100% 50%, 0 100%, 35% 50%);
+}
+
+/* The composer sits on the floor of the page, where the hand is. */
+.ask-composer {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 10px;
+    margin-top: 12px;
+    border: 1px solid var(--app-rule);
+    border-radius: 14px;
+    background: var(--app-surface);
+}
+
+.ask-composer .ant-input {
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    padding: 4px 6px;
+    resize: none;
+}
+
+.ask-composer-hint {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    color: var(--app-text-secondary);
+}
+
+/* Back to the newest answer, once the reader has scrolled away from it. */
+.ask-jump {
+    position: sticky;
+    bottom: 6px;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.ask-jump > button {
+    pointer-events: auto;
+}
+
+@media (max-width: 768px) {
+    .ask-shell {
+        height: calc(100vh - 88px);
+    }
+
+    .ask-question > span {
+        max-width: 88%;
+    }
+
+    .ask-composer-hint span {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .ask-thread {
+        scroll-behavior: auto;
+    }
+
+    .ask-thinking i {
+        animation: none;
+        opacity: 0.6;
+    }
+}
