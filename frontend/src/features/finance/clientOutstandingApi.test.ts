@@ -58,8 +58,36 @@ describe('importClientOutstanding', () => {
         expect(body).toBeInstanceOf(FormData);
         // The key itself, read back off the body — not merely "a FormData".
         expect(body.get('file')).toBe(file);
-        expect([...body.keys()]).toEqual(['file']);
         expect(config.headers['Content-Type']).toBe('multipart/form-data');
+    });
+
+    /**
+     * THE BUG THIS PINS. The body carried only `file` while the server required
+     * `as_of` as well, so every press of Import returned 422 before it ever
+     * reached the parser. The two halves were written against contracts that
+     * had drifted apart by exactly one field, and nothing caught it because the
+     * test above asserted the body's keys were EXACTLY ['file'].
+     */
+    it('sends as_of as a plain ISO date, built from the local calendar', async () => {
+        const { importClientOutstanding } = await import('@/features/finance/api');
+
+        await importClientOutstanding(new File(['<ENVELOPE/>'], 'o.xml', { type: 'text/xml' }));
+
+        const [, body] = post.mock.calls[0] as unknown as [string, FormData];
+
+        expect([...body.keys()]).toEqual(['file', 'as_of']);
+
+        const asOf = String(body.get('as_of'));
+
+        // date_format:Y-m-d server-side — anything else is a 422.
+        expect(asOf).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+        // Built from LOCAL calendar parts, never toISOString(): that converts
+        // to UTC first, so any evening in IST would file the position under
+        // yesterday's date.
+        const now = new Date();
+        const pad = (n: number) => String(n).padStart(2, '0');
+        expect(asOf).toBe(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
     });
 
     it('returns the counts the server sent, unwrapped from the Resource envelope', async () => {

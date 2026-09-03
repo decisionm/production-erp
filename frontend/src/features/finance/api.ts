@@ -106,11 +106,37 @@ export async function getClientOutstanding(): Promise<ClientOutstandingReport> {
  * is the only thing that reads Tally's shape — the ERP has one reader for that
  * export and this must not become a second one that drifts from it.
  */
-export async function importClientOutstanding(file: File): Promise<ClientOutstandingImportResult> {
+export async function importClientOutstanding(file: File, asOf: string = todayInFactoryTime()): Promise<ClientOutstandingImportResult> {
     const form = new FormData();
     form.append('file', file);
+    // REQUIRED BY THE SERVER, AND NOT DEFAULTED THERE. `as_of` is the date the
+    // position was read as at, and it is what the page prints as "position as
+    // at". Defaulting it server-side would let any stale file be filed as
+    // current with nothing recording that choice; supplying it here makes the
+    // caller state it.
+    //
+    // Today, matching the agent. receivablesSync.ts stamps `asOf = today()` at
+    // the moment of the pull rather than reading a period out of the report, so
+    // an imported position and a pulled one mean the same thing by the same
+    // rule. An export taken on an earlier day is therefore labelled the day it
+    // was imported — the same way a pull run this morning is labelled today.
+    form.append('as_of', asOf);
     const { data } = await api.post<{ data: ClientOutstandingImportResult }>('/finance/client-outstanding/import', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
     });
     return data.data;
+}
+
+/**
+ * Today as the factory reckons it.
+ *
+ * Built from the LOCAL calendar parts, never `toISOString()`: that converts to
+ * UTC first, so any evening in IST becomes the previous day's date and a
+ * position imported after 5:30pm would be filed as yesterday's.
+ */
+function todayInFactoryTime(): string {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 }

@@ -129,7 +129,10 @@ export default function ClientOutstandingPage() {
     const [importOutcome, setImportOutcome] = useState<OutstandingImportOutcome | null>(null);
 
     const importPosition = useMutation({
-        mutationFn: importClientOutstanding,
+        // Wrapped, not passed by reference: useMutation calls mutationFn with a
+        // second argument (its context), which would land in this function's
+        // optional `asOf` and file the position under an object.
+        mutationFn: (file: File) => importClientOutstanding(file),
         onSuccess: async (result) => {
             setImportOutcome(outstandingImportOutcome(result));
 
