@@ -809,15 +809,109 @@ class BatchAmendmentAndQcReturnTest extends TestCase
         $this->assertStringContainsString('already on a Tally voucher', $return->json('message'));
     }
 
-    public function test_a_segment_that_handed_over_can_no_longer_be_corrected(): void
+    /**
+     * DEC-20260903-007. A handed-over batch USED TO refuse every correction,
+     * on the ground that the next shift opened from its closing weights. What
+     * the next shift actually inherits is exactly ONE number — the counted
+     * closing bin weight (DayBinLedgerService::openingFor reads closingFor,
+     * one `count` movement). The pieces, the rejects, the reason and the
+     * downtime reach it not at all, and all of them were being refused.
+     *
+     * So this is the chain the owner asked for, end to end: quality sends a
+     * handed-over batch back, and the supervisor corrects the count from the
+     * shift floor queue. Nothing goes back to a machine — the machine has
+     * moved on and only the paperwork is wrong.
+     */
+    public function test_quality_can_return_a_handed_over_batch_and_the_floor_corrects_the_count(): void
     {
         $this->actAsSupervisor();
         $entryId = $this->startBatch();
         $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", $this->wrongFigures())
             ->assertOk();
 
-        // The next shift opened from this segment's closing weights.
-        ShiftProductionEntry::create([
+        $entry = ShiftProductionEntry::query()->findOrFail($entryId);
+        $child = $this->handoverChildOf($entry);
+
+        // What the next shift opened with, BEFORE anything is corrected.
+        $ledger = app(DayBinLedgerService::class);
+        $openingBefore = $ledger->openingFor($child, $this->resin->id);
+
+        $this->actAsChecker();
+        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/return-to-production", [
+            'reason' => 'Quantity mismatch — recount it.',
+        ])->assertOk();
+
+        // The correction drawer sends no closing weight unless the supervisor
+        // types one (it prefills null and drops blanks), which is exactly the
+        // shape of a pieces-only fix.
+        $figures = $this->correctFigures();
+        unset($figures['closing_day_bin']);
+
+        $this->actAsSupervisor();
+        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/amend", $figures)
+            ->assertOk();
+
+        $this->assertAmount('9500', ShiftProductionEntry::query()->findOrFail($entryId)->quantity_produced);
+
+        // The whole point of the guard: the next shift's opening did not move.
+        $this->assertSame($openingBefore, $ledger->openingFor($child->refresh(), $this->resin->id));
+    }
+
+    /**
+     * DEC-20260903-007, the other half: the closing weight itself is the one
+     * figure a following segment stands on, so while it stands there it
+     * cannot be restated underneath it. Correcting the chain — reopening the
+     * next shift and restating its opening — is expressly not built.
+     */
+    public function test_a_correction_that_would_restate_the_next_shifts_opening_is_refused(): void
+    {
+        $this->actAsSupervisor();
+        $entryId = $this->startBatch();
+        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", $this->wrongFigures())
+            ->assertOk();
+
+        $this->handoverChildOf(ShiftProductionEntry::query()->findOrFail($entryId));
+
+        // correctFigures() moves the closing weight 80 → 75.
+        $amend = $this->postJson(
+            "/api/v1/production/shift-production-entries/{$entryId}/amend",
+            $this->correctFigures(),
+        )->assertStatus(422);
+
+        $this->assertStringContainsString('the next shift opened from', $amend->json('message'));
+        // The refusal names the figure it is protecting.
+        $this->assertStringContainsString('80', $amend->json('message'));
+
+        // Untouched by the refusal.
+        $this->assertAmount('10000', ShiftProductionEntry::query()->findOrFail($entryId)->quantity_produced);
+    }
+
+    /** Resubmitting the SAME closing weight changes nothing, so it is allowed. */
+    public function test_a_correction_that_resubmits_the_same_closing_weight_is_allowed(): void
+    {
+        $this->actAsSupervisor();
+        $entryId = $this->startBatch();
+        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/complete", $this->wrongFigures())
+            ->assertOk();
+
+        $this->handoverChildOf(ShiftProductionEntry::query()->findOrFail($entryId));
+
+        $figures = $this->correctFigures();
+        // The weight the batch already closed on, retyped unchanged.
+        $figures['closing_day_bin'] = [['item_id' => $this->resin->id, 'quantity_kg' => '80']];
+
+        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/amend", $figures)
+            ->assertOk();
+    }
+
+    /**
+     * The next shift's segment, as completeAndHandover() creates it: a child
+     * row carrying parent_entry_id, which is the only thing that makes this
+     * batch one somebody has opened from.
+     */
+    private function handoverChildOf(ShiftProductionEntry $parent): ShiftProductionEntry
+    {
+        return ShiftProductionEntry::create([
             'shift_id' => $this->shift->id,
             'work_center_id' => $this->machine->id,
             'item_id' => $this->bottle->id,
@@ -825,21 +919,9 @@ class BatchAmendmentAndQcReturnTest extends TestCase
             'production_date' => '2026-07-31',
             'batch_number' => '20260731-M01-001',
             'batch_status' => BatchStatus::InProgress,
-            'parent_entry_id' => $entryId,
+            'parent_entry_id' => $parent->id,
             'quantity_scrap' => '0',
         ]);
-
-        $amend = $this->postJson(
-            "/api/v1/production/shift-production-entries/{$entryId}/amend",
-            $this->correctFigures(),
-        )->assertStatus(422);
-        $this->assertStringContainsString('handed over to the next shift', $amend->json('message'));
-
-        $this->actAsChecker();
-        $return = $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/return-to-production", [
-            'reason' => 'Needs a recount.',
-        ])->assertStatus(422);
-        $this->assertStringContainsString('handed over to the next shift', $return->json('message'));
     }
 
     public function test_a_batch_still_running_has_nothing_to_amend(): void
