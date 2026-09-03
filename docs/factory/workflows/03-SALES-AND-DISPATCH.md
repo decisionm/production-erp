@@ -142,6 +142,12 @@ Every item below is a GAP against a record now in force.
     refusal (DEC-20260902-035).
 11. Stale text: the Tally mirror statement on the Sales pages; superseded ids
     in code comments; one dashboard sales count.
+12. Retire the ERP's own sales invoice (DEC-20260903-004, from the 03-Sep
+    Dispatch -> Invoice spot check): withdraw the Invoices screen and the
+    create/issue routes, keep existing rows as read-only history on the
+    order's trace, and stop building receivables and GST figures on them.
+    Until this ships, an ERP invoice cannot bill more than the customer
+    ordered (PR #88).
 
 ## Status
 

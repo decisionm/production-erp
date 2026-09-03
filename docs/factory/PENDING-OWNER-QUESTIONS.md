@@ -2886,3 +2886,51 @@ means nothing until batches consume the item the Store issued, and the Store's
 Tally reconciliation figure carries all of September's consumption on the
 wrong item. The pre-fill fix stops the split growing from the next batch; only
 (a) decides what to do with what is already booked. *Open since 2026-09-03.*
+
+## Q96 · The ERP's own Sales Invoice: retire it, or keep it as a disciplined proforma? — RESOLVED
+
+**Resolved 2026-09-03 by DEC-20260903-004 — option A: the ERP's own sales
+invoice is retired; the Invoices screen and the create/issue routes are
+withdrawn, no proforma replaces them, existing rows stay as read-only history,
+and the imported Tally invoice matched to the order is the ERP's invoice
+record. Owed build: chapter 3 item 12. Until it ships, PR #88's cap holds.**
+The original question follows.
+
+What the read-only spot check of the live database found (03-Sep-2026 04:00 IST,
+4 orders, 2 deliveries, 2 invoices, all demo-era July data against seeded customers):
+
+- Invoice INV-2 (issued 11-Aug, order SO-3, customer Aqua Bottlers Pvt Ltd) bills
+  2,000 bottles. The Store dispatched 50. Over-invoiced by 1,950 units, ₹8,775.00
+  pre-tax at 4.50. Nothing refused it and nothing flagged it.
+- Nothing reached Tally: outbound sales posting has been OFF since DEC-20260831-012,
+  and the one attempt before that (26-Aug) failed at Tally and is dismissed. The
+  damage is internal to the ERP: any receivable or GST figure built on ERP
+  invoices inherits the 1,950.
+- Why, from the code: the ERP invoice is created from the sales order and its
+  lines; the service never reads deliveries, kept no invoiced counter, and the
+  invoice-line table has no uniqueness on the order line. The same line could be
+  invoiced any number of times at any unit price the client sent.
+- Fixed in code without a decision (this branch): the total quantity invoiced
+  against an order line can no longer exceed the quantity ORDERED, checked under
+  the same row locks the delivery path takes. That is true under either option
+  below. It would not have caught INV-2, whose order line is for 2,000.
+
+What only the factory can settle. DEC-20260831-012 made Tally the origin of the
+sales invoice, the e-invoice and the IRN, and the ERP an importer that matches the
+Tally invoice to the order (DEC-20260902-046). That leaves the ERP's own Invoices
+screen without a stated purpose.
+
+A. **Retire the ERP invoice.** Hide the screen and its routes; the existing rows stay
+   as history; the imported Tally invoice with its match status is the ERP's invoice
+   record from then on.
+B. **Keep it as a proforma, disciplined.** Labelled "Proforma, not the tax invoice";
+   a proforma may precede dispatch but a FINAL one is capped at the quantity
+   delivered and not yet invoiced; the unit price defaults from the order line;
+   one issued document per order line and quantity.
+
+Recommendation: A. Tally owns the invoice; a second invoice document in the ERP is
+a second truth, and a proforma is a Sales quotation-stage document the factory has
+said is out of scope (DEC-20260902-052).
+
+**Blocks:** nothing on the floor. It decides whether the Invoices page and the two
+receivable figures built on it stay in the product. *Open since 2026-09-03.*
