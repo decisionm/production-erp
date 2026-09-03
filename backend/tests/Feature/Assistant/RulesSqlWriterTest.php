@@ -62,9 +62,33 @@ class RulesSqlWriterTest extends TestCase
             $this->fail('Expected a refusal.');
         } catch (AskErpException $e) {
             $this->assertSame(422, $e->status);
-            $this->assertStringContainsString('only answer set questions', $e->getMessage());
-            // Naming what it CAN do is the whole usability of a closed set.
-            $this->assertStringContainsString('Stock on hand', $e->getMessage());
+            // THE EXAMPLES, NOT THE LABELS. The page offered "How much stock
+            // do we have?" while the refusal answered "Stock on hand by item"
+            // — one product, two vocabularies, and the reader left to guess
+            // which one the box wanted.
+            $this->assertStringContainsString('How much stock do we have?', $e->getMessage());
+            $this->assertStringNotContainsString('Stock on hand by item', $e->getMessage());
+        }
+    }
+
+    /**
+     * "today productivity?" came back refused on the live floor. There IS a
+     * rule for today's production; it simply had never been told that word.
+     * Every phrasing here is one a supervisor might reasonably type.
+     */
+    public function test_it_understands_the_words_the_floor_actually_uses(): void
+    {
+        foreach ([
+            'today productivity?' => 'production_today',
+            'productivity today' => 'production_today',
+            'productivity' => 'production_today',
+            'what is our inventory' => 'stock_on_hand',
+            'how many bottles do we have' => 'stock_on_hand',
+            'anything short of reorder' => 'low_stock',
+            'qc pending batches' => 'batches_awaiting_quality',
+            'headcount today' => 'attendance_today',
+        ] as $question => $expected) {
+            $this->assertSame($expected, RulesSqlWriter::match($question)?->key, "asking: {$question}");
         }
     }
 

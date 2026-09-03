@@ -81,7 +81,7 @@ final class RuleBook
                 key: 'stock_on_hand',
                 example: 'How much stock do we have?',
                 label: 'Stock on hand by item',
-                keywords: ['stock on hand', 'stock in hand', 'how much stock', 'stock level', 'current stock', 'stock'],
+                keywords: ['stock on hand', 'stock in hand', 'how much stock', 'stock level', 'current stock', 'stock', 'inventory', 'how many bottles'],
                 tables: ['stock_balances', 'items', 'warehouses'],
                 sql: 'SELECT i.sku AS sku, i.name AS item, w.name AS warehouse, ROUND(SUM(sb.quantity), 3) AS quantity, i.uom AS uom
 FROM stock_balances sb
@@ -98,7 +98,7 @@ LIMIT 200',
                 key: 'low_stock',
                 example: 'Which items are below reorder level?',
                 label: 'Items at or below reorder level',
-                keywords: ['low stock', 'below reorder', 'reorder level', 'running out', 'need to order', 'shortage'],
+                keywords: ['low stock', 'below reorder', 'reorder level', 'running out', 'need to order', 'shortage', 'short of', 'reorder'],
                 tables: ['stock_balances', 'items'],
                 sql: 'SELECT i.sku AS sku, i.name AS item, ROUND(COALESCE(SUM(sb.quantity), 0), 3) AS quantity, i.reorder_level AS reorder_level, i.uom AS uom
 FROM items i
@@ -138,7 +138,7 @@ LIMIT 100',
                 key: 'open_purchase_orders',
                 example: 'Show open purchase orders',
                 label: 'Open purchase orders',
-                keywords: ['open purchase order', 'open po', 'pending purchase order', 'pending po', 'purchase order', 'open orders'],
+                keywords: ['open purchase order', 'open po', 'pending purchase order', 'pending po', 'purchase order', 'open orders', 'po pending', 'orders raised'],
                 tables: ['purchase_orders', 'vendors'],
                 sql: "SELECT po.id AS po_number, v.name AS vendor, po.status AS status, po.order_date AS order_date, po.expected_date AS expected_date
 FROM purchase_orders po
@@ -225,7 +225,8 @@ LIMIT 100",
                 key: 'production_today',
                 example: 'What was produced today?',
                 label: "Today's production",
-                keywords: ['produced today', 'production today', 'output today', 'today production', 'made today'],
+                keywords: ['today productivity', 'productivity today', 'produced today', 'production today', 'output today', 'today production', 'made today', 'productivity'],
+                hints: ['today'],
                 tables: ['shift_production_entries', 'work_centers', 'items'],
                 sql: "SELECT wc.code AS machine, i.name AS item, spe.batch_number AS batch, spe.quantity_produced AS pieces, spe.batch_status AS status
 FROM shift_production_entries spe
@@ -241,7 +242,8 @@ LIMIT 200",
                 key: 'production_by_day',
                 example: 'Daily production for the last 30 days',
                 label: 'Output by day, last 30 days',
-                keywords: ['by day', 'per day', 'daily production', 'day wise', 'production trend', 'last 30 days'],
+                keywords: ['daily production', 'production trend', 'daily output', 'day wise'],
+                hints: ['by day', 'per day', 'last 30 days'],
                 tables: ['shift_production_entries'],
                 sql: "SELECT spe.production_date AS date, SUM(spe.quantity_produced) AS pieces
 FROM shift_production_entries spe
@@ -291,7 +293,7 @@ LIMIT 100",
                 key: 'batches_awaiting_quality',
                 example: 'Which batches are awaiting quality?',
                 label: 'Batches waiting for a quality check',
-                keywords: ['awaiting quality', 'pending quality', 'quality queue', 'not checked', 'waiting for quality'],
+                keywords: ['awaiting quality', 'pending quality', 'quality queue', 'not checked', 'waiting for quality', 'qc pending', 'quality pending', 'qc queue'],
                 tables: ['shift_production_entries', 'work_centers', 'items'],
                 sql: "SELECT spe.batch_number AS batch, wc.code AS machine, i.name AS item, spe.production_date AS date, spe.quantity_produced AS pieces
 FROM shift_production_entries spe
@@ -415,7 +417,7 @@ LIMIT 200",
                 key: 'attendance_today',
                 example: 'Attendance today',
                 label: "Today's attendance",
-                keywords: ['attendance today', 'present today', 'who is present', 'today attendance', 'attendance'],
+                keywords: ['attendance today', 'present today', 'who is present', 'today attendance', 'attendance', 'headcount', 'who came'],
                 tables: ['attendances', 'employees'],
                 sql: "SELECT a.status AS status, COUNT(*) AS people
 FROM attendances a

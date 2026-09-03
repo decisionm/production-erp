@@ -7,6 +7,7 @@ use App\Modules\Assistant\Catalogue\ColumnSpec;
 use App\Modules\Assistant\Catalogue\SchemaCatalogue;
 use App\Modules\Assistant\Catalogue\TableSpec;
 use App\Modules\Assistant\Models\AskErpConversation;
+use App\Modules\Assistant\Services\SchemaRetriever;
 use App\Modules\HRMS\Models\Employee;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -164,5 +165,25 @@ class AskErpHistoryTest extends TestCase
         $this->postJson("/api/v1/ask-erp/conversations/{$conversation->id}/ask", ['question' => 'zzzz qqqq'])
             ->assertStatus(422)
             ->assertJsonPath('message', 'That question matches none of the tables you can see. Try naming what you want counted.');
+    }
+
+    /**
+     * A WORD MATCHER MUST NOT DECIDE WHAT A MODEL CANNOT ANSWER.
+     *
+     * "today productivity?" was refused on the live floor before Claude ever
+     * saw it: no table is called productivity, so the lexical rank found
+     * nothing and the gate closed. On a model driver the retriever now falls
+     * back to the tables the rule book names, so the model gets its chance to
+     * answer or to decline. Permission still decides what is in that set.
+     */
+    public function test_the_fallback_table_set_is_still_permission_filtered(): void
+    {
+        $retriever = app(SchemaRetriever::class);
+
+        $withHrms = $this->login(['assistant.view', 'hrms.view']);
+        $this->assertNotSame([], $retriever->defaultTables($withHrms, 8));
+
+        $withoutAnything = $this->login(['assistant.view']);
+        $this->assertSame([], $retriever->defaultTables($withoutAnything, 8));
     }
 }

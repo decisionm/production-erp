@@ -159,6 +159,27 @@ class AskErpService
 
         try {
             $specs = $this->retriever->forQuestion($user, $question, $previousTables);
+
+            if ($specs === []) {
+                // A WORD MATCHER MUST NOT DECIDE WHAT A MODEL CANNOT ANSWER.
+                // "today productivity?" was refused here on the live floor
+                // without Claude ever seeing it: no table is called
+                // productivity, so the lexical rank found nothing and the
+                // gate closed. The gate was built for the rules driver,
+                // where matching nothing genuinely means answering nothing.
+                //
+                // For a model, matching nothing means only that the question
+                // used different words. So it now falls back to the tables
+                // this factory's own rule book cares about — a curated set,
+                // already permission-filtered, and small enough to stay cheap
+                // — and lets the model say it cannot rather than saying so on
+                // its behalf. The rules driver keeps the old behaviour: it
+                // has no use for tables no rule names.
+                $specs = config('ask-erp.driver') === 'rules'
+                    ? []
+                    : $this->retriever->defaultTables($user, (int) config('ask-erp.tables_per_question'));
+            }
+
             if ($specs === []) {
                 // Naming what CAN be asked matters more now that the page
                 // shows its suggestions only on an empty thread: a reader
