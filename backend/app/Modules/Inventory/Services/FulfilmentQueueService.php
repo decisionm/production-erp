@@ -125,6 +125,24 @@ class FulfilmentQueueService
     }
 
     /**
+     * HOW MANY ORDER LINES STILL NEED THE STORE — the dashboard tile.
+     *
+     * It asks `queue()` itself, with no filters, and reads the total. Not
+     * because that is cheap — it builds every row — but because the tile's
+     * whole promise is that its number is the number of rows the storekeeper
+     * finds after tapping it, and the default view is a rule (S16: everything
+     * that is not `fully_allocated`) that would have to be restated to be
+     * counted separately. Restated, it could drift; asked, it cannot.
+     *
+     * The cost is the same read the queue screen already does, and the
+     * dashboard summary is fetched once per visit, not polled.
+     */
+    public function needingStoreCount(): int
+    {
+        return $this->queue([], 1, 1)->total();
+    }
+
+    /**
      * IS THIS ORDER READY TO GO OUT? Every line covered by what has already
      * been delivered plus what is still held for it.
      *

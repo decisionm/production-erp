@@ -7,7 +7,9 @@ use App\Modules\CRM\Services\LeadService;
 use App\Modules\CRM\Services\OpportunityService;
 use App\Modules\Finance\Services\AccountsReceivableService;
 use App\Modules\HRMS\Services\LeaveRequestService;
+use App\Modules\Inventory\Services\FulfilmentQueueService;
 use App\Modules\Inventory\Services\ItemService;
+use App\Modules\Inventory\Services\MaterialRequestService;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Inventory\Services\WarehouseService;
 use App\Modules\Maintenance\Services\MaintenanceWorkOrderService;
@@ -33,6 +35,8 @@ class DashboardService
         private readonly ItemService $items,
         private readonly WarehouseService $warehouses,
         private readonly StockMovementService $stock,
+        private readonly MaterialRequestService $materialRequests,
+        private readonly FulfilmentQueueService $fulfilmentQueue,
         private readonly PurchaseOrderService $purchaseOrders,
         private readonly PurchaseRequisitionService $purchaseRequisitions,
         private readonly WorkOrderService $workOrders,
@@ -65,6 +69,12 @@ class DashboardService
                 'total_items' => $this->items->count(),
                 'total_warehouses' => $this->warehouses->count(),
                 'low_stock_items' => $this->stock->lowStockCount(),
+                // THE STORE'S TWO ACTION COUNTS (chapter 1 §1: every login
+                // needs its own pending actions first). Both are the total of
+                // a screen's DEFAULT view, not a figure of their own, so
+                // tapping the tile lands on exactly these rows.
+                'material_requests_to_issue' => $this->materialRequests->openToStoreCount(),
+                'order_lines_awaiting_store' => $this->fulfilmentQueue->needingStoreCount(),
             ];
         }
         if ($sees('procurement')) {

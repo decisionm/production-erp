@@ -91,6 +91,31 @@ class MaterialRequestService
         return $page;
     }
 
+    /**
+     * HOW MANY REQUESTS ARE STILL TO ISSUE — the store's dashboard tile, and
+     * it must equal the number of rows `queue()` returns on its DEFAULT view.
+     *
+     * That view is not "no filter": it is the two open statuses
+     * (MaterialRequestStatus::isOpenToTheStore) over submitted requests only.
+     * Both halves are repeated here rather than shared with `queue()` because
+     * the two shapes differ — one pages and decorates, one counts in SQL —
+     * and a count computed off a page would be a different, wrong number.
+     * DashboardQueueTest pins them to each other, so the pair cannot drift.
+     */
+    public function openToStoreCount(): int
+    {
+        return MaterialRequest::query()
+            ->whereNotNull('submitted_at')
+            ->whereIn('status', array_map(
+                fn (MaterialRequestStatus $status) => $status->value,
+                array_filter(
+                    MaterialRequestStatus::cases(),
+                    fn (MaterialRequestStatus $status) => $status->isOpenToTheStore(),
+                ),
+            ))
+            ->count();
+    }
+
     /** One request, loaded and decorated exactly as the queue's rows are. */
     public function show(MaterialRequest $request): MaterialRequest
     {

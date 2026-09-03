@@ -2,7 +2,20 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ConfigProvider } from 'antd';
-import '@fontsource-variable/archivo/wdth.css';
+/* Both faces are BUNDLED, as Archivo was: nothing on this floor should have
+   to reach Google for a font, and the plant's link is not something a screen
+   full of quantities may depend on.
+ *
+ * Plex Sans is one variable weight axis. Plex Mono has no variable build, so
+ * its weights are named one by one — 500 for a figure in running text, 600
+ * for a tile's own number, 700 for the dashboard's headline counts, which
+ * were drawn at 700 when they were Archivo. A weight that is not bundled is
+ * not a lighter result: the browser synthesises it, and a faked bold on a
+ * monospaced digit is exactly where it looks worst. */
+import '@fontsource-variable/ibm-plex-sans/wght.css';
+import '@fontsource/ibm-plex-mono/500.css';
+import '@fontsource/ibm-plex-mono/600.css';
+import '@fontsource/ibm-plex-mono/700.css';
 import { registerSW } from 'virtual:pwa-register';
 import App from './app/App';
 import { queryClient } from '@/lib/queryClient';

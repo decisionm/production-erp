@@ -3026,3 +3026,62 @@ the clock, and the export. Nothing pays anybody until A-D are answered.
 **Blocks:** the "final file for payroll" from the original HRMS ask. The
 month can be corrected and read today; it cannot be turned into money.
 *Open since 2026-09-04.*
+
+## Q99 · What belongs in each role's queue? Store and the Administrator are written down; the other five are a guess
+
+Chapter 1 §1 says every login needs a dashboard for its own job, and names
+six roles that must see their own pending actions first: Store, Procurement,
+Quality, Production, Accounts and Sales.
+
+**Built and live-ready:** one dashboard shell with a "Waiting on you" strip
+at the top. Each tile is a figure, two or three words, and a colour, and
+tapping it opens exactly the rows it counted. Which tiles a login sees is
+decided by its PERMISSIONS, so a role created on the Roles screen gets
+everything it is allowed to see without anybody editing code.
+
+**Written down, and built as written:** the Store's queue is spelled out in
+chapter 1 §1 — requests raised and their status, requests waiting for Store
+issue, incoming material held for Quality, finished goods held against sales
+orders, and sales lines waiting for Store dispatch. The Administrator and
+Owner keep the whole factory view they have today.
+
+**Not written down anywhere, and therefore assumed:** what the other five
+queues should actually contain. Today the strip offers each of them the
+figures the ERP already keeps:
+
+- **Production** — batches waiting for the Plant Manager, its own open
+  material requests.
+- **Quality** — open NCRs. (Inspections due and checklists owed are NOT on
+  it; see below.)
+- **Accounts** — batches waiting for the Accountant's signature, purchase
+  requisitions waiting to be approved, Tally vouchers that failed.
+- **Sales** — order lines waiting to be dispatched.
+- **Procurement** — purchase requisitions waiting to be approved.
+
+That list is an engineer's reading of what each role does, not a decision.
+Three questions follow from it, and none can be answered from the code:
+
+A. **Is each of those five lists the right FIRST thing for that role?** A
+   tile that is not the job gets ignored, and a strip of ignored tiles is
+   worse than no strip.
+B. **What is MISSING from each?** A supervisor may want the machine that is
+   down before anything else; Accounts may want the bills nobody has
+   recorded. The ERP holds both figures — neither is on a queue because
+   nobody has said they belong there.
+C. **Does Procurement need its own login at all,** or is it Accounts and
+   Store between them? DEC-20260903-006 and DEC-20260903-008 gave both roles
+   full procurement write, which is most of what a Procurement role would be.
+
+**One figure was deliberately left off, and it is not an oversight.** The
+Store's four finished-goods figures — completed, Quality-pending, approved,
+rejected — are required by DEC-20260902-016. They read a Quality-pending
+stock state that does not exist yet: DEC-20260902-042 leaves which internal
+location carries those goods expressly undecided, and requires a READ-ONLY
+count of the live Quality-pending finished goods, reviewed by a person,
+before any of it is switched on. Inventing a location to fill four tiles is
+the exact guess that rule exists to prevent, so the tiles wait for the count.
+
+**Blocks:** nothing on the floor. Every role has a working dashboard today
+and the Store's is the one the chapter specifies. What is blocked is knowing
+whether the other five are the right five.
+*Open since 2026-09-04.*
