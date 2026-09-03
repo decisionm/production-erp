@@ -1,4 +1,4 @@
-import { UploadOutlined } from '@ant-design/icons';
+import { BellOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Col, Empty, Input, Row, Segmented, Space, Statistic, Table, Tag, Tooltip, Typography, Upload } from 'antd';
 import { useMemo, useState } from 'react';
@@ -340,6 +340,38 @@ export default function ClientOutstandingPage() {
                     ? <Tag style={{ marginInlineEnd: 0 }}>Balance only</Tag>
                     : count,
         },
+        {
+            /*
+             * THE REMINDER PLACEHOLDER — a seat kept for chasing a client,
+             * before anything can chase one.
+             *
+             * IT IS DISABLED ON PURPOSE, and that is the whole design. A
+             * live-looking button that silently does nothing is worse than no
+             * button at all: an accounts clerk presses it, believes the client
+             * has been chased, and the client is never chased — the money goes
+             * quiet and the screen looks like it worked. A control that cannot
+             * be pressed cannot tell that lie.
+             *
+             * The tooltip carries the "why" instead of a sentence on the page
+             * (floor and desk users do not read page blurbs), and the button
+             * keeps its real label so the column that arrives later is the
+             * column that is here now.
+             */
+            title: 'Reminder',
+            key: 'reminder',
+            width: 150,
+            render: () => (
+                <Tooltip title="Not connected yet — reminders cannot be sent from here so far.">
+                    {/* antd fires no mouse event on a disabled control, so the
+                        tooltip needs a wrapper that can receive one. */}
+                    <span>
+                        <Button size="small" icon={<BellOutlined />} disabled>
+                            Send reminder
+                        </Button>
+                    </span>
+                </Tooltip>
+            ),
+        },
     ];
 
     return (
@@ -572,6 +604,10 @@ export default function ClientOutstandingPage() {
                                 <Table.Summary.Cell index={12} align="right">
                                     <Text strong>{hasBalanceOnly ? 'Partial' : totals.bill_count}</Text>
                                 </Table.Summary.Cell>
+                                {/* Reminder: nothing to total. Present so the
+                                    footer keeps as many cells as the header —
+                                    see the spacer note at index 0. */}
+                                <Table.Summary.Cell index={13} />
                             </Table.Summary.Row>
                         </Table.Summary>
                     )
