@@ -1,7 +1,7 @@
-import { HistoryOutlined, PlusOutlined } from '@ant-design/icons';
+import { ArrowDownOutlined, HistoryOutlined, PlusOutlined, SendOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Input, Space, Typography } from 'antd';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
     askQuestion,
@@ -17,20 +17,25 @@ import HistoryDrawer from '@/features/ask-erp/components/HistoryDrawer';
 import Suggestions from '@/features/ask-erp/components/Suggestions';
 import type { AskErpMessage, AskResult } from '@/features/ask-erp/types';
 import { apiErrorSummary } from '@/lib/apiError';
+import { isNearBottom } from '@/features/ask-erp/thread';
+import { useDisplayStore } from '@/theme/store';
+import { askBubbleBg } from '@/theme/tokens';
 
 /**
  * ASK ERP — a question, its answer, and the evidence under it.
  *
- * NOT A CHAT, and the layout says so. Bubbles imply somebody on the other
- * end; there is nobody. Each turn is a RESULT SLIP: the question as its
- * heading, the answer beneath it, the rows beneath that, and last the tables
- * it read and the query it ran. That order is this factory's own habit — its
- * screens name where every figure came from — and it is the order a person
- * checks a number in.
+ * THE SHAPE IS A CHAT WINDOW (03-Sep-2026, owner: it does "not look like a
+ * modern chat window"). The thread owns the height and scrolls on its own,
+ * and the composer is pinned to the floor of the page where a hand rests.
+ * Before this the page put a one-line box near the TOP with a page-sized
+ * void beneath it, which read as a search bar that had lost its results.
  *
- * One column. Past questions moved into a drawer, because a permanent list
- * took a quarter of the width and, on a phone, sat ABOVE the box you came to
- * type in.
+ * WHAT DID NOT CHANGE, and the earlier note here was right about: an answer
+ * carries a table, a chart and the SQL it ran, so the ANSWER is not a
+ * bubble. Only the question is. A bubble sized for wide content is not a
+ * bubble, and this factory's screens name where every figure came from —
+ * so the answer keeps the full width and the evidence stays under it. That
+ * is the same split every assistant that returns wide content makes.
  *
  * The page computes nothing. The server decides from the login's permissions
  * which tables may be looked at, and every figure here came back from it.
@@ -43,7 +48,13 @@ export default function AskErpPage() {
     const [draft, setDraft] = useState('');
     const [historyOpen, setHistoryOpen] = useState(false);
     const [results, setResults] = useState<Record<number, AskResult>>({});
+    const [atBottom, setAtBottom] = useState(true);
+    // The bubble's fill is contrast-tested per mode, so it is read from the
+    // palette rather than written into the stylesheet.
+    const themeMode = useDisplayStore((state) => state.mode);
+    const bubble = { background: askBubbleBg[themeMode] };
     const queryClient = useQueryClient();
+    const threadRef = useRef<HTMLDivElement>(null);
     const bottomRef = useRef<HTMLDivElement>(null);
 
     const catalogue = useQuery({ queryKey: ['ask-erp', 'catalogue'], queryFn: getCatalogue });
@@ -105,28 +116,43 @@ export default function AskErpPage() {
     });
 
     const messages: AskErpMessage[] = useMemo(() => thread.data?.messages ?? [], [thread.data]);
+    const answered = useMemo(() => messages.filter((message) => message.role === 'assistant'), [messages]);
+
+    const toBottom = useCallback(() => bottomRef.current?.scrollIntoView({ block: 'end' }), []);
+
+    /*
+     * Follow the newest turn — but only while the reader is already there.
+     * Yanking someone back to the bottom while they are reading an older
+     * answer is the thing every chat window gets wrong; the jump button
+     * below is what they get instead.
+     */
     useEffect(() => {
-        bottomRef.current?.scrollIntoView({ block: 'end' });
-    }, [messages.length, ask.isPending]);
+        if (atBottom) toBottom();
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- position is read at the moment a turn arrives, not tracked.
+    }, [answered.length, ask.isPending]);
 
     const submit = () => {
         const question = draft.trim();
-        if (question && !ask.isPending) ask.mutate(question);
+        if (question && !ask.isPending) {
+            setAtBottom(true);
+            ask.mutate(question);
+        }
     };
 
     const askNow = (question: string) => {
         if (ask.isPending) return;
         setDraft(question);
+        setAtBottom(true);
         ask.mutate(question);
     };
 
-    const empty = messages.length === 0;
+    const empty = answered.length === 0 && !ask.isPending;
 
     return (
-        <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Space style={{ width: '100%', justifyContent: 'space-between' }} align="center">
+        <div className="ask-shell">
+            <div className="ask-head">
                 <Typography.Title level={3} style={{ margin: 0 }}>
-                    {thread.data?.title && !empty ? thread.data.title : 'Ask ERP'}
+                    {thread.data?.title && answered.length > 0 ? thread.data.title : 'Ask ERP'}
                 </Typography.Title>
                 <Space size={8}>
                     <Button icon={<HistoryOutlined />} onClick={() => setHistoryOpen(true)}>
@@ -136,54 +162,110 @@ export default function AskErpPage() {
                         New question
                     </Button>
                 </Space>
-            </Space>
-
-            {catalogue.data && !catalogue.data.configured ? (
-                <Alert type="warning" showIcon message="Ask ERP is not configured on this server." />
-            ) : null}
-
-            {empty ? (
-                <Suggestions examples={catalogue.data?.examples ?? []} onAsk={askNow} />
-            ) : null}
-
-            <div style={{ maxHeight: 'calc(100vh - 320px)', overflowY: 'auto', paddingRight: 8 }}>
-                <Space direction="vertical" size={24} style={{ width: '100%' }}>
-                    {messages
-                        .filter((message) => message.role === 'assistant')
-                        .map((message) => (
-                            <section key={message.id}>
-                                {/* The question IS the heading of its slip — not
-                                    a bubble addressed to anyone. */}
-                                <Typography.Title level={5} style={{ margin: '0 0 8px' }}>
-                                    {message.question}
-                                </Typography.Title>
-                                <AnswerCard
-                                    message={message}
-                                    result={results[message.id] ?? null}
-                                    conversationId={conversationId}
-                                    onRerun={(result) => setResults((current) => ({ ...current, [message.id]: result }))}
-                                />
-                            </section>
-                        ))}
-                    <div ref={bottomRef} />
-                </Space>
             </div>
 
-            {ask.isError ? <Alert type="error" showIcon message={apiErrorSummary(ask.error)} /> : null}
+            {catalogue.data && !catalogue.data.configured ? (
+                <Alert type="warning" showIcon message="Ask ERP is not configured on this server." style={{ marginBottom: 12 }} />
+            ) : null}
 
-            <Space.Compact style={{ width: '100%' }}>
-                <Input
-                    size="large"
+            <div
+                className="ask-thread"
+                ref={threadRef}
+                onScroll={(event) => setAtBottom(isNearBottom(event.currentTarget))}
+            >
+                {empty ? (
+                    <div className="ask-empty">
+                        <div className="ask-empty-mark" />
+                        <Typography.Title level={4} style={{ margin: 0 }}>
+                            What would you like to know?
+                        </Typography.Title>
+                        <Suggestions examples={catalogue.data?.examples ?? []} onAsk={askNow} />
+                    </div>
+                ) : (
+                    <div className="ask-turns">
+                        {answered.map((message) => (
+                            <section key={message.id}>
+                                {/* The question is the person's own turn, so it
+                                    sits at the end of the row as a bubble. */}
+                                <div className="ask-question">
+                                    <span style={bubble}>{message.question}</span>
+                                </div>
+                                <div className="ask-answer" style={{ marginTop: 14 }}>
+                                    <div className="ask-answer-by">Ask ERP</div>
+                                    <AnswerCard
+                                        message={message}
+                                        result={results[message.id] ?? null}
+                                        conversationId={conversationId}
+                                        onRerun={(result) => setResults((current) => ({ ...current, [message.id]: result }))}
+                                    />
+                                </div>
+                            </section>
+                        ))}
+
+                        {ask.isPending ? (
+                            <section>
+                                <div className="ask-question">
+                                    <span style={bubble}>{ask.variables}</span>
+                                </div>
+                                <div className="ask-answer" style={{ marginTop: 14 }}>
+                                    <div className="ask-answer-by">Ask ERP</div>
+                                    {/* Said where the answer will appear, so the
+                                        wait has a place rather than a spinner. */}
+                                    <div className="ask-thinking">
+                                        <i />
+                                        <i />
+                                        <i />
+                                        <span>Reading the tables</span>
+                                    </div>
+                                </div>
+                            </section>
+                        ) : null}
+
+                        <div ref={bottomRef} />
+
+                        {!atBottom ? (
+                            <div className="ask-jump">
+                                <Button size="small" shape="round" icon={<ArrowDownOutlined />} onClick={toBottom}>
+                                    Newest
+                                </Button>
+                            </div>
+                        ) : null}
+                    </div>
+                )}
+            </div>
+
+            {ask.isError ? <Alert type="error" showIcon message={apiErrorSummary(ask.error)} style={{ marginTop: 12 }} /> : null}
+
+            <div className="ask-composer">
+                <Input.TextArea
+                    autoSize={{ minRows: 1, maxRows: 6 }}
                     placeholder="Ask a question"
                     value={draft}
                     maxLength={500}
+                    autoFocus
                     onChange={(event) => setDraft(event.target.value)}
-                    onPressEnter={submit}
+                    onKeyDown={(event) => {
+                        // Enter sends; Shift+Enter is a new line, which a
+                        // one-line Input could not offer at all.
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                            event.preventDefault();
+                            submit();
+                        }
+                    }}
                 />
-                <Button size="large" type="primary" onClick={submit} loading={ask.isPending} disabled={!draft.trim()}>
-                    Ask
-                </Button>
-            </Space.Compact>
+                <div className="ask-composer-hint">
+                    <span>Enter to send · Shift+Enter for a new line</span>
+                    <Button
+                        type="primary"
+                        shape="circle"
+                        icon={<SendOutlined />}
+                        aria-label="Ask"
+                        onClick={submit}
+                        loading={ask.isPending}
+                        disabled={!draft.trim()}
+                    />
+                </div>
+            </div>
 
             <HistoryDrawer
                 open={historyOpen}
@@ -206,6 +288,6 @@ export default function AskErpPage() {
                 onRename={(id, title) => rename.mutate({ id, title })}
                 onDelete={(id) => remove.mutate(id)}
             />
-        </Space>
+        </div>
     );
 }
