@@ -5,6 +5,8 @@ namespace App\Modules\Assistant\Services;
 use App\Modules\Assistant\Exceptions\AskErpException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 /**
  * Asks an OpenAI chat model for one SELECT as structured JSON — the same
@@ -137,6 +139,31 @@ class OpenAiSqlWriter implements SqlWriter
             return new AskErpException('Too many questions at once. Wait a moment, then try again.', 429);
         }
 
-        return new AskErpException('The model refused the request ('.($code !== '' ? $code : $status).').', 502);
+        // Everything else, and this is the branch a rejected request body
+        // lands in. It KEEPS the provider's own message and the parameter it
+        // names: a 400 saying which field was wrong is the difference between
+        // a one-line config fix and an afternoon in the logs. The full error
+        // is logged too, because the sentence is trimmed for the screen.
+        $message = trim((string) data_get($body, 'error.message'));
+        $param = trim((string) data_get($body, 'error.param'));
+
+        Log::warning('Ask ERP: the model provider rejected the request.', [
+            'status' => $status,
+            'type' => $type,
+            'code' => $code,
+            'param' => $param,
+            'message' => $message,
+        ]);
+
+        $detail = $code !== '' ? $code : (string) $status;
+        if ($param !== '') {
+            $detail .= ' on '.$param;
+        }
+
+        return new AskErpException(
+            'The model refused the request ('.$detail.')'
+                .($message !== '' ? ': '.Str::limit($message, 200) : '.'),
+            502,
+        );
     }
 }

@@ -5,8 +5,10 @@ namespace Tests\Feature\Assistant;
 use App\Modules\Assistant\Exceptions\AskErpException;
 use App\Modules\Assistant\Services\AnthropicSqlWriter;
 use App\Modules\Assistant\Services\OpenAiSqlWriter;
+use App\Modules\Assistant\Services\ProviderStatus;
 use App\Modules\Assistant\Services\SqlRequest;
 use App\Modules\Assistant\Services\SqlWriter;
+use App\Modules\Assistant\Services\UnconfiguredSqlWriter;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -248,12 +250,71 @@ class OpenAiSqlWriterTest extends TestCase
         $this->assertInstanceOf(AnthropicSqlWriter::class, $this->app->make(SqlWriter::class));
     }
 
-    public function test_an_unknown_driver_refuses_instead_of_falling_back(): void
+    /*
+     * An unknown driver must not blow up while the CONTAINER is building the
+     * controller — SqlWriter is a constructor dependency two levels up from
+     * AskErpController::ask(), so a throw during resolution lands outside the
+     * try block that turns an AskErpException into an answer. Resolving is
+     * therefore required to succeed; the refusal comes when it is used.
+     */
+
+    public function test_an_unknown_driver_resolves_without_throwing(): void
     {
         config(['ask-erp.driver' => 'gemini']);
 
-        $this->expectException(AskErpException::class);
+        $writer = $this->app->make(SqlWriter::class);
 
-        $this->app->make(SqlWriter::class);
+        $this->assertInstanceOf(UnconfiguredSqlWriter::class, $writer);
+        $this->assertSame('gemini', $writer->driver());
+    }
+
+    public function test_an_unknown_driver_refuses_when_it_is_actually_used(): void
+    {
+        config(['ask-erp.driver' => 'gemini']);
+
+        try {
+            $this->app->make(SqlWriter::class)->write($this->request());
+            $this->fail('Expected a refusal.');
+        } catch (AskErpException $e) {
+            $this->assertSame(503, $e->status);
+            $this->assertSame('Ask ERP is not configured on this server.', $e->getMessage());
+        }
+    }
+
+    public function test_a_rejected_request_body_keeps_the_providers_own_explanation(): void
+    {
+        Http::fake(['api.openai.com/*' => Http::response([
+            'error' => [
+                'message' => "Invalid value: 'banana'. Supported values are: 'low', 'medium' and 'high'.",
+                'type' => 'invalid_request_error',
+                'param' => 'reasoning_effort',
+                'code' => 'invalid_value',
+            ],
+        ], 400)]);
+
+        try {
+            (new OpenAiSqlWriter)->write($this->request());
+            $this->fail('Expected a refusal.');
+        } catch (AskErpException $e) {
+            $this->assertSame(502, $e->status);
+            $this->assertStringContainsString('invalid_value', $e->getMessage());
+            $this->assertStringContainsString('reasoning_effort', $e->getMessage());
+            $this->assertStringContainsString('Supported values', $e->getMessage());
+        }
+    }
+
+    public function test_readiness_follows_the_driver_not_whichever_key_happens_to_be_set(): void
+    {
+        config(['ask-erp.driver' => 'openai', 'ask-erp.api_key' => null]);
+        $this->assertTrue(ProviderStatus::configured(), 'an openai server with an openai key is configured');
+
+        config(['ask-erp.openai.api_key' => null]);
+        $this->assertFalse(ProviderStatus::configured());
+
+        config(['ask-erp.driver' => 'anthropic', 'ask-erp.api_key' => 'sk-ant-test']);
+        $this->assertTrue(ProviderStatus::configured());
+
+        config(['ask-erp.driver' => 'gemini']);
+        $this->assertFalse(ProviderStatus::configured(), 'an unknown driver is never ready');
     }
 }

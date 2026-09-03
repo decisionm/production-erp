@@ -36,7 +36,10 @@ class AskErpApiTest extends TestCase
                 return new SqlDraft('SELECT e.status, COUNT(*) AS n FROM employees e GROUP BY e.status', '{{count}} statuses.', 'bar');
             }
         });
-        config(['ask-erp.api_key' => 'test-key']);
+        // The driver is pinned, not inherited. Without this the suite reads
+        // whatever ASK_ERP_DRIVER the developer happens to have in .env, and
+        // a machine set up for one provider fails tests written for the other.
+        config(['ask-erp.driver' => 'anthropic', 'ask-erp.api_key' => 'test-key']);
     }
 
     /** @param list<string> $permissions */
@@ -133,5 +136,39 @@ class AskErpApiTest extends TestCase
 
         $this->getJson('/api/v1/ask-erp/catalogue')->assertOk()->assertJsonPath('configured', false);
         $this->postJson("/api/v1/ask-erp/conversations/{$conversation->id}/ask", ['question' => 'employees'])->assertStatus(503);
+    }
+
+    /**
+     * A driver name that matches no provider must travel the SAME road as any
+     * other refusal — through the controller's catch and out as a 503 with a
+     * sentence. Asserted here rather than only against the container, because
+     * SqlWriter is resolved while this controller is being built: a binding
+     * that threw during resolution would produce a 500 and a stack trace, and
+     * a unit test on the container could not tell the difference.
+     */
+    public function test_an_unknown_driver_answers_503_through_the_route_not_500(): void
+    {
+        config(['ask-erp.driver' => 'gemini']);
+        $this->app->forgetInstance(SqlWriter::class);
+        $user = $this->login(['assistant.view', 'hrms.view']);
+        $conversation = AskErpConversation::create(['user_id' => $user->id, 'title' => 'x']);
+
+        $this->getJson('/api/v1/ask-erp/catalogue')->assertOk()->assertJsonPath('configured', false);
+        $this->postJson("/api/v1/ask-erp/conversations/{$conversation->id}/ask", ['question' => 'employees'])
+            ->assertStatus(503)
+            ->assertJsonPath('message', 'Ask ERP is not configured on this server.');
+    }
+
+    /**
+     * The readiness flag follows the DRIVER. An OpenAI server holds no
+     * Anthropic key and is still perfectly able to answer; before this it
+     * would have told the user it was not configured.
+     */
+    public function test_an_openai_server_reports_itself_configured(): void
+    {
+        config(['ask-erp.driver' => 'openai', 'ask-erp.api_key' => null, 'ask-erp.openai.api_key' => 'sk-test']);
+        $this->login(['assistant.view', 'hrms.view']);
+
+        $this->getJson('/api/v1/ask-erp/catalogue')->assertOk()->assertJsonPath('configured', true);
     }
 }
