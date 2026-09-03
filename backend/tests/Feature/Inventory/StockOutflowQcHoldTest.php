@@ -579,11 +579,28 @@ class StockOutflowQcHoldTest extends TestCase
         // are covered is that they all land in decrementBalance, which the
         // rest of this file exercises door by door.
         //
-        // ResetTestData is the one expected exception and stays one: a
-        // console command that zeroes the whole table to reset a demo
-        // instance, which is not an outflow and has no hold to respect.
-        // CheckStockLedger reads the raw table and writes nothing, so it does
-        // not appear — if it ever does, it has stopped being read-only.
+        // TWO CONSOLE COMMANDS ARE EXPECTED HERE, AND BOTH ARE THE SAME KIND
+        // OF THING: a manually-run repair that RECOMPUTES a balance from the
+        // movements that survive, rather than moving stock. Neither is an
+        // outflow, so neither has a QC hold to respect, and neither can go
+        // through decrementBalance — there is nothing to decrement, the rows
+        // it would have summed are gone.
+        //
+        //   ResetTestData          zeroes the table and re-sums it, to reset
+        //                          a demo instance.
+        //   RemoveWipDemoRows      removes demo-seeded ledger rows by exact
+        //                          id (DEC-20260903-002) and re-sums the
+        //                          (item, warehouse) pairs it touched, inside
+        //                          the same transaction as the delete.
+        //
+        // ADDING A THIRD IS A DECISION, NOT A TEST FIX. The guard is worth
+        // what the list is worth: anything that MOVES stock belongs in
+        // StockMovementService and must fail here. Only a command that
+        // deletes ledger rows and restates the sum belongs on this list, and
+        // it belongs on it because leaving the balance untouched after a
+        // delete would break the very invariant inventory:check-ledger signs
+        // by. CheckStockLedger reads the raw table and writes nothing, so it
+        // does not appear — if it ever does, it has stopped being read-only.
         $writers = [];
         $root = dirname(__DIR__, 3).'/app';
         $patterns = [
@@ -609,6 +626,7 @@ class StockOutflowQcHoldTest extends TestCase
         sort($writers);
 
         $this->assertSame([
+            'Console/Commands/RemoveWipDemoRows.php',
             'Console/Commands/ResetTestData.php',
             'Modules/Inventory/Services/StockMovementService.php',
         ], $writers);
