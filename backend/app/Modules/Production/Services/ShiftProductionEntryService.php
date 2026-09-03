@@ -510,7 +510,13 @@ class ShiftProductionEntryService
             // master. Assessed without them, the gate refuses products whose
             // weight and cycle time it is about to snapshot two lines below.
             $standard = $this->standards->resolve($data['item_id'], $data['production_standard_id'] ?? null);
-            $packaging = $this->standards->resolvePackaging($standard, $data['production_standard_packaging_id'] ?? null);
+            // requireChoice: true (DEC-20260902-020) — this is the one call
+            // that actually creates the batch and freezes the packaging
+            // into its snapshot, so it is the one caller that must refuse
+            // rather than silently proceed with no packing basis when the
+            // standard offers several packagings, none is default, and none
+            // was named. See ProductionStandardResolver::resolvePackaging().
+            $packaging = $this->standards->resolvePackaging($standard, $data['production_standard_packaging_id'] ?? null, requireChoice: true);
 
             // FAIL CLOSED, FORWARD ONLY (DEC-20260821-001). A packing whose
             // own Tally identity names a different stock item from the
