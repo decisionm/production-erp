@@ -955,6 +955,11 @@ Route::prefix('v1')->group(function () {
             Route::post('conversations', [AskErpController::class, 'store']);
             Route::get('conversations/{id}', [AskErpController::class, 'show']);
             Route::post('conversations/{id}/ask', [AskErpController::class, 'ask']);
+            // A stored turn keeps its SQL but not its rows; this runs it
+            // again, re-guarded against the CURRENT reader's permissions.
+            Route::post('conversations/{id}/messages/{message}/rerun', [AskErpController::class, 'rerun']);
+            Route::patch('conversations/{id}', [AskErpController::class, 'rename']);
+            Route::delete('conversations/{id}', [AskErpController::class, 'destroy']);
         });
 
         Route::prefix('hrms')->middleware('module:hrms')->group(function () {
