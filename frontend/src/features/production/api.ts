@@ -13,6 +13,7 @@ import type {
     ConfigurationReview,
     ProductionQueueRead,
     ProductionRequest,
+    ProductionRequestStatus,
     ProductVariants,
     ProductionStandardRow,
     ProductStandardsSummary,
@@ -2163,15 +2164,23 @@ export async function withdrawPackingMaterialMapping(id: number): Promise<void> 
  */
 
 /**
- * The whole queue, priority order, OPEN requests only.
+ * The whole queue, priority order, OPEN requests only — no `statuses` given.
  *
  * DELIBERATELY UNPAGINATED, server-side — reorder renumbers the WHOLE queue,
  * and nobody should be asked to reorder a list they can see one page of. So
  * the payload is a bare `{data}` with no `meta`, and the table it feeds turns
  * pagination off rather than reading a page count that is not there.
+ *
+ * `statuses` is the LOOK-BACK read the owner asked for on 03-Sep-2026: any
+ * mix of the four statuses, answered newest first rather than in queue order
+ * — a produced or cancelled request has no priority to sort by any more.
+ * Read-only, the same as the default call: nothing this function can send
+ * starts, cancels or completes a request.
  */
-export async function listProductionRequests(): Promise<ProductionRequest[]> {
-    const { data } = await api.get<{ data: ProductionRequest[] }>('/production/requests');
+export async function listProductionRequests(statuses?: ProductionRequestStatus[]): Promise<ProductionRequest[]> {
+    const { data } = await api.get<{ data: ProductionRequest[] }>('/production/requests', {
+        params: statuses && statuses.length > 0 ? { status: statuses } : undefined,
+    });
     return data.data;
 }
 
