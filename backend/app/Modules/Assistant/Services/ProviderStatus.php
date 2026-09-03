@@ -23,6 +23,9 @@ final class ProviderStatus
         return match ((string) config('ask-erp.driver')) {
             'anthropic' => (string) config('ask-erp.api_key') !== '',
             'openai' => (string) config('ask-erp.openai.api_key') !== '',
+            // Always ready: the rule set needs no credential to configure and
+            // no balance to stay working.
+            'rules' => true,
             default => false,
         };
     }

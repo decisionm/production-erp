@@ -1,10 +1,15 @@
 <?php
 
 return [
-    // Which model writes the SQL: 'anthropic' (the default, and what the
-    // design was reviewed against) or 'openai'. The choice changes the
-    // transport only — the prompt, the schema, the permission filtering and
-    // SqlGuard are the same on both paths.
+    // Who turns a question into SQL:
+    //   anthropic — Claude (the default, and what the design was reviewed against)
+    //   openai    — a GPT model
+    //   rules     — no model at all: a fixed rule set over the real tables,
+    //               needing no key, no credit and no network. The only driver
+    //               an empty credit balance cannot switch off.
+    // The choice changes THAT STEP ONLY. The permission filter that decides
+    // which tables exist for a reader, SqlGuard, the row cap and the answer
+    // template are identical on all three paths.
     'driver' => env('ASK_ERP_DRIVER', 'anthropic'),
 
     // Anthropic API key. Read from env only; never logged, never sent to the SPA.

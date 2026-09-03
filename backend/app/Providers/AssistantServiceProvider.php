@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Modules\Assistant\Catalogue\SchemaCatalogue;
 use App\Modules\Assistant\Services\AnthropicSqlWriter;
 use App\Modules\Assistant\Services\OpenAiSqlWriter;
+use App\Modules\Assistant\Services\RulesSqlWriter;
 use App\Modules\Assistant\Services\SchemaRetriever;
 use App\Modules\Assistant\Services\SqlWriter;
 use App\Modules\Assistant\Services\UnconfiguredSqlWriter;
@@ -31,6 +32,10 @@ class AssistantServiceProvider extends ServiceProvider
             return match ($driver) {
                 'anthropic' => new AnthropicSqlWriter,
                 'openai' => new OpenAiSqlWriter,
+                // No model, no key, no bill — a fixed rule set over the real
+                // tables. The one driver that cannot be switched off by an
+                // empty credit balance.
+                'rules' => new RulesSqlWriter,
                 default => new UnconfiguredSqlWriter($driver),
             };
         });
