@@ -106,6 +106,8 @@ import {
 import { cavityPrefill } from '@/features/production/startBatchCavities';
 import { chosenStartVariant, mouldLabel, startBatchChoices, startBatchSeparateProductConflict, startBatchTallyIdentity } from '@/features/production/startBatchChoices';
 import { expectedOutput, netRunningHours } from '@/features/production/expectedOutput';
+import { stateStyle } from '@/features/production/machineStateStyle';
+import { useDisplayStore } from '@/theme/store';
 import { roundPer, useProductionSettings } from '@/features/production/packing';
 import { itemLabel, uomOf } from '@/lib/itemLabel';
 import { apiErrorParts } from '@/lib/apiError';
@@ -1277,22 +1279,6 @@ const approvalColor: Record<ShiftProductionEntryStatus, string> = {
  * figure is, or who may press anything — those all stay where they were.
  * ------------------------------------------------------------------------ */
 
-/**
- * One palette for the five machine states, used by BOTH the card's status rail
- * and the floor-status tiles, so a colour means one thing on this screen.
- * The hexes are the ones the cards already carried; only where they are spent
- * has changed.
- */
-const STATE_STYLE: Record<MachineFloorState, { accent: string; readable: string; wash: string; label: string; icon: ReactNode }> = {
-    down: { accent: '#ff4d4f', readable: '#cf1322', wash: '#fff1f0', label: 'Down', icon: <ExclamationCircleFilled /> },
-    mold_change: { accent: '#faad14', readable: '#ad6800', wash: '#fffbe6', label: 'Mold change', icon: <SwapOutlined /> },
-    // A run that belongs to another shift takes its own muted gold, deliberately
-    // a different tone from the mold-change amber it sits beside in the grid.
-    running_other_shift: { accent: '#d48806', readable: '#ad6800', wash: '#fffbe6', label: 'Not handed over', icon: <RetweetOutlined /> },
-    running: { accent: '#52c41a', readable: '#389e0d', wash: '#f6ffed', label: 'Running', icon: <PlayCircleFilled /> },
-    idle: { accent: '#bfbfbf', readable: '#595959', wash: '#fafafa', label: 'Idle', icon: <MinusCircleOutlined /> },
-};
-
 const tabularNums = { fontVariantNumeric: 'tabular-nums' } as const;
 
 /**
@@ -1333,7 +1319,7 @@ function FloorStatTile({
                 maxWidth: 180,
                 padding: '10px 12px',
                 borderRadius: 8,
-                border: '1px solid #f0f0f0',
+                border: '1px solid var(--app-rule)',
                 borderInlineStart: `3px solid ${accent}`,
             }}
         >
@@ -1367,7 +1353,7 @@ function FloorStatTile({
  */
 function FigureTile({ label, value, suffix, hint }: { label: string; value: string; suffix?: string; hint?: string }) {
     const body = (
-        <div style={{ flex: '1 1 120px', minWidth: 120, maxWidth: 220, padding: '10px 12px', border: '1px solid #f0f0f0', borderRadius: 8 }}>
+        <div style={{ flex: '1 1 120px', minWidth: 120, maxWidth: 220, padding: '10px 12px', border: '1px solid var(--app-rule)', borderRadius: 8 }}>
             <Typography.Text type="secondary" style={{ fontSize: 12, display: 'block' }}>
                 {label}
             </Typography.Text>
@@ -1393,7 +1379,7 @@ function SectionHeading({ title, extra, id }: { title: string; extra?: ReactNode
                 flexWrap: 'wrap',
                 marginBottom: 12,
                 paddingBottom: 8,
-                borderBottom: '1px solid #f0f0f0',
+                borderBottom: '1px solid var(--app-rule)',
             }}
         >
             <Typography.Title level={5} style={{ margin: 0 }}>
@@ -1531,6 +1517,10 @@ function BackdateField({
 }
 
 export default function ShiftProductionEntryPage() {
+    // The five state colours follow light/dark — see stateStyle(). Resolved
+    // once here so the tiles and the cards below cannot disagree.
+    const themeMode = useDisplayStore((state) => state.mode);
+    const stateStyles = useMemo(() => stateStyle(themeMode), [themeMode]);
     const [selectedShiftId, setSelectedShiftId] = useState<number | undefined>(undefined);
     const [graceBannerDismissed, setGraceBannerDismissed] = useState(false);
     const [startingMachine, setStartingMachine] = useState<WorkCenter | null>(null);
@@ -2233,6 +2223,14 @@ export default function ShiftProductionEntryPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps -- shiftTabIds is rebuilt each render from shiftOptions; its CONTENT is what matters.
         [activeWorkCenters, runningByMachine, openDowntimeByMachine, openMoldChangeByMachine, effectiveShiftId, shiftOptions],
     );
+
+    /** Machines on the floor — the strip above the tiles has nothing to divide when this is 0. */
+    const floorTotal =
+        floorCounts.running +
+        floorCounts.runningOtherShift +
+        floorCounts.moldChange +
+        floorCounts.down +
+        floorCounts.idle;
     /**
      * Completed Today's totals, over EXACTLY the rows the table below renders.
      * Production-date scoped like the read itself, so it is labelled "today"
@@ -5333,35 +5331,59 @@ export default function ShiftProductionEntryPage() {
 
                 Deliberately not clickable: these are statements about the grid
                 immediately below, not a second way to act on a machine. */}
+
+            {/* THE SHAPE OF THE SHIFT, before a single number is read: one
+                strip, each state's share of the floor. It answers "is most of
+                the floor going?" at a glance and from across a room, which
+                four separate counts do not. Same counts, same colours as the
+                tiles under it and the rails below them. */}
+            {floorTotal > 0 && (
+                <div className="floor-bar" style={{ marginBottom: 10 }} aria-hidden="true">
+                    {(
+                        [
+                            ['running', floorCounts.running],
+                            ['running_other_shift', floorCounts.runningOtherShift],
+                            ['mold_change', floorCounts.moldChange],
+                            ['down', floorCounts.down],
+                            ['idle', floorCounts.idle],
+                        ] as const
+                    )
+                        .filter(([, count]) => count > 0)
+                        .map(([state, count]) => (
+                            <span key={state} style={{ flexGrow: count, background: stateStyles[state].accent }} />
+                        ))}
+                </div>
+            )}
+
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
                 <FloorStatTile
                     count={floorCounts.running}
                     label="Running"
-                    accent={STATE_STYLE.running.accent}
-                    readable={STATE_STYLE.running.readable}
-                    icon={STATE_STYLE.running.icon}
+                    accent={stateStyles.running.accent}
+                    readable={stateStyles.running.readable}
+                    icon={stateStyles.running.icon}
                 />
                 <FloorStatTile
                     count={floorCounts.idle}
                     label="Idle"
-                    accent={STATE_STYLE.idle.accent}
-                    readable={STATE_STYLE.idle.readable}
-                    icon={STATE_STYLE.idle.icon}
+                    accent={stateStyles.idle.accent}
+                    readable={stateStyles.idle.readable}
+                    icon={stateStyles.idle.icon}
                     muted
                 />
                 <FloorStatTile
                     count={floorCounts.down}
                     label="Down"
-                    accent={STATE_STYLE.down.accent}
-                    readable={STATE_STYLE.down.readable}
-                    icon={STATE_STYLE.down.icon}
+                    accent={stateStyles.down.accent}
+                    readable={stateStyles.down.readable}
+                    icon={stateStyles.down.icon}
                 />
                 <FloorStatTile
                     count={floorCounts.moldChange}
                     label="Mold change"
-                    accent={STATE_STYLE.mold_change.accent}
-                    readable={STATE_STYLE.mold_change.readable}
-                    icon={STATE_STYLE.mold_change.icon}
+                    accent={stateStyles.mold_change.accent}
+                    readable={stateStyles.mold_change.readable}
+                    icon={stateStyles.mold_change.icon}
                 />
                 {/* Only when there is one — a permanent zero here would train
                     the eye to skip the row that matters on the day it is not. */}
@@ -5369,9 +5391,9 @@ export default function ShiftProductionEntryPage() {
                     <FloorStatTile
                         count={floorCounts.runningOtherShift}
                         label="Not handed over"
-                        accent={STATE_STYLE.running_other_shift.accent}
-                        readable={STATE_STYLE.running_other_shift.readable}
-                        icon={STATE_STYLE.running_other_shift.icon}
+                        accent={stateStyles.running_other_shift.accent}
+                        readable={stateStyles.running_other_shift.readable}
+                        icon={stateStyles.running_other_shift.icon}
                     />
                 )}
                 {/* THE ANSWER TO MOVING "SENT BACK BY QUALITY" TO THE BOTTOM.
@@ -5406,16 +5428,16 @@ export default function ShiftProductionEntryPage() {
                             style={{
                                 padding: '10px 12px',
                                 borderRadius: 8,
-                                border: '1px solid #ffe58f',
-                                borderInlineStart: '3px solid #faad14',
-                                background: '#fffbe6',
+                                border: `1px solid ${stateStyles.mold_change.accent}`,
+                                borderInlineStart: `3px solid ${stateStyles.mold_change.accent}`,
+                                background: stateStyles.mold_change.wash,
                                 height: '100%',
                             }}
                         >
-                            <div style={{ fontSize: 24, lineHeight: 1.15, fontWeight: 600, color: '#ad6800', ...tabularNums }}>
+                            <div style={{ fontSize: 24, lineHeight: 1.15, fontWeight: 600, color: stateStyles.mold_change.readable, ...tabularNums }}>
                                 {needsAttentionCount}
                             </div>
-                            <Typography.Text style={{ fontSize: 12, color: '#ad6800' }}>Needs attention →</Typography.Text>
+                            <Typography.Text style={{ fontSize: 12, color: stateStyles.mold_change.readable }}>Needs attention →</Typography.Text>
                         </div>
                     </a>
                 )}
@@ -5468,14 +5490,14 @@ export default function ShiftProductionEntryPage() {
                     // belongs to another shift takes its own muted gold,
                     // deliberately a different tone from the mold-change amber
                     // above it. The order (and the palette) live once now:
-                    // machineFloorState + STATE_STYLE, shared with the tiles.
+                    // machineFloorState + stateStyle(), shared with the tiles.
                     const state = machineFloorState({
                         down: down !== undefined,
                         moldChange: moldChange !== undefined,
                         running: running !== undefined,
                         runningForOtherShift,
                     });
-                    const style = STATE_STYLE[state];
+                    const style = stateStyles[state];
                     // A carryover run — started under an earlier shift/date than
                     // the clock's own context. Named here so the card can say it
                     // once, in the header, instead of twice.
@@ -5494,7 +5516,7 @@ export default function ShiftProductionEntryPage() {
                     // about. Gold, shared with "not handed over": both mean a run
                     // that is not cleanly this shift's. The two stay distinct by
                     // their status tag and their header line.
-                    const railAccent = isCarryover ? STATE_STYLE.running_other_shift.accent : style.accent;
+                    const railAccent = isCarryover ? stateStyles.running_other_shift.accent : style.accent;
                     // THE ONE PRIMARY ACTION FOR THIS STATE, said in words. All
                     // four used to be an unlabelled click on the card body.
                     const primaryLabel =
@@ -5622,6 +5644,13 @@ export default function ShiftProductionEntryPage() {
                                 so nothing but the not-ours card gains one. */}
                             <Tooltip title={runningForOtherShift ? completeElsewhere : undefined}>
                                 <Card
+                                    // A LIGHT TRAVELS THE RAIL WHILE IT RUNS,
+                                    // and on no other card. The one moving
+                                    // thing on the screen therefore means
+                                    // exactly one thing: that machine is going.
+                                    // A carryover run is running too, so it
+                                    // gets the light on its gold rail.
+                                    className={running !== undefined && !down && !moldChange ? 'floor-card-running' : undefined}
                                     // Not hoverable when it is not ours: the
                                     // card must stop advertising the primary
                                     // action it no longer performs.
@@ -5689,7 +5718,7 @@ export default function ShiftProductionEntryPage() {
                                         block per state. */}
                                     {down && (
                                         <div>
-                                            <Typography.Text style={{ color: '#a8071a', display: 'block', wordBreak: 'break-word' }}>
+                                            <Typography.Text style={{ color: stateStyles.down.readable, display: 'block', wordBreak: 'break-word' }}>
                                                 {down.nature_of_problem}
                                             </Typography.Text>
                                             <Typography.Text type="secondary" style={{ fontSize: 12, ...tabularNums }}>
@@ -5752,7 +5781,7 @@ export default function ShiftProductionEntryPage() {
                                         // over yet. It replaces the Carryover tag rather than
                                         // joining it — on this card both would be true, gold,
                                         // and saying overlapping things.
-                                        <Typography.Text style={{ color: '#ad6800', fontSize: 12 }}>
+                                        <Typography.Text style={{ color: stateStyles.mold_change.readable, fontSize: 12 }}>
                                             {`Running for ${owningShiftName} shift${otherShiftDateSuffix} — not handed over`}
                                         </Typography.Text>
                                     ) : (
@@ -6046,7 +6075,7 @@ export default function ShiftProductionEntryPage() {
                                 flex: '1 1 260px',
                                 minWidth: 260,
                                 padding: '10px 12px',
-                                border: '1px solid #f0f0f0',
+                                border: '1px solid var(--app-rule)',
                                 borderRadius: 8,
                             }}
                         >
@@ -6197,7 +6226,7 @@ export default function ShiftProductionEntryPage() {
 
                     {awaitingCorrection.length > 0 && (
                         <div style={{ marginBottom: 16 }}>
-                            <Typography.Text strong style={{ color: '#ad6800', display: 'block', marginBottom: 8 }}>
+                            <Typography.Text strong style={{ color: stateStyles.mold_change.readable, display: 'block', marginBottom: 8 }}>
                                 Sent back by quality — correct and re-submit ({awaitingCorrection.length})
                             </Typography.Text>
                             <Space direction="vertical" size={8} style={{ width: '100%' }}>
@@ -6205,7 +6234,7 @@ export default function ShiftProductionEntryPage() {
                                     <Card
                                         key={entry.id}
                                         size="small"
-                                        style={{ borderColor: '#faad14', background: '#fffbe6' }}
+                                        style={{ borderColor: stateStyles.mold_change.accent, background: stateStyles.mold_change.wash }}
                                     >
                                         <Space direction="vertical" size={6} style={{ width: '100%' }}>
                                             <div>
@@ -6220,7 +6249,7 @@ export default function ShiftProductionEntryPage() {
                                             {/* The reason IS the instruction. It is the only
                                                 thing quality tells the floor, so it is set in
                                                 the panel's own colour and never truncated. */}
-                                            <Typography.Text style={{ color: '#ad6800' }}>
+                                            <Typography.Text style={{ color: stateStyles.mold_change.readable }}>
                                                 {readReturnReason(entry) ?? 'No reason was recorded with this return.'}
                                             </Typography.Text>
                                             <Typography.Text type="secondary" style={{ fontSize: 12, ...tabularNums }}>
