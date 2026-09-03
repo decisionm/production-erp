@@ -254,7 +254,9 @@ class AttendanceReadsTheUploadTest extends TestCase
         $sources = $this->getJson('/api/v1/hrms/attendance/summary?from=2026-07-01&to=2026-07-31')
             ->assertOk()->json('data.imports');
 
-        $this->assertSame(1, $sources[0]['id']);
+        // Never a literal id: CI's MySQL keeps auto-increment across tests,
+        // so this row is id 1 locally and id 45 there.
+        $this->assertSame($import->id, $sources[0]['id']);
         $this->assertSame('july.xlsx', $sources[0]['file_name']);
         $this->assertSame('review', $sources[0]['status']);
         $this->assertSame('2026-07-01', $sources[0]['period_from']);
