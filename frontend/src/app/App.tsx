@@ -74,6 +74,7 @@ const GstRatesPage = lazyPage(() => import('@/features/compliance/pages/GstRates
 const GstRegistrationsPage = lazyPage(() => import('@/features/compliance/pages/GstRegistrationsPage'));
 const GstReportsPage = lazyPage(() => import('@/features/compliance/pages/GstReportsPage'));
 const HelpPage = lazyPage(() => import('@/features/help/pages/HelpPage'));
+const SettingsPage = lazyPage(() => import('@/features/settings/pages/SettingsPage'));
 const AttendancePage = lazyPage(() => import('@/features/hrms/pages/AttendancePage'));
 const AttendanceImportsPage = lazyPage(() => import('@/features/hrms/pages/AttendanceImportsPage'));
 const AttendanceImportPage = lazyPage(() => import('@/features/hrms/pages/AttendanceImportPage'));
@@ -353,6 +354,15 @@ export default function App() {
                                     <Route path="/tally-sync" element={<TallySyncPage />} />
                                     <Route path="/tally-sync/agent-tokens" element={<AgentTokensPage />} />
                                     <Route path="/tally-sync/settings" element={<TallySettingsPage />} />
+                                    {/* The one destination for the four utilities
+                                        below it, which used to sit loose at the
+                                        bottom of the sidebar. Ungated like they are:
+                                        the CARDS gate themselves (settingsSections
+                                        mirrors AppLayout's adoption-then-permission
+                                        rule), so a login holding neither users nor
+                                        roles still opens the page and sees only
+                                        Downloads and Help. */}
+                                    <Route path="/settings" element={<SettingsPage />} />
                                     {/* The Download / Export Center. Open to every
                                         login like every other route — the SERVER's
                                         catalogue is what filters: a kind is offered,

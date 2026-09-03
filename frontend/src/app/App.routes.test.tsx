@@ -119,6 +119,10 @@ const ROUTE_TABLE = [
     '/tally-sync',
     '/tally-sync/agent-tokens',
     '/tally-sync/settings',
+    // The one destination gathering the three below it — Downloads, Help and
+    // the two Administration screens. The four keep their own URLs; Settings
+    // is a way in, not a replacement.
+    '/settings',
     '/exports',
     '/help',
     '/administration/users',
