@@ -374,7 +374,7 @@ test('agentVersion() reads package.json and is the strict semver the release gat
     assert.match(agentVersion(), /^\d+\.\d+\.\d+$/);
 });
 
-test('this candidate is 0.4.6 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9, the purchase-rate read since 0.4.0, measured receivables summary support since 0.4.6', () => {
+test('this candidate is 0.4.7 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9, the purchase-rate read since 0.4.0, measured receivables summary support since 0.4.6, the bill-wise Collection read since 0.4.7', () => {
     // The drawer's "agent ≥ 0.3.8" line depends on 0.3.8 being the snapshot
     // FLOOR, which does not move; the candidate itself advances. 0.3.9 added
     // purchaseOrder.ts (Phase 6, staged, flag off); 0.4.0 adds the Day Book
@@ -414,15 +414,21 @@ test('this candidate is 0.4.6 — snapshots since 0.3.8, the Purchase Order buil
     // Tally's debit sign at the integration boundary. The cloud/UI explicitly
     // marks these as balance-only rows, never as invented bill detail.
     //
-    // IT STILL ASKS THE WAY 0.4.3 STOPPED ASKING. These two readers request a
-    // REPORT (TALLYREQUEST=Export, TYPE=Data, ID=...), which is what the
-    // purchase-rate read did until 0.4.3 measured that this factory's Tally
-    // answers a TDL Collection and not that. Bills Receivable is a different
-    // report and may well answer — but nobody has measured it, and the honest
-    // position is that the first pull may return nothing for the same reason
-    // the purchase-rate pulls did on 31-Aug. That is why the readers report
-    // WHAT THE DOCUMENT HELD when they find nothing, and why moving them to
-    // the Collection shape is the open follow-up rather than a claim already
-    // made here.
-    assert.equal(agentVersion(), '0.4.6');
+    // 0.4.7 CLOSES THAT FOLLOW-UP. The bills are asked for as a TDL COLLECTION
+    // first — the shape 0.4.3 measured this Tally answers — with the report
+    // request kept as the fallback, and the pull reports WHICH SHAPE ANSWERED
+    // and HOW MANY ROWS CARRIED A DUE DATE. It also stops asking with
+    // SVFROMDATE = SVTODATE = the as-at day: that is a one-day window, and an
+    // outstanding position is an as-at reading over the whole book.
+    //
+    // WHY IT HAD TO CHANGE: the party-summary answer 0.4.6 accepted cannot be
+    // aged. With no bill date and no due date, every rupee lands in the page's
+    // "no due date" bucket and the ageing columns stay empty for good.
+    //
+    // THE COLLECTION SHAPE IS NOT YET MEASURED. Nobody has run it against the
+    // factory's Tally, and an unrecognised NATIVEMETHOD returns an empty
+    // collection rather than an error — #64's exact failure mode. That is why
+    // it is the first of two shapes and not the only one, and why every
+    // attempt is still described by node name and count.
+    assert.equal(agentVersion(), '0.4.7');
 });
