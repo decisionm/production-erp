@@ -2,6 +2,7 @@
 
 namespace App\Modules\Production\Http\Resources;
 
+use App\Models\User;
 use App\Modules\Core\Http\Resources\UserResource;
 use App\Modules\HRMS\Http\Resources\EmployeeResource;
 use App\Modules\Inventory\Http\Resources\ItemResource;
@@ -54,6 +55,20 @@ class ShiftProductionEntryResource extends JsonResource
     private ?array $pageAllocationRows = null;
 
     /**
+     * The names behind every quality_return.returned_by id on the page,
+     * keyed by user id — not by entry id like the pageX arrays above,
+     * because a name only depends on which user it is, and one small map
+     * shared by every row is simpler than repeating it per entry. Resolved
+     * ONCE for the whole collection (see collection() below) in a single
+     * `whereIn` — null on a resource made on its own (store/complete/the
+     * return endpoint's own response), which looks its one id up itself.
+     * Not a wire field.
+     *
+     * @var array<int, string>|null
+     */
+    private ?array $pageReturnedByNames = null;
+
+    /**
      * A page of entries resolves its Tally links AND its two cost reads in
      * a constant number of queries — TallySyncLinkService::forMany /
      * forEntryIds, ShiftProductionEntryService::materialCosts and
@@ -76,10 +91,20 @@ class ShiftProductionEntryResource extends JsonResource
             $allocationRows = $entries->isEmpty() ? [] : app(BagCostAllocationService::class)->forEntries(
                 $entries->filter(fn (ShiftProductionEntry $entry) => $entry->batch_status === BatchStatus::Completed)->pluck('id')->all(),
             );
-            $rows->each(function (self $row) use ($links, $materialCosts, $allocationRows): void {
+            $returnedByIds = $entries
+                ->map(fn (ShiftProductionEntry $entry) => self::lastQualityReturn($entry)['returned_by'] ?? null)
+                ->filter(fn ($id) => $id !== null)
+                ->map(fn ($id) => (int) $id)
+                ->unique()
+                ->values();
+            $returnedByNames = $returnedByIds->isEmpty()
+                ? []
+                : User::query()->whereIn('id', $returnedByIds->all())->pluck('name', 'id')->all();
+            $rows->each(function (self $row) use ($links, $materialCosts, $allocationRows, $returnedByNames): void {
                 $row->pageTallyLinks = $links;
                 $row->pageMaterialCosts = $materialCosts;
                 $row->pageAllocationRows = $allocationRows;
+                $row->pageReturnedByNames = $returnedByNames;
             });
         });
     }
@@ -305,6 +330,18 @@ class ShiftProductionEntryResource extends JsonResource
             // Always present (empty lists before anything happens), same rule
             // as `quality` above.
             'correction' => app(ShiftProductionEntryService::class)->correctionHistory($this->resource),
+            // WAS THIS BATCH SENT BACK BY QUALITY, and what did the LAST
+            // return say — the one-line answer `correction` above does not
+            // give: that block is the full audit trail with a raw
+            // `returned_by` id (Production's own screen, which already knows
+            // who its users are); this key is the queue-row answer, the
+            // name resolved rather than an id a badge would have to look up
+            // itself, and only the latest return, because that is the
+            // instruction currently outstanding. `times` counts every
+            // return this batch has ever had. Null when it has never been
+            // returned — never an empty object, so a client can tell "not
+            // returned" from "returned with a blank reason".
+            'quality_return' => $this->qualityReturn(),
             // What the consumed material actually cost — each line at the
             // unit cost its own issue movement recorded, plus a total that
             // is null (never a partial figure) when any line is unpriced.
@@ -392,6 +429,64 @@ class ShiftProductionEntryResource extends JsonResource
             'notes' => $this->notes,
             'created_at' => $this->created_at?->toIso8601String(),
         ];
+    }
+
+    /**
+     * `quality_return` as toArray() emits it: null when this entry has
+     * never been returned, else the LAST row of quality_returns with its
+     * `returned_by` id resolved to a name and `times` set to how many
+     * returns there have ever been. The name comes from the page's
+     * precomputed map when this resource was made as part of a collection
+     * (see collection() above); a resource made on its own (store/complete/
+     * the return endpoint's own response) looks its one id up itself — the
+     * same fallback shape tallyLink() below uses, and for the same reason:
+     * a single-entry response is never the busy path a page is.
+     *
+     * @return array{returned_by_name: ?string, returned_at: ?string, reason: ?string, times: int}|null
+     */
+    private function qualityReturn(): ?array
+    {
+        $returns = self::qualityReturns($this->resource);
+
+        if ($returns === []) {
+            return null;
+        }
+
+        $last = end($returns);
+        $returnedById = isset($last['returned_by']) ? (int) $last['returned_by'] : null;
+
+        return [
+            'returned_by_name' => $returnedById === null
+                ? null
+                : ($this->pageReturnedByNames[$returnedById] ?? User::find($returnedById)?->name),
+            'returned_at' => $last['returned_at'] ?? null,
+            'reason' => $last['reason'] ?? null,
+            'times' => count($returns),
+        ];
+    }
+
+    /**
+     * config_snapshot['quality_returns'], read the same defensive way
+     * returnToProduction() itself reads it before appending — the key can
+     * be absent, and a row written before this feature existed may not be
+     * an array at all, so every row is filtered through is_array first
+     * rather than trusted.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function qualityReturns(ShiftProductionEntry $entry): array
+    {
+        return array_values(array_filter((array) ($entry->config_snapshot['quality_returns'] ?? []), 'is_array'));
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private static function lastQualityReturn(ShiftProductionEntry $entry): ?array
+    {
+        $returns = self::qualityReturns($entry);
+
+        return $returns === [] ? null : end($returns);
     }
 
     /**
