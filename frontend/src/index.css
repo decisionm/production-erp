@@ -25,6 +25,8 @@
     --app-text: var(--brand-ink);
     --app-text-secondary: var(--brand-text-secondary);
     --app-surface: #ffffff;
+    /* A panel set INTO a surface — a quoted block, a code sample, a legend. */
+    --app-inset: #fafafa;
     --app-rule: var(--brand-rule);
 }
 
@@ -54,6 +56,7 @@
     --app-text: #e9edf7;
     --app-text-secondary: #afb9d0;
     --app-surface: #171f33;
+    --app-inset: #1f2942;
     --app-rule: #2a3450;
 }
 
