@@ -129,6 +129,43 @@ class ProductReadinessGateTest extends TestCase
         $this->assertDatabaseCount('shift_production_entries', 0);
     }
 
+    public function test_an_inactive_item_is_refused_when_enforced(): void
+    {
+        // DEC-20260902-017: the `item_active` check's default severity is
+        // 'block' (config/production.php), so once the master switch is on,
+        // a deactivated item is refused the same way a missing cycle time is.
+        config()->set('production.readiness.enforced', true);
+        $this->supervisor();
+        $item = $this->readyItem();
+        $item->update(['is_active' => false]);
+
+        $response = $this->postJson('/api/v1/production/shift-production-entries', $this->startPayload($item))
+            ->assertStatus(422)
+            ->assertJsonPath('code', 'product_not_ready');
+
+        $this->assertSame(['item_active'], array_column($response->json('blocking'), 'code'));
+        $this->assertDatabaseCount('shift_production_entries', 0);
+    }
+
+    public function test_colour_is_only_a_warning_when_enforced(): void
+    {
+        // DEC-20260902-017: `colour`'s default severity is 'warn', so even
+        // with the gate enforced, a missing colour never refuses the start —
+        // it only reports, same as it does with enforcement off.
+        config()->set('production.readiness.enforced', true);
+        $this->supervisor();
+        $item = $this->readyItem(['colour' => null]);
+
+        $this->postJson('/api/v1/production/shift-production-entries', $this->startPayload($item))
+            ->assertOk();
+
+        $preview = $this->getJson('/api/v1/production/shift-production-entries/preview?item_id='.$item->id)
+            ->assertOk();
+
+        $this->assertContains('colour', array_column($preview->json('data.readiness.warnings'), 'code'));
+        $this->assertTrue($preview->json('data.readiness.ready'));
+    }
+
     public function test_a_product_with_no_tally_identity_is_refused_before_the_shift_not_after(): void
     {
         // The exact failure the exception report describes: the voucher dies
