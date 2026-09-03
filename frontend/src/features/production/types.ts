@@ -585,6 +585,29 @@ export interface EntryCorrectionAmendment {
 }
 
 /**
+ * The LAST time Quality sent this batch back, exactly as
+ * ShiftProductionEntryResource serves it under the `quality_return` key
+ * (Task 1 of the "Returned by Quality" plan, 03-Sep-2026) — the queue-row
+ * answer, with the returning user's name already resolved rather than an id
+ * a badge would have to look up itself.
+ *
+ * `times` counts every return this batch has EVER had; the other three
+ * fields describe only the latest one, the instruction currently on record.
+ * The full history (every return, every amendment, raw `returned_by` ids)
+ * is `EntryCorrection` below — Production's own screen, which already knows
+ * who its users are. This key exists for screens that do not, and for the
+ * one-line "has this ever happened" tag (`returnedTagText`,
+ * features/quality/returnedByQuality.ts) both the Quality queue and the
+ * Shift Floor render from it.
+ */
+export interface EntryQualityReturn {
+    returned_by_name: string | null;
+    returned_at: string | null;
+    reason: string | null;
+    times: number;
+}
+
+/**
  * What has been done to this batch since it was completed, exactly as
  * ShiftProductionEntryResource serves it under the `correction` key
  * (ShiftProductionEntryService::correctionHistory).
@@ -985,6 +1008,14 @@ export interface ShiftProductionEntry {
      * `readReturnReason`.
      */
     correction?: EntryCorrection | null;
+    /**
+     * WAS THIS BATCH EVER SENT BACK BY QUALITY, and what did the LAST return
+     * say — null when it never has been. See `EntryQualityReturn` above for
+     * why this exists beside `correction`. Optional only for a backend that
+     * predates the key; read through `returnedTagText`
+     * (features/quality/returnedByQuality.ts).
+     */
+    quality_return?: EntryQualityReturn | null;
     /**
      * Both collections are `whenLoaded` on the backend resource, and the
      * approval/reject/start endpoints deliberately don't load them — so they

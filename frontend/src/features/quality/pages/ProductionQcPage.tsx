@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Descriptions, Drawer, Input, InputNumber, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Descriptions, Drawer, Input, InputNumber, Space, Switch, Table, Tag, Tooltip, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/features/auth/store';
 import { hasManageAccess, hasModuleAccess } from '@/features/auth/permissions';
@@ -11,17 +11,19 @@ import {
     RETURN_REASON_MIN_LENGTH,
 } from '@/features/quality/api';
 import { ListNoMatch } from '@/features/quality/components/ListNoMatch';
+import { returnedTagText } from '@/features/quality/returnedByQuality';
 import { consumptionSummary } from '@/features/production/consumptionSummary';
 import { grossProducedPieces, readQuantity } from '@/features/production/types';
 import {
     PRODUCTION_QC_DEFAULT_SORT,
     PRODUCTION_QC_LIST,
     PRODUCTION_QC_SORT_FIELDS,
-    type SortedListParams,
+    productionQcListRequest,
+    productionQcReturnedOnly,
+    type ProductionQcListParams,
 } from '@/features/quality/qualityLists';
 import { itemLabel } from '@/lib/itemLabel';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
-import { compactParams } from '@/lib/listParams';
 import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
 import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { useListParams } from '@/lib/useListParams';
@@ -92,15 +94,16 @@ export default function ProductionQcPage() {
         queryClient.invalidateQueries({ queryKey: ['production', 'shift-production-entries'] });
     };
 
-    // THE URL IS THE QUEUE'S STATE (search, page, page size) and the SERVER
-    // cuts the page: this screen used to walk every page of the production
-    // list and filter and re-sort in the browser.
-    const { params, setParams, setPage, reset } = useListParams<SortedListParams>(QUEUE_LIST_SPEC);
-    const request = compactParams(params);
+    // THE URL IS THE QUEUE'S STATE (search, the Returned switch, page, page
+    // size) and the SERVER cuts the page: this screen used to walk every
+    // page of the production list and filter and re-sort in the browser.
+    const { params, setParams, setPage, reset } = useListParams<ProductionQcListParams>(QUEUE_LIST_SPEC);
+    const request = productionQcListRequest(params);
+    const returnedOnly = productionQcReturnedOnly(params);
 
     const { data, isLoading, isPending, isError, error, refetch } = useQuery({
         queryKey: ['quality', 'batch-quality-queue', request],
-        queryFn: () => listBatchQualityQueue(params),
+        queryFn: () => listBatchQualityQueue(request),
         enabled: canView && canReadQueue,
         retry: false,
         placeholderData: (previous) => previous,
@@ -193,6 +196,13 @@ export default function ProductionQcPage() {
                         </Button>
                     </>
                 )}
+                <Space size={8}>
+                    <Typography.Text>Returned</Typography.Text>
+                    <Switch
+                        checked={returnedOnly}
+                        onChange={(checked) => setParams({ returned: checked ? '1' : undefined })}
+                    />
+                </Space>
             </Space>
 
             <ListReadAlert state={{ isPending, isError, error, refetch }} entity="the quality queue" />
@@ -229,10 +239,21 @@ export default function ProductionQcPage() {
                     {
                         title: 'Batch #',
                         key: 'batch_number',
-                        dataIndex: 'batch_number',
                         sorter: true,
                         sortOrder: columnSortOrder('batch_number', params.sort, PRODUCTION_QC_DEFAULT_SORT),
-                        render: (v: string | null) => v ?? '—',
+                        render: (_, row) => {
+                            const tagText = returnedTagText(row.quality_return);
+                            return (
+                                <Space size={4} wrap>
+                                    <span>{row.batch_number ?? '—'}</span>
+                                    {tagText && (
+                                        <Tooltip title={row.quality_return?.reason ?? undefined}>
+                                            <Tag color="warning">{tagText}</Tag>
+                                        </Tooltip>
+                                    )}
+                                </Space>
+                            );
+                        },
                     },
                     { title: 'Machine', render: (_, row) => row.work_center?.code ?? row.work_center?.name ?? '—' },
                     { title: 'Product', render: (_, row) => itemLabel(row.item) },

@@ -9,6 +9,7 @@ use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\WorkCenter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -120,6 +121,30 @@ class ReturnedByQualityVisibleTest extends TestCase
             ->firstWhere('id', $entryId);
     }
 
+    /** The quality queue, one page, exactly as BatchQualityQueueTest reads it. */
+    private function queue(array $query = []): TestResponse
+    {
+        return $this->getJson('/api/v1/quality/batch-quality-queue?'.http_build_query($query))->assertOk();
+    }
+
+    /** @return list<int> */
+    private function queueIds(array $query = []): array
+    {
+        return array_map(fn (array $row) => $row['id'], $this->queue($query)->json('data'));
+    }
+
+    /** The same completion payload completedBatch() posts — reused for /amend so the piece count never moves. */
+    private function amendWithSameFigures(int $entryId): TestResponse
+    {
+        return $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/amend", [
+            'quantity_produced' => '10000',
+            'running_hours' => '8',
+            'material_consumptions' => [
+                ['item_id' => $this->resin->id, 'warehouse_id' => $this->rm->id, 'quantity_issued_kg' => '130'],
+            ],
+        ]);
+    }
+
     public function test_a_batch_sent_back_by_quality_says_so_in_its_payload(): void
     {
         $this->actAs();
@@ -178,5 +203,59 @@ class ReturnedByQualityVisibleTest extends TestCase
         $indexedTwice = $this->entryJson($entryId);
         $this->assertSame($secondReason, $indexedTwice['quality_return']['reason']);
         $this->assertSame(2, $indexedTwice['quality_return']['times']);
+    }
+
+    /**
+     * Task 2: the Quality queue's `returned=1` filter.
+     *
+     * IT DOES NOT MEAN "every batch ever returned" — it narrows the queue's
+     * OWN membership (whereAwaitingQualityCheck: pending · completed ·
+     * unchecked · no return outstanding), so a batch still sitting with the
+     * floor unfixed is not a queue member at all, with or without the flag.
+     * The only rows `returned=1` can ever surface are ones that were sent
+     * back AND the floor has since re-submitted them — a batch back here for
+     * a second look, not a batch new to the desk. That intersection is what
+     * this test pins.
+     */
+    public function test_the_queue_returns_only_the_returned_and_resubmitted_batch_when_asked(): void
+    {
+        $this->actAs();
+        $neverReturnedId = $this->completedBatch();
+
+        $this->actAs();
+        $returnedId = $this->completedBatch();
+
+        $this->actAs();
+        $this->postJson("/api/v1/production/shift-production-entries/{$returnedId}/return-to-production", [
+            'reason' => 'Recount the boxes on this pallet — the sheet says 40, the floor has 38.',
+        ])->assertOk();
+
+        // STILL AWAITING CORRECTION: not a queue member at all yet, so
+        // returned=1 must not surface it either — the flag only narrows the
+        // queue, it can never widen it.
+        $this->assertNotContains($returnedId, $this->queueIds());
+        $this->assertNotContains($returnedId, $this->queueIds(['returned' => 1]));
+
+        // The floor corrects it — the SAME figures it completed with, so the
+        // piece count does not move and refuseStaleMaterialLines lets the
+        // unchanged material line through untouched.
+        $this->actAs();
+        $this->amendWithSameFigures($returnedId)->assertOk();
+
+        // Default: both the never-returned batch and the returned-then-fixed
+        // one are in the queue — a corrected batch is ordinary work again.
+        $default = $this->queueIds();
+        $this->assertContains($neverReturnedId, $default);
+        $this->assertContains($returnedId, $default);
+
+        // returned=1: only the one that was ever sent back.
+        $this->assertSame([$returnedId], $this->queueIds(['returned' => 1]));
+
+        $narrowed = $this->queue(['returned' => 1]);
+        $this->assertSame(1, $narrowed->json('meta.total'), 'the total is the filtered set\'s');
+
+        // A falsy or absent value never turns the switch on.
+        $this->assertSame($default, $this->queueIds(['returned' => 0]));
+        $this->assertSame($default, $this->queueIds());
     }
 }

@@ -31,7 +31,14 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
  * them and no row can: whether the stage is switched on at all, and — only
  * while it is off — how many pending batches are going straight to the
  * Plant Manager, so "nothing to check" and "this screen is not in use" do
- * not look the same.
+ * not look the same. `pending_count`'s own paginate() call deliberately does
+ * NOT receive `returned` — it answers a different question (how many are
+ * going straight to the PM while the stage is off), not the queue's own
+ * membership.
+ *
+ * `returned` (03-Sep-2026, Task 2 of "Returned by Quality") narrows the same
+ * queue to batches that carry a quality return — see
+ * ListBatchQualityQueueRequest for what that can and cannot surface.
  */
 class BatchQualityQueueController extends Controller
 {
@@ -48,6 +55,7 @@ class BatchQualityQueueController extends Controller
             q: $request->term(),
             oldestFirst: true,
             sort: $request->sort(),
+            returned: $request->returnedOnly(),
         );
 
         return ShiftProductionEntryResource::collection($page)->additional(['meta' => [

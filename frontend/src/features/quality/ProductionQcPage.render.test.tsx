@@ -119,4 +119,32 @@ describe('ProductionQcPage', () => {
         expect(html).toContain('3 are waiting for approval right now');
         expect(html).not.toContain('Search batch, product, machine');
     });
+
+    it('offers the Returned switch and tags a batch quality has sent back', () => {
+        const sentBack: BatchQualityQueueRow = {
+            ...batch(41, 'MC01-0902-01'),
+            quality_return: {
+                returned_by_name: 'Priya',
+                returned_at: '2026-09-01T10:00:00+00:00',
+                reason: 'Recount the boxes on this pallet.',
+                times: 2,
+            },
+        };
+        const offHtml = render('/quality/production-qc', {}, queue([batch(1, 'MC01-0902-00'), sentBack], 2));
+        // 'Returned' alone would also match the row action "Return to
+        // production" — the switch itself is what must be OFF here, since
+        // the URL carries no returned=1.
+        expect(offHtml).not.toContain('ant-switch-checked');
+        expect(offHtml).toContain('Returned by Quality x2');
+        // The never-returned row on the same page carries exactly no tag —
+        // one match on the whole page, not one per row.
+        expect(offHtml.match(/Returned by Quality/g)).toHaveLength(1);
+
+        const onHtml = render(
+            '/quality/production-qc?returned=1',
+            { returned: 1 },
+            queue([sentBack], 1),
+        );
+        expect(onHtml).toContain('ant-switch-checked');
+    });
 });
