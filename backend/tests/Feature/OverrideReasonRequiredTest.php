@@ -37,13 +37,12 @@ class OverrideReasonRequiredTest extends TestCase
     private Item $item;
 
     /**
-     * Everything the fixture needs, built ONCE. startPayload() below is
-     * called more than once per test (the two limit pins each post twice),
-     * so the item and its APPROVED configuration must not be re-created per
-     * call — a second Item::create() with the same sku, or a second
-     * ProductionConfiguration for the same machine+item, would either
-     * violate a unique constraint or leave two applicable configurations
-     * for applicableQuery() to choose between.
+     * The shared fixture, built ONCE here rather than lazily inside
+     * readyItem()/supervisor() helpers called from startPayload() (the
+     * original shape). That made startPayload() below a pure array
+     * builder with no side effects — safe for a test to call it, or post
+     * to the endpoint, any number of times without re-inserting the item,
+     * its BOM or its APPROVED configuration.
      */
     protected function setUp(): void
     {
@@ -103,6 +102,41 @@ class OverrideReasonRequiredTest extends TestCase
         ];
     }
 
+    /**
+     * A second machine + product + APPROVED configuration, independent of
+     * the shared fixture above — for the two tests below that vary the
+     * MACHINE's own cycle_time_min/max, without touching the four tests
+     * that rely on setUp()'s fixture staying exactly as it is.
+     */
+    private function readyItemWithConfiguration(WorkCenter $machine, string $sku, array $configOverrides = []): Item
+    {
+        $item = Item::create([
+            'sku' => $sku,
+            'name' => '500ml Round Amber',
+            'uom' => 'Nos.',
+            'is_active' => true,
+            'nominal_weight_grams' => '31.5000',
+            'standard_cycle_time' => '12.00',
+            'standard_cavities' => 5,
+            'nos_per_box' => 800,
+            'nos_per_tray' => 40,
+            'colour' => 'Amber',
+            'tally_stock_item_guid' => 'itm-'.$sku,
+        ]);
+
+        $resin = Item::create(['sku' => 'PET-'.$sku, 'name' => 'Billion Pet Resin', 'uom' => 'Kgs.', 'is_active' => true]);
+        $bom = Bom::create(['item_id' => $item->id, 'name' => 'BOM', 'version' => '1', 'is_active' => true]);
+        $bom->lines()->create(['component_item_id' => $resin->id, 'quantity_per' => '0.0315']);
+
+        ProductionConfiguration::create($configOverrides + [
+            'work_center_id' => $machine->id,
+            'item_id' => $item->id,
+            'status' => ConfigurationStatus::Approved->value,
+        ]);
+
+        return $item->fresh();
+    }
+
     public function test_an_override_without_a_reason_is_refused(): void
     {
         $payload = $this->startPayload(['cycle_time_override' => 12]);
@@ -137,5 +171,49 @@ class OverrideReasonRequiredTest extends TestCase
         $payload = $this->startPayload(['cycle_time_override' => 5, 'override_reason' => 'Trying it']);
         $this->postJson('/api/v1/production/shift-production-entries', $payload)
             ->assertStatus(422)->assertJsonValidationErrors(['cycle_time_override']);
+    }
+
+    public function test_a_configuration_with_no_bounds_falls_back_to_the_machines(): void
+    {
+        $machine = WorkCenter::create([
+            'code' => 'MC-02', 'name' => 'Machine 2', 'is_active' => true,
+            'cycle_time_min' => 8, 'cycle_time_max' => 14,
+        ]);
+        // Deliberately no cycle_time_min/max on the configuration itself.
+        $item = $this->readyItemWithConfiguration($machine, 'BTL-501', ['default_cycle_time' => 10]);
+
+        $payload = $this->startPayload([
+            'work_center_id' => $machine->id,
+            'item_id' => $item->id,
+            'cycle_time_override' => 20,
+            'override_reason' => 'Trying it',
+        ]);
+
+        $this->postJson('/api/v1/production/shift-production-entries', $payload)
+            ->assertStatus(422)->assertJsonValidationErrors(['cycle_time_override']);
+    }
+
+    public function test_a_configurations_own_bound_wins_over_the_machines(): void
+    {
+        $machine = WorkCenter::create([
+            'code' => 'MC-03', 'name' => 'Machine 3', 'is_active' => true,
+            'cycle_time_min' => 8, 'cycle_time_max' => 14,
+        ]);
+        // The configuration's own range is WIDER than the machine's — 20 is
+        // refused by the machine's max of 14 but allowed by the
+        // configuration's own max of 20, and the configuration must win,
+        // the same precedent assertCavitiesAllowed() sets for cavities.
+        $item = $this->readyItemWithConfiguration($machine, 'BTL-502', [
+            'default_cycle_time' => 10, 'cycle_time_min' => 4, 'cycle_time_max' => 20,
+        ]);
+
+        $payload = $this->startPayload([
+            'work_center_id' => $machine->id,
+            'item_id' => $item->id,
+            'cycle_time_override' => 20,
+            'override_reason' => 'Trying it',
+        ]);
+
+        $this->postJson('/api/v1/production/shift-production-entries', $payload)->assertOk();
     }
 }
