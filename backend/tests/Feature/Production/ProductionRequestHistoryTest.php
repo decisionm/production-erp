@@ -173,6 +173,22 @@ class ProductionRequestHistoryTest extends TestCase
             ->assertJsonMissingPath('meta');
     }
 
+    /**
+     * `per_page`/`page` live on the SHARED request validation, so an
+     * out-of-range `per_page` is refused even with no `status` — `queue()`
+     * itself never reads either key, but ListMaterialRequestsRequest's own
+     * discipline applies here too: a value that could only be a mistake is a
+     * 422, never silently ignored.
+     */
+    public function test_a_junk_per_page_is_refused_even_on_the_default_view(): void
+    {
+        $this->actingWith(['production.view']);
+
+        $this->getJson('/api/v1/production/requests?per_page=999')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['per_page']);
+    }
+
     // ---- fixtures ----------------------------------------------------------
 
     private function request(Item $item, string $quantity): ProductionRequest

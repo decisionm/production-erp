@@ -584,7 +584,13 @@ export default function ProductionQueuePage() {
                         pagination={serverPagination(
                             historyMeta,
                             (page, perPage) => {
-                                setHistoryPage(page);
+                                // A page-SIZE change (not a page turn) can leave the
+                                // requested page past the new last page for a
+                                // narrower filter — asking for page 3 at 25/page,
+                                // then 100/page, when the filter only has 60 rows
+                                // left. Land back on page 1 rather than asking the
+                                // server for a page that no longer exists.
+                                setHistoryPage(perPage !== historyMeta?.per_page ? 1 : page);
                                 setHistoryPerPage(perPage);
                             },
                             'requests',
