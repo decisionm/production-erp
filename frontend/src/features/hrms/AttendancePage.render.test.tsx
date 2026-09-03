@@ -24,12 +24,33 @@ import AttendancePage from './pages/AttendancePage';
 function mark(id: number, employeeName: string, date: string): Attendance {
     return {
         id,
+        key: `attendance-${id}-${date}`,
         employee: { id, name: employeeName },
         date,
         status: 'present',
         check_in: null,
         check_out: null,
         notes: null,
+        source: 'attendance',
+        needs_review: false,
+        provisional: false,
+    };
+}
+
+/** A day read from an upload nobody has applied, still unanswered. */
+function uploaded(employeeId: number, employeeName: string, date: string): Attendance {
+    return {
+        id: null,
+        key: `import-${employeeId}-${date}`,
+        employee: { id: employeeId, name: employeeName },
+        date,
+        status: null,
+        check_in: null,
+        check_out: null,
+        notes: null,
+        source: 'import',
+        needs_review: true,
+        provisional: true,
     };
 }
 
@@ -51,6 +72,20 @@ function render(path: string, params: Partial<AttendanceListParams>, seeded: Pag
 }
 
 describe('AttendancePage', () => {
+    it('lists an uploaded day, marked as such and with no status invented for it', () => {
+        const html = render(
+            '/hrms/attendance',
+            {},
+            page([mark(1, 'Anand Kumar', '2026-08-10'), uploaded(2, 'Bala Murugan', '2026-08-09')], 2),
+        );
+
+        expect(html).toContain('Bala Murugan');
+        // Not present, not absent — the day is still owed an answer.
+        expect(html).toContain('needs review');
+        // And it is visibly the upload's reading, not the record.
+        expect(html).toContain('upload');
+    });
+
     it('renders a search box and a date range', () => {
         const html = render('/hrms/attendance', {}, page([mark(1, 'Anand Kumar', '2026-08-10')], 1));
 

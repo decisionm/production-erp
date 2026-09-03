@@ -7,6 +7,7 @@ use App\Modules\HRMS\Http\Requests\AttendancePersonRequest;
 use App\Modules\HRMS\Http\Requests\AttendanceSummaryRequest;
 use App\Modules\HRMS\Http\Requests\ListAttendanceRequest;
 use App\Modules\HRMS\Http\Requests\MarkAttendanceRequest;
+use App\Modules\HRMS\Http\Resources\AttendanceDayResource;
 use App\Modules\HRMS\Http\Resources\AttendanceResource;
 use App\Modules\HRMS\Models\Employee;
 use App\Modules\HRMS\Services\AttendanceService;
@@ -24,7 +25,7 @@ class AttendanceController extends Controller
     {
         $filters = $request->validated();
 
-        return AttendanceResource::collection($this->attendance->paginate($query->perPage($filters), $filters));
+        return AttendanceDayResource::collection($this->attendance->paginate($query->perPage($filters), $filters));
     }
 
     public function mark(MarkAttendanceRequest $request): AttendanceResource

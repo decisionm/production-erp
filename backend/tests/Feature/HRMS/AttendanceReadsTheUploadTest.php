@@ -285,6 +285,98 @@ class AttendanceReadsTheUploadTest extends TestCase
         $this->assertSame(0, $totals['needs_review'], 'a line with no employee cannot be counted under a department');
     }
 
+    // ---- the list of all marks ---------------------------------------------
+
+    public function test_the_list_of_all_marks_shows_the_uploaded_days_too(): void
+    {
+        $this->actAs();
+        $import = $this->uploadRun();
+        $this->line($import, $this->anand, '2026-07-01', 'present');
+        $this->line($import, $this->anand, '2026-07-02', null, 'no_punch');
+        $this->line($import, $this->bala, '2026-07-01', 'absent');
+        Attendance::create(['employee_id' => $this->anand->id, 'date' => '2026-07-03', 'status' => 'present']);
+
+        $response = $this->getJson('/api/v1/hrms/attendance?from=2026-07-01&to=2026-07-31')->assertOk();
+
+        $this->assertSame(4, $response->json('meta.total'));
+        // The applied day first — newest date — then the uploaded ones.
+        $this->assertSame(['attendance', 'import', 'import', 'import'], $response->json('data.*.source'));
+        // Newest date first: the applied 3rd, then the unanswered 2nd, then
+        // the two people on the 1st.
+        $this->assertSame([false, true, false, false], $response->json('data.*.needs_review'));
+        // An unanswered day has NO status rather than being left out.
+        $this->assertNull($response->json('data.1.status'), 'the unanswered day is listed with no status at all');
+        $this->assertSame('Anand', $response->json('data.1.employee.name'));
+        // Nothing applied is provisional; everything from this run is.
+        $this->assertSame([false, true, true, true], $response->json('data.*.provisional'));
+    }
+
+    public function test_an_applied_day_appears_once_and_as_the_record(): void
+    {
+        $this->actAs();
+        $import = $this->uploadRun();
+        $this->line($import, $this->anand, '2026-07-01', 'half_day');
+        Attendance::create([
+            'employee_id' => $this->anand->id, 'date' => '2026-07-01', 'status' => 'present', 'notes' => 'corrected',
+        ]);
+
+        $response = $this->getJson('/api/v1/hrms/attendance?from=2026-07-01&to=2026-07-31')->assertOk();
+
+        $this->assertSame(1, $response->json('meta.total'), 'one day is one row, not two');
+        $this->assertSame('present', $response->json('data.0.status'));
+        $this->assertSame('corrected', $response->json('data.0.notes'));
+        $this->assertSame('attendance', $response->json('data.0.source'));
+    }
+
+    public function test_a_day_uploaded_twice_is_listed_once_as_the_newer_reading(): void
+    {
+        $this->actAs();
+        $first = $this->uploadRun();
+        $this->line($first, $this->anand, '2026-07-01', 'absent');
+        $second = $this->uploadRun();
+        $this->line($second, $this->anand, '2026-07-01', 'present');
+
+        $response = $this->getJson('/api/v1/hrms/attendance?from=2026-07-01&to=2026-07-31')->assertOk();
+
+        $this->assertSame(1, $response->json('meta.total'));
+        $this->assertSame('present', $response->json('data.0.status'));
+    }
+
+    public function test_the_list_filters_reach_the_uploaded_days_as_well(): void
+    {
+        $this->actAs();
+        $import = $this->uploadRun();
+        $this->line($import, $this->anand, '2026-07-01', 'present');
+        $this->line($import, $this->anand, '2026-07-02', 'absent');
+        $this->line($import, $this->bala, '2026-07-01', 'present');
+
+        $this->assertSame(2, $this->getJson('/api/v1/hrms/attendance?status=present')->assertOk()->json('meta.total'));
+        $this->assertSame(
+            2,
+            $this->getJson("/api/v1/hrms/attendance?employee_id={$this->anand->id}")->assertOk()->json('meta.total'),
+        );
+        $this->assertSame(1, $this->getJson('/api/v1/hrms/attendance?q=SPP-02')->assertOk()->json('meta.total'), 'by code');
+        $this->assertSame(1, $this->getJson('/api/v1/hrms/attendance?q=Stores')->assertOk()->json('meta.total'), 'by department');
+        $this->assertSame(
+            2,
+            $this->getJson('/api/v1/hrms/attendance?from=2026-07-01&to=2026-07-01')->assertOk()->json('meta.total'),
+        );
+    }
+
+    public function test_a_listed_uploaded_day_carries_the_factory_clock(): void
+    {
+        $this->actAs();
+        $import = $this->uploadRun();
+        $this->line($import, $this->anand, '2026-07-01', 'present');
+
+        // 06:00 IST is 00:30 UTC, and the API has always spelled an instant
+        // in UTC — an uploaded wall clock has to be converted, not copied.
+        $this->assertSame(
+            '2026-07-01T00:30:00+00:00',
+            $this->getJson('/api/v1/hrms/attendance?from=2026-07-01&to=2026-07-31')->assertOk()->json('data.0.check_in'),
+        );
+    }
+
     // ---- the printed sheet ------------------------------------------------
 
     public function test_the_printed_sheet_reads_the_upload_as_well(): void
