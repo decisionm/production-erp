@@ -384,7 +384,7 @@ export default function ClientOutstandingPage() {
                 columns={columns}
                 size="small"
                 scroll={{ x: 1500 }}
-                pagination={{ pageSize: 25, showSizeChanger: true }}
+                pagination={{ defaultPageSize: 25, showSizeChanger: true }}
                 locale={{ emptyText: <Empty description={nothingPulled ? 'Nothing pulled from Tally yet' : 'No client matches this filter'} /> }}
                 expandable={{
                     // The bill-level detail is where "outstanding days" is
