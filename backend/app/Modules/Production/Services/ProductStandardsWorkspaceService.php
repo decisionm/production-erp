@@ -52,6 +52,13 @@ class ProductStandardsWorkspaceService
     /** How many uncovered finished goods one search will list. */
     public const UNCONFIGURED_ITEM_LIMIT = 25;
 
+    /**
+     * The columns a column-header sort may order the workspace on (besides
+     * id), in the shared ListSort spelling. Both are the standard's own
+     * columns, present on every assessed row.
+     */
+    public const SORTABLE = ['source_product_name', 'status'];
+
     public function __construct(
         private readonly ProductReadinessService $readiness,
         private readonly ProductionStandardResolver $resolver,
@@ -79,7 +86,7 @@ class ProductStandardsWorkspaceService
      * @param  array<string, mixed>  $filters
      * @return array{page: LengthAwarePaginator, summary: array{ready: int, incomplete: int, all: int}, configuration_overlaps: mixed, unconfigured_items: array{data: list<array<string, mixed>>, total: int}}
      */
-    public function workspace(array $filters = [], int $perPage = 25, int $page = 1): array
+    public function workspace(array $filters = [], int $perPage = 25, int $page = 1, ?string $sort = null): array
     {
         $assessed = $this->assessedRows($filters);
 
@@ -98,6 +105,12 @@ class ProductStandardsWorkspaceService
             self::VIEW_INCOMPLETE => $assessed->where('ready', false),
             default => $assessed,
         })->values();
+
+        // A column-header sort reorders the WHOLE assessed set before the
+        // page is cut, so page 2 of "-status" is the second page of that
+        // order, never the default order re-sliced. Absent, the rows keep
+        // the workspace's own order (product name, cavities, id).
+        $rows = $this->sorted($rows, $sort);
 
         $paginator = new LengthAwarePaginator(
             $rows->forPage($page, $perPage)->values()->all(),
@@ -211,6 +224,34 @@ class ProductStandardsWorkspaceService
             ->all();
 
         return ['data' => $rows, 'total' => $total];
+    }
+
+    /**
+     * The assessed rows in the order a validated `sort` asks for — a bare
+     * column ascending, "-column" descending, `id desc` as the tiebreak (the
+     * ListSort contract), and untouched when nothing was asked. The
+     * FormRequest is the gate; an unknown column here is simply ignored.
+     *
+     * @param  Collection<int, array<string, mixed>>  $rows
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function sorted(Collection $rows, ?string $sort): Collection
+    {
+        $sort = trim((string) $sort);
+        if ($sort === '') {
+            return $rows;
+        }
+
+        $descending = str_starts_with($sort, '-');
+        $column = ltrim($sort, '-');
+        if ($column !== 'id' && ! in_array($column, self::SORTABLE, true)) {
+            return $rows;
+        }
+
+        $direction = $descending ? 'desc' : 'asc';
+        $keys = $column === 'id' ? [['id', $direction]] : [[$column, $direction], ['id', 'desc']];
+
+        return $rows->sortBy($keys)->values();
     }
 
     private function view(mixed $requested): string

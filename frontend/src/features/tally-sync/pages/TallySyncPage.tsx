@@ -44,13 +44,36 @@ import {
 } from '@/features/tally-sync/syncNow';
 import { useAuthStore } from '@/features/auth/store';
 import type { TallySyncEntry, TallySyncEntryFilters, TallySyncStatus } from '@/features/tally-sync/types';
-import { TABLE_STICKY } from '@/lib/tableProps';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
+import { TABLE_STICKY, rangeLine } from '@/lib/tableProps';
 
 /** The status filter's choices — the same words the Status column uses. */
 const statusOptions = (Object.keys(statusLabel) as TallySyncStatus[]).map((status) => ({
     value: status,
     label: statusLabel[status],
 }));
+
+/** What the Status CELL says for a row — the hold's tag when held, else the status word — so its column filter offers the same words. */
+function statusCellText(row: TallySyncEntry): string {
+    return row.hold ? holdCopy(row.hold).tag : statusLabel[row.status];
+}
+
+/** The furthest instant the Last activity column shows first: in Tally, else collected, else queued. */
+function lastActivityAt(row: TallySyncEntry): string | null {
+    return row.synced_at ?? row.delivered_at ?? row.created_at;
+}
+
+/**
+ * The pager's range line. When the page holds fewer rows than the server
+ * has for these filters (listAllTallySyncEntries stops at its page cap), the
+ * line says so in numbers beside the range, so a sort over the held rows is
+ * never mistaken for a sort over the queue.
+ */
+export function queueRangeLine(count: number, range: readonly [number, number], held: number, total: number): string {
+    const line = rangeLine(count, range, 'vouchers');
+
+    return total > held ? `${line} · ${held} of ${total} fetched` : line;
+}
 
 /** The most recent of a set of ISO timestamps — all share the server's offset. */
 function latest(values: (string | null | undefined)[]): string | null {
@@ -253,9 +276,12 @@ export default function TallySyncPage() {
     // rejection can never be pushed below the fold by a day of successful
     // posts; dismissed sinks BELOW synced, being the one kind of row nobody
     // will ever act on. That order is the SERVER's (`sort=status_rank`, asked
-    // for by listAllTallySyncEntries) and is deliberately not re-sorted here:
+    // for by listAllTallySyncEntries) and `entries` is never re-sorted here:
     // with server-side filters the rows are whatever the server matched, and
-    // two sorts — one each side — is how the table and the counts drift apart.
+    // two sorts — one each side — is how the table and the counts drift
+    // apart. The table's column sorters and filters re-order and narrow only
+    // what antd DRAWS from these rows; the counts, the red strip and
+    // "Resync all failed" keep reading `entries` as the server sent them.
     const entries = useMemo(() => data?.entries ?? [], [data]);
 
     const failed = useMemo(() => entries.filter((entry) => entry.status === 'failed'), [entries]);
@@ -846,11 +872,18 @@ export default function TallySyncPage() {
                     rowKey="id"
                     loading={isLoading}
                     dataSource={entries}
-                    pagination={{ defaultPageSize: 25, showSizeChanger: true }}
+                    // Client pager over the held rows; the range line names the
+                    // server's total when the page holds fewer (queueRangeLine).
+                    pagination={{
+                        defaultPageSize: 25,
+                        showSizeChanger: true,
+                        showTotal: (count, range) => queueRangeLine(count, range, entries.length, total),
+                    }}
                     rowClassName={(row) => (row.status === 'failed' ? 'tally-sync-failed-row' : '')}
                     columns={[
                         {
                             title: 'Voucher',
+                            sorter: columnSorter((row: TallySyncEntry) => voucherNumber(row), 'text'),
                             render: (_, row) => (
                                 <Space direction="vertical" size={0}>
                                     <strong>{voucherNumber(row)}</strong>
@@ -875,12 +908,19 @@ export default function TallySyncPage() {
                             // 23rd everywhere, and parsing it as an instant
                             // shows a viewer west of Greenwich the 22nd.
                             title: 'Voucher date',
+                            // Sorted on the stored YYYY-MM-DD, which orders the
+                            // same as the calendar date it names.
+                            sorter: columnSorter((row: TallySyncEntry) => row.business_date, 'date'),
                             render: (_, row) => (
                                 <span style={{ whiteSpace: 'nowrap' }}>{voucherDate(row.business_date)}</span>
                             ),
                         },
                         {
                             title: 'Category',
+                            // Filtered on the words the cell shows (categoryLabel), so
+                            // the menu and the column can never disagree.
+                            filters: filterOptions(entries, (row) => categoryLabel(row.category)),
+                            onFilter: onFilterBy((row: TallySyncEntry) => categoryLabel(row.category)),
                             render: (_, row) => (
                                 // categoryLabel() adds "· posts as Stock Journal"
                                 // where the ERP's label is not what Tally receives
@@ -894,10 +934,18 @@ export default function TallySyncPage() {
                             // batch, and the cell says what the row's own source
                             // record is.
                             title: 'Source',
+                            // The source RECORD's type, as the cell names it
+                            // ("ShiftProductionEntry #42") — never the party.
+                            filters: filterOptions(entries, (row) => row.syncable_type),
+                            onFilter: onFilterBy((row: TallySyncEntry) => row.syncable_type),
                             render: (_, row) => <EntrySourceCell entry={row} />,
                         },
                         {
                             title: 'Status',
+                            // The cell's own words: a held row filters under its
+                            // hold tag, not under "Waiting for agent".
+                            filters: filterOptions(entries, statusCellText),
+                            onFilter: onFilterBy(statusCellText),
                             render: (_, row) =>
                                 row.hold ? (
                                     // A held shift voucher is deliberately not with
@@ -924,6 +972,7 @@ export default function TallySyncPage() {
                             title: 'Tries',
                             dataIndex: 'attempts',
                             align: 'right',
+                            sorter: columnSorter((row: TallySyncEntry) => row.attempts, 'number'),
                         },
                         {
                             title: 'What Tally said',
@@ -983,6 +1032,8 @@ export default function TallySyncPage() {
                             // a suspiciously long time. Both stay on one line
                             // each so the column cannot reflow into a paragraph.
                             title: 'Last activity',
+                            // Sorted on the instant the cell leads with (lastActivityAt).
+                            sorter: columnSorter(lastActivityAt, 'date'),
                             render: (_, row) => (
                                 <Space direction="vertical" size={0} style={{ whiteSpace: 'nowrap' }}>
                                     {row.synced_at && <span><strong>In Tally</strong> {instant(row.synced_at)}</span>}

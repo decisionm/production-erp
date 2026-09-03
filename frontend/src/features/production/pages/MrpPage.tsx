@@ -4,7 +4,9 @@ import { useState } from 'react';
 import { listAllItems } from '@/features/inventory/api';
 import { getMrpNetRequirements } from '@/features/production/api';
 import type { MrpNetRequirement } from '@/features/production/types';
+import { columnSorter } from '@/lib/clientSort';
 import { itemLabel } from '@/lib/itemLabel';
+import { TABLE_STICKY } from '@/lib/tableProps';
 
 export default function MrpPage() {
     const [itemId, setItemId] = useState<number | undefined>();
@@ -63,15 +65,25 @@ export default function MrpPage() {
             {results && (
                 <Table<MrpNetRequirement>
                     scroll={{ x: 'max-content' }}
+                    sticky={TABLE_STICKY}
                     rowKey="item_id"
                     dataSource={results}
                     pagination={false}
+                    // The whole explosion is in the browser; each column sorts on the value it shows.
                     columns={[
-                        { title: 'SKU', dataIndex: 'sku' },
-                        { title: 'Name', dataIndex: 'name' },
-                        { title: 'Gross Required', dataIndex: 'gross_required' },
-                        { title: 'On Hand', dataIndex: 'on_hand' },
-                        { title: 'Net Required', dataIndex: 'net_required' },
+                        { title: 'SKU', dataIndex: 'sku', sorter: columnSorter((row: MrpNetRequirement) => row.sku, 'text') },
+                        { title: 'Name', dataIndex: 'name', sorter: columnSorter((row: MrpNetRequirement) => row.name, 'text') },
+                        {
+                            title: 'Gross Required',
+                            dataIndex: 'gross_required',
+                            sorter: columnSorter((row: MrpNetRequirement) => row.gross_required, 'number'),
+                        },
+                        { title: 'On Hand', dataIndex: 'on_hand', sorter: columnSorter((row: MrpNetRequirement) => row.on_hand, 'number') },
+                        {
+                            title: 'Net Required',
+                            dataIndex: 'net_required',
+                            sorter: columnSorter((row: MrpNetRequirement) => row.net_required, 'number'),
+                        },
                     ]}
                 />
             )}

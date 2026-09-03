@@ -20,7 +20,13 @@ import {
 } from 'antd';
 import { useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
+import {
+    ConfigurationActionsCell,
+    ConfigurationStatusTag,
+    configurationEntity,
+    lifecycleStateOf,
+} from '@/components/configuration';
+import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
 import FactoryRulesTab from '@/features/production/components/FactoryRulesTab';
 import PackingMaterialsTab from '@/features/production/components/PackingMaterialsTab';
 import MoldsPage from '@/features/production/pages/MoldsPage';
@@ -143,6 +149,11 @@ export default function ProductionConfigurationPage() {
                 onChange={(key) => {
                     const next = new URLSearchParams(searchParams);
                     next.set('tab', key);
+                    // The masters on these tabs keep their sort and page in
+                    // the URL (useListParams) under the same four keys, and
+                    // page 3 of the moulds is not page 3 of the shifts — a tab
+                    // opens on its own first page, in its own order.
+                    for (const listKey of ['q', 'sort', 'page', 'per_page']) next.delete(listKey);
                     // Replace, not push: clicking through the tabs should not
                     // cost one Back press each to leave the page.
                     setSearchParams(next, { replace: true });
@@ -334,17 +345,34 @@ function MachinesTab() {
         form.setFieldsValue(row === 'new' ? BLANK_MACHINE : machineFormValues(row));
     };
 
+    // The whole master is in the browser (a ten-machine factory), so the
+    // columns sort and filter here, on the values the cells show.
+    const rows = data?.data ?? [];
+    const machineStatus = (row: WorkCenter) => lifecycleStateOf(configurationEntity('work-center'), row).label;
+    const lowestCavities = (row: WorkCenter) =>
+        row.permitted_cavities?.length ? Math.min(...row.permitted_cavities) : (row.min_cavities ?? row.max_cavities);
+
     const columns = [
-        { title: 'Code', dataIndex: 'code', width: 110, fixed: 'left' as const },
-        { title: 'Machine', dataIndex: 'name', width: 200 },
+        {
+            title: 'Code',
+            dataIndex: 'code',
+            width: 110,
+            fixed: 'left' as const,
+            sorter: columnSorter((row: WorkCenter) => row.code, 'text'),
+        },
+        { title: 'Machine', dataIndex: 'name', width: 200, sorter: columnSorter((row: WorkCenter) => row.name, 'text') },
         {
             title: 'Class',
             width: 140,
+            sorter: columnSorter((row: WorkCenter) => row.capacity_class, 'text'),
+            filters: filterOptions(rows, (row: WorkCenter) => row.capacity_class),
+            onFilter: onFilterBy((row: WorkCenter) => row.capacity_class),
             render: (_: unknown, row: WorkCenter) => stated(row.capacity_class),
         },
         {
             title: 'Cavities',
             width: 150,
+            sorter: columnSorter(lowestCavities, 'number'),
             render: (_: unknown, row: WorkCenter) =>
                 row.permitted_cavities?.length
                     ? row.permitted_cavities.join(' / ')
@@ -355,6 +383,7 @@ function MachinesTab() {
         {
             title: 'Cycle time (s)',
             width: 150,
+            sorter: columnSorter((row: WorkCenter) => row.cycle_time_min ?? row.cycle_time_max, 'number'),
             render: (_: unknown, row: WorkCenter) =>
                 row.cycle_time_min != null || row.cycle_time_max != null
                     ? `${row.cycle_time_min ?? '?'}–${row.cycle_time_max ?? '?'}`
@@ -363,6 +392,7 @@ function MachinesTab() {
         {
             title: 'Hours/day',
             width: 120,
+            sorter: columnSorter((row: WorkCenter) => row.capacity_hours_per_day, 'number'),
             render: (_: unknown, row: WorkCenter) => stated(row.capacity_hours_per_day),
         },
         {
@@ -370,6 +400,8 @@ function MachinesTab() {
             // master calls Active. One vocabulary, product-wide, is the point.
             title: 'Status',
             width: 110,
+            filters: filterOptions(rows, machineStatus),
+            onFilter: onFilterBy(machineStatus),
             render: (_: unknown, row: WorkCenter) => <ConfigurationStatusTag entity="work-center" row={row} />,
         },
         ...(canManage
@@ -433,7 +465,7 @@ function MachinesTab() {
                 rowKey="id"
                 size="small"
                 loading={isFetching}
-                dataSource={data?.data ?? []}
+                dataSource={rows}
                 pagination={false}
                 scroll={{ x: 'max-content' }}
                 columns={columns as never}
@@ -560,6 +592,12 @@ function DowntimeReasonsTab() {
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['production', 'downtime-reasons'] }),
     });
 
+    // The whole master is in the browser, so the columns sort and filter
+    // here, on the values the cells show.
+    const rows = data?.data ?? [];
+    const typeWord = (row: DowntimeReason) => (row.planning_type === 'planned' ? 'Planned' : 'Unplanned');
+    const reasonStatus = (row: DowntimeReason) => lifecycleStateOf(configurationEntity('downtime-reason'), row).label;
+
     return (
         <>
             <Alert
@@ -574,15 +612,27 @@ function DowntimeReasonsTab() {
                 rowKey="id"
                 size="small"
                 loading={isFetching}
-                dataSource={data?.data ?? []}
+                dataSource={rows}
                 pagination={false}
                 columns={
                     [
-                        { title: 'Code', dataIndex: 'code' },
-                        { title: 'Description', dataIndex: 'description' },
-                        { title: 'Category', dataIndex: 'category' },
+                        { title: 'Code', dataIndex: 'code', sorter: columnSorter((row: DowntimeReason) => row.code, 'text') },
+                        {
+                            title: 'Description',
+                            dataIndex: 'description',
+                            sorter: columnSorter((row: DowntimeReason) => row.description, 'text'),
+                        },
+                        {
+                            title: 'Category',
+                            dataIndex: 'category',
+                            sorter: columnSorter((row: DowntimeReason) => row.category, 'text'),
+                            filters: filterOptions(rows, (row: DowntimeReason) => row.category),
+                            onFilter: onFilterBy((row: DowntimeReason) => row.category),
+                        },
                         {
                             title: 'Type',
+                            filters: filterOptions(rows, typeWord),
+                            onFilter: onFilterBy(typeWord),
                             render: (_: unknown, row: DowntimeReason) => (
                                 <Select
                                     size="small"
@@ -613,6 +663,8 @@ function DowntimeReasonsTab() {
                             // dependency report, no reason recorded, and this
                             // master cascades to `production_downtime_events`.
                             title: 'Status',
+                            filters: filterOptions(rows, reasonStatus),
+                            onFilter: onFilterBy(reasonStatus),
                             render: (_: unknown, row: DowntimeReason) => (
                                 <ConfigurationStatusTag entity="downtime-reason" row={row} />
                             ),

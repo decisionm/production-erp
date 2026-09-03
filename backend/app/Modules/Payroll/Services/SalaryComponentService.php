@@ -2,16 +2,19 @@
 
 namespace App\Modules\Payroll\Services;
 
+use App\Modules\Payroll\Http\Requests\ListSalaryComponentsRequest;
 use App\Modules\Payroll\Models\SalaryComponent;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 class SalaryComponentService
 {
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /** Ordered by `sort` (ListSort; validated by ListSalaryComponentsRequest), by name as it always was when absent. */
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return SalaryComponent::query()
-            ->orderBy('name')
-            ->paginate($perPage);
+        return ListSort::apply(SalaryComponent::query(), $sort, ListSalaryComponentsRequest::SORTABLE, 'name')
+            ->paginate($perPage)
+            ->withQueryString();
     }
 
     public function create(array $data): SalaryComponent

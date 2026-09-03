@@ -4,6 +4,7 @@ namespace App\Modules\CRM\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Compliance\Services\GstRegistrationService;
+use App\Modules\CRM\Http\Requests\ListQuotationsRequest;
 use App\Modules\CRM\Http\Requests\StoreQuotationRequest;
 use App\Modules\CRM\Http\Resources\QuotationResource;
 use App\Modules\CRM\Models\Quotation;
@@ -21,9 +22,12 @@ class QuotationController extends Controller
         private readonly GstRegistrationService $gstRegistrations,
     ) {}
 
-    public function index(): AnonymousResourceCollection
+    public function index(ListQuotationsRequest $request): AnonymousResourceCollection
     {
-        return QuotationResource::collection($this->quotations->paginate());
+        return QuotationResource::collection($this->quotations->paginate(
+            (int) ($request->validated('per_page') ?? 20),
+            $request->validated('sort'),
+        ));
     }
 
     public function store(StoreQuotationRequest $request): QuotationResource

@@ -2,13 +2,24 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { activePickerOptions } from '@/components/configuration/pickerOptions';
 import { createOpportunity, listOpportunities, updateOpportunity, updateOpportunityStage } from '@/features/crm/api';
+import {
+    OPPORTUNITY_DEFAULT_SORT,
+    OPPORTUNITY_LIST_SPEC,
+    OPPORTUNITY_SORT_FIELDS,
+    type OpportunityListParams,
+    opportunitiesQueryKey,
+    opportunityServerFilters,
+} from '@/features/crm/opportunityList';
 import type { Opportunity, OpportunityStage } from '@/features/crm/types';
 import { listCustomers } from '@/features/sales/api';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const stageColor: Record<OpportunityStage, string> = {
     prospecting: 'default',
@@ -44,7 +55,15 @@ export default function OpportunitiesPage() {
     const [editingOpportunity, setEditingOpportunity] = useState<Opportunity | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['crm', 'opportunities'], queryFn: listOpportunities });
+    // THE LIST'S VIEW IS ITS URL: sort, page and page size, sorted and paged
+    // on the SERVER over every opportunity.
+    const { params, setParams, setPage } = useListParams<OpportunityListParams>(OPPORTUNITY_LIST_SPEC);
+    const filters = useMemo(() => opportunityServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: opportunitiesQueryKey(filters),
+        queryFn: () => listOpportunities(filters),
+        placeholderData: (previous) => previous,
+    });
     const { data: customers } = useQuery({
         queryKey: ['sales', 'customers', 'picker'],
         // Explicit thunk: passing listCustomers directly would hand
@@ -114,20 +133,55 @@ export default function OpportunitiesPage() {
             </Space>
 
             <Table<Opportunity>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries every opportunity. Customer is a relation's
+                // name: no sorter.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, OPPORTUNITY_SORT_FIELDS, OPPORTUNITY_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'opportunities')}
                 columns={[
-                    { title: 'Name', dataIndex: 'name' },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, OPPORTUNITY_DEFAULT_SORT),
+                    },
                     { title: 'Customer', render: (_, row) => row.customer.name },
-                    { title: 'Estimated Value', dataIndex: 'estimated_value' },
-                    { title: 'Probability %', dataIndex: 'probability' },
-                    { title: 'Expected Close', dataIndex: 'expected_close_date' },
+                    {
+                        title: 'Estimated Value',
+                        dataIndex: 'estimated_value',
+                        key: 'estimated_value',
+                        sorter: true,
+                        sortOrder: columnSortOrder('estimated_value', params.sort, OPPORTUNITY_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Probability %',
+                        dataIndex: 'probability',
+                        key: 'probability',
+                        sorter: true,
+                        sortOrder: columnSortOrder('probability', params.sort, OPPORTUNITY_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Expected Close',
+                        dataIndex: 'expected_close_date',
+                        key: 'expected_close_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('expected_close_date', params.sort, OPPORTUNITY_DEFAULT_SORT),
+                    },
                     {
                         title: 'Stage',
                         dataIndex: 'stage',
+                        key: 'stage',
+                        sorter: true,
+                        sortOrder: columnSortOrder('stage', params.sort, OPPORTUNITY_DEFAULT_SORT),
                         render: (stage: OpportunityStage, row) => (
                             <Select
                                 value={stage}

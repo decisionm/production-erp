@@ -7,11 +7,12 @@ import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { ConfigurationActionsCell, ConfigurationStatusTag } from '@/components/configuration';
 import { createEmployee, listAllEmployees, listEmployees, updateEmployee } from '@/features/hrms/api';
-import { EMPLOYEE_LIST_SPEC, noMatchLine, pageRangeLine } from '@/features/hrms/list';
+import { EMPLOYEE_DEFAULT_SORT, EMPLOYEE_LIST_SPEC, EMPLOYEE_SORT_FIELDS, noMatchLine, pageRangeLine } from '@/features/hrms/list';
 import type { Employee, EmployeeListParams, EmployeeStatus } from '@/features/hrms/types';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { compactParams, narrowingKeys } from '@/lib/listParams';
 import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { useListParams } from '@/lib/useListParams';
 
 const employeeSchema = z.object({
@@ -170,15 +171,54 @@ export default function EmployeesPage() {
                 rowKey="id"
                 loading={query.isFetching}
                 dataSource={query.data?.data}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries; the list is paginated, so sorting the
+                // loaded page would misorder the whole master.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, EMPLOYEE_SORT_FIELDS, EMPLOYEE_DEFAULT_SORT) });
+                }}
                 pagination={serverPagination(query.data?.meta, setPage, 'employees')}
                 locale={{ emptyText: <ListEmpty state={query} entity="employees" empty={emptyText} /> }}
                 columns={[
-                    { title: 'Code', dataIndex: 'employee_code' },
-                    { title: 'Name', dataIndex: 'name' },
-                    { title: 'Designation', dataIndex: 'designation' },
-                    { title: 'Department', dataIndex: 'department' },
+                    {
+                        title: 'Code',
+                        dataIndex: 'employee_code',
+                        key: 'employee_code',
+                        sorter: true,
+                        sortOrder: columnSortOrder('employee_code', params.sort, EMPLOYEE_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Name',
+                        dataIndex: 'name',
+                        key: 'name',
+                        sorter: true,
+                        sortOrder: columnSortOrder('name', params.sort, EMPLOYEE_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Designation',
+                        dataIndex: 'designation',
+                        key: 'designation',
+                        sorter: true,
+                        sortOrder: columnSortOrder('designation', params.sort, EMPLOYEE_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Department',
+                        dataIndex: 'department',
+                        key: 'department',
+                        sorter: true,
+                        sortOrder: columnSortOrder('department', params.sort, EMPLOYEE_DEFAULT_SORT),
+                    },
+                    // A name through the manager relation: not a column of
+                    // this table, so not a server sort.
                     { title: 'Manager', render: (_, row) => row.manager?.name },
-                    { title: 'Joined', dataIndex: 'date_of_joining' },
+                    {
+                        title: 'Joined',
+                        dataIndex: 'date_of_joining',
+                        key: 'date_of_joining',
+                        sorter: true,
+                        sortOrder: columnSortOrder('date_of_joining', params.sort, EMPLOYEE_DEFAULT_SORT),
+                    },
                     {
                         // The same two words as every other master, plus the
                         // factory's own word for the case that is neither:
@@ -186,6 +226,9 @@ export default function EmployeesPage() {
                         // it into "Retired" would lose what payroll reads.
                         title: 'Status',
                         dataIndex: 'status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, EMPLOYEE_DEFAULT_SORT),
                         render: (_: EmployeeStatus, row) => <ConfigurationStatusTag entity="employee" row={row} />,
                     },
                     {

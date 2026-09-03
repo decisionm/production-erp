@@ -5,8 +5,19 @@ import { listAllWarehouses } from '@/features/inventory/api';
 import type { StockMovement } from '@/features/inventory/types';
 import { itemLabel } from '@/lib/itemLabel';
 import { ListEmpty } from '@/lib/ListEmpty';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { listProductionReturnable, listRequestableMaterials, listStoreProductionMovements } from '../api';
 import { formatQuantity } from '../words';
+
+/**
+ * SORTED BY THE SERVER (ListStockMovementsRequest::SORTABLE): the history
+ * is paged, so a sorter here re-queries the whole list rather than
+ * reordering the twenty rows on screen. Direction is the movement's `type`
+ * read against the WIP leg, so that column sorts on `type`.
+ */
+const HISTORY_SORT_FIELDS: readonly string[] = ['movement_date', 'type', 'quantity'];
+const HISTORY_DEFAULT_SORT = '-movement_date';
 
 /**
  * ONE HISTORY FOR BOTH DIRECTIONS — every handover out to production and
@@ -32,6 +43,10 @@ import { formatQuantity } from '../words';
 export default function StoreProductionHistoryTab() {
     const [itemId, setItemId] = useState<number | undefined>();
     const [page, setPage] = useState(1);
+    const [perPage, setPerPage] = useState(20);
+    // Component state, not the URL: this tab shares its route with the
+    // issue queue, whose own list params already own `page` there.
+    const [sort, setSort] = useState<string | undefined>();
 
     const warehouses = useQuery({
         queryKey: ['inventory', 'warehouses', 'return-destinations'],
@@ -59,13 +74,14 @@ export default function StoreProductionHistoryTab() {
     });
 
     const movements = useQuery({
-        queryKey: ['material-flow', 'store-production-movements', wipWarehouseId, itemId, page],
+        queryKey: ['material-flow', 'store-production-movements', wipWarehouseId, itemId, sort, page, perPage],
         queryFn: () =>
             listStoreProductionMovements({
                 wipWarehouseId: wipWarehouseId as number,
                 itemId,
+                sort,
                 page,
-                perPage: 20,
+                perPage,
             }),
         enabled: wipWarehouseId !== null,
     });
@@ -104,7 +120,10 @@ export default function StoreProductionHistoryTab() {
         {
             title: 'When',
             dataIndex: 'movement_date',
+            key: 'movement_date',
             width: 160,
+            sorter: true,
+            sortOrder: columnSortOrder('movement_date', sort, HISTORY_DEFAULT_SORT),
             render: (value: string | null) => (value ? new Date(value).toLocaleString() : '—'),
         },
         {
@@ -121,8 +140,10 @@ export default function StoreProductionHistoryTab() {
              * transfer_in / transfer_out, which say nothing to a storekeeper.
              */
             title: 'Direction',
-            key: 'direction',
+            key: 'type',
             width: 190,
+            sorter: true,
+            sortOrder: columnSortOrder('type', sort, HISTORY_DEFAULT_SORT),
             render: (_: unknown, row: StockMovement) =>
                 row.type === 'transfer_in' ? (
                     <Tag color="blue">Issued to production</Tag>
@@ -135,6 +156,8 @@ export default function StoreProductionHistoryTab() {
             key: 'quantity',
             width: 130,
             align: 'right' as const,
+            sorter: true,
+            sortOrder: columnSortOrder('quantity', sort, HISTORY_DEFAULT_SORT),
             render: (_: unknown, row: StockMovement) => formatQuantity(row.quantity, row.item?.uom),
         },
         { title: 'Reference', dataIndex: 'reference', width: 200 },
@@ -200,16 +223,24 @@ export default function StoreProductionHistoryTab() {
             <Table<StockMovement>
                 rowKey="id"
                 size="small"
+                sticky={TABLE_STICKY}
+                scroll={{ x: 'max-content' }}
                 columns={columns}
                 dataSource={movements.data?.data ?? []}
                 loading={movements.isPending}
-                pagination={{
-                    current: movements.data?.meta?.current_page ?? 1,
-                    pageSize: movements.data?.meta?.per_page ?? 20,
-                    total: movements.data?.meta?.total ?? 0,
-                    showSizeChanger: false,
-                    onChange: setPage,
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setSort(sortParamFromSorter(sorter, HISTORY_SORT_FIELDS, HISTORY_DEFAULT_SORT));
+                    setPage(1);
                 }}
+                pagination={serverPagination(
+                    movements.data?.meta,
+                    (nextPage, nextSize) => {
+                        setPage(nextPage);
+                        setPerPage(nextSize);
+                    },
+                    'movements',
+                )}
                 locale={{
                     emptyText: (
                         <ListEmpty

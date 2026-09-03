@@ -7,10 +7,13 @@ import MaterialBagLabels from '@/features/inventory/components/MaterialBagLabels
 import { hasModuleAccess } from '@/features/auth/permissions';
 import { useAuthStore } from '@/features/auth/store';
 import { listAllItems } from '@/features/inventory/api';
+import { MATERIAL_LOT_SORT_FIELDS, materialLotDefaultSort } from '@/features/inventory/traceabilityRegisters';
 import { listMaterialLots } from '@/features/production/api';
 import type { MaterialLot } from '@/features/production/types';
 import { formatDateTime } from '@/lib/datetime';
 import { itemLabel } from '@/lib/itemLabel';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 
 /**
  * The register also carries each lot's receipt provenance (MaterialLotResource
@@ -50,10 +53,20 @@ function fmtRate(value: string | null | undefined): string {
 export default function MaterialLotsPage({ embedded = false }: { embedded?: boolean } = {}) {
     const [itemId, setItemId] = useState<number | null>(null);
     const [page, setPage] = useState(1);
+    const [perPage, setPerPage] = useState(20);
     /** Received-date window, YYYY-MM-DD, and which end of the register to read from. */
     const [receivedFrom, setReceivedFrom] = useState<string | null>(null);
     const [receivedTo, setReceivedTo] = useState<string | null>(null);
     const [order, setOrder] = useState<'newest' | 'oldest'>('newest');
+    /**
+     * A column sort (ListMaterialLotsRequest::SORTABLE), SERVER-side like
+     * the date filter and for the same reason. Component state rather than
+     * the URL: this register is also a tab of Barcode & Labels, where two
+     * lists on one URL would fight over `page`. With none set the Received
+     * arrow follows the newest/oldest switch.
+     */
+    const [sort, setSort] = useState<string | undefined>();
+    const defaultSort = materialLotDefaultSort(order);
     const [labelSelection, setLabelSelection] = useState<{ lot: MaterialLot; bagId?: number } | null>(null);
     const user = useAuthStore((s) => s.user);
 
@@ -64,14 +77,17 @@ export default function MaterialLotsPage({ embedded = false }: { embedded?: bool
     const { data, isLoading, isError, error, refetch } = useQuery({
         // Every filter is in the key, so a narrowed register is fetched rather
         // than sliced from a page that is already here.
-        queryKey: ['inventory', 'material-lots', itemId, page, receivedFrom, receivedTo, order],
+        queryKey: ['inventory', 'material-lots', itemId, page, perPage, receivedFrom, receivedTo, order, sort],
         queryFn: () => listMaterialLots({
             item_id: itemId ?? undefined,
             page,
+            per_page: perPage,
             received_from: receivedFrom ?? undefined,
             received_to: receivedTo ?? undefined,
             order,
+            sort,
         }),
+        placeholderData: (previous) => previous,
         retry: false,
     });
 
@@ -175,6 +191,9 @@ export default function MaterialLotsPage({ embedded = false }: { embedded?: bool
                         value={order}
                         onChange={(value) => {
                             setOrder(value as 'newest' | 'oldest');
+                            // The switch is the Received order; a column sort
+                            // would otherwise keep winning over it.
+                            setSort(undefined);
                             setPage(1);
                         }}
                         options={[
@@ -188,18 +207,24 @@ export default function MaterialLotsPage({ embedded = false }: { embedded?: bool
                     rowKey="id"
                     loading={isLoading}
                     dataSource={lots}
+                    sticky={TABLE_STICKY}
                     scroll={{ x: 'max-content' }}
-                    pagination={
-                        data?.meta
-                            ? {
-                                  current: data.meta.current_page,
-                                  pageSize: data.meta.per_page,
-                                  total: data.meta.total,
-                                  showSizeChanger: false,
-                                  onChange: setPage,
-                              }
-                            : false
-                    }
+                    // SORTED BY THE SERVER: sortOrder-controlled, re-queries
+                    // the whole register. Material, the receipt columns and
+                    // the rate render relations and carry no sorter.
+                    onChange={(_pagination, _filters, sorter, extra) => {
+                        if (extra.action !== 'sort') return;
+                        setSort(sortParamFromSorter(sorter, MATERIAL_LOT_SORT_FIELDS, defaultSort));
+                        setPage(1);
+                    }}
+                    pagination={serverPagination(
+                        data?.meta,
+                        (nextPage, nextSize) => {
+                            setPage(nextPage);
+                            setPerPage(nextSize);
+                        },
+                        'lots',
+                    )}
                     expandable={{
                         expandedRowRender: (lot) => (
                             <Table
@@ -252,8 +277,22 @@ export default function MaterialLotsPage({ embedded = false }: { embedded?: bool
                                 ),
                         },
                         { title: 'Material', render: (_, lot) => (lot.item ? itemLabel(lot.item) : '—') },
-                        { title: 'Supplier lot', dataIndex: 'supplier_lot_no', render: (value: string | null) => value ?? '—' },
-                        { title: 'Received', dataIndex: 'received_date', render: (value: string | null) => value ?? '—' },
+                        {
+                            title: 'Supplier lot',
+                            dataIndex: 'supplier_lot_no',
+                            key: 'supplier_lot_no',
+                            sorter: true,
+                            sortOrder: columnSortOrder('supplier_lot_no', sort, defaultSort),
+                            render: (value: string | null) => value ?? '—',
+                        },
+                        {
+                            title: 'Received',
+                            dataIndex: 'received_date',
+                            key: 'received_date',
+                            sorter: true,
+                            sortOrder: columnSortOrder('received_date', sort, defaultSort),
+                            render: (value: string | null) => value ?? '—',
+                        },
                         {
                             title: 'Receipt date & time',
                             render: (_, lot) => formatDateTime(lot.receipt?.received_at),
@@ -302,8 +341,23 @@ export default function MaterialLotsPage({ embedded = false }: { embedded?: bool
                                   },
                               ]
                             : []),
-                        { title: 'Bags', dataIndex: 'bag_count', align: 'right' },
-                        { title: 'Received kg', dataIndex: 'total_received_kg', align: 'right', render: fmtKg },
+                        {
+                            title: 'Bags',
+                            dataIndex: 'bag_count',
+                            key: 'bag_count',
+                            align: 'right',
+                            sorter: true,
+                            sortOrder: columnSortOrder('bag_count', sort, defaultSort),
+                        },
+                        {
+                            title: 'Received kg',
+                            dataIndex: 'total_received_kg',
+                            key: 'total_received_kg',
+                            align: 'right',
+                            sorter: true,
+                            sortOrder: columnSortOrder('total_received_kg', sort, defaultSort),
+                            render: fmtKg,
+                        },
                         {
                             title: 'Labels',
                             render: (_, lot) => (

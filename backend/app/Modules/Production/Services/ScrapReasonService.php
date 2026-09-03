@@ -2,9 +2,11 @@
 
 namespace App\Modules\Production\Services;
 
+use App\Modules\Production\Http\Requests\ListScrapReasonsRequest;
 use App\Modules\Production\Models\ScrapReason;
 use App\Support\Configuration\DependencyCheck;
 use App\Support\Configuration\ManagesConfigurationLifecycle;
+use App\Support\Lists\ListSort;
 use Closure;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
@@ -17,12 +19,13 @@ class ScrapReasonService
      *                             handover screen may offer), false =
      *                             withdrawn only, null = the whole master.
      */
-    public function paginate(int $perPage = 20, ?bool $activeOnly = null): LengthAwarePaginator
+    public function paginate(int $perPage = 20, ?bool $activeOnly = null, ?string $sort = null): LengthAwarePaginator
     {
-        return ScrapReason::query()
-            ->when($activeOnly !== null, fn ($q) => $q->where('is_active', $activeOnly))
-            ->orderBy('name')
-            ->paginate($perPage);
+        $query = ScrapReason::query()
+            ->when($activeOnly !== null, fn ($q) => $q->where('is_active', $activeOnly));
+
+        // The master's own order is by name; a sort asked for replaces it.
+        return ListSort::apply($query, $sort, ListScrapReasonsRequest::SORTABLE, 'name')->paginate($perPage);
     }
 
     public function create(array $data): ScrapReason

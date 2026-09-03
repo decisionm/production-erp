@@ -2,10 +2,12 @@
 
 namespace App\Modules\Production\Services;
 
+use App\Modules\Production\Http\Requests\ListShiftsRequest;
 use App\Modules\Production\Models\Shift;
 use App\Modules\TallySync\Services\TallySyncLinkService;
 use App\Support\Configuration\DependencyCheck;
 use App\Support\Configuration\ManagesConfigurationLifecycle;
+use App\Support\Lists\ListSort;
 use Closure;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Model;
@@ -26,12 +28,13 @@ class ShiftService
      *                             for old records and must never surface on
      *                             an operational screen.
      */
-    public function paginate(int $perPage = 20, ?bool $activeOnly = null): LengthAwarePaginator
+    public function paginate(int $perPage = 20, ?bool $activeOnly = null, ?string $sort = null): LengthAwarePaginator
     {
-        return Shift::query()
-            ->when($activeOnly !== null, fn ($q) => $q->where('is_active', $activeOnly))
-            ->orderBy('start_time')
-            ->paginate($perPage);
+        $query = Shift::query()
+            ->when($activeOnly !== null, fn ($q) => $q->where('is_active', $activeOnly));
+
+        // The master's own order is the clock's; a sort asked for replaces it.
+        return ListSort::apply($query, $sort, ListShiftsRequest::SORTABLE, 'start_time')->paginate($perPage);
     }
 
     public function create(array $data): Shift

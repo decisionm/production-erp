@@ -1,0 +1,210 @@
+# DEC-20260903-001 — correct the batch consumption booked against one item to
+# another, by NEW append-only movements. On live: "Pet Resin" (demo, item 592)
+# to "Relpet" (item 606), roughly 15.5 t over 115 batches.
+#
+# How to use it:
+#   1. Run with write=false (the default). The job summary is the CORRECTION
+#      STATEMENT: one line per batch (date, shift, machine, warehouse, net kg)
+#      and the totals, plus what the Store has issued of the to-item and is
+#      still standing in Production/WIP, and the other negative balances in
+#      the same warehouse (Master Batch Amber) — listed, never corrected.
+#      Hand that statement to the accountant: the Tally-side correcting
+#      journal is theirs (DEC-20260903-001); the ERP never touches Tally here.
+#   2. Run again with write=true, the same items, the `batches` count you read
+#      in the dry run, and the confirmation text. The workflow re-runs the dry
+#      run, refuses if the batch count no longer matches, takes a FULL
+#      database dump on the server (backend/scripts/backup-db.sh — refuses to
+#      write if the dump fails), then posts the correction rows in one
+#      transaction. The originals are never edited or deleted. A second write
+#      finds nothing left to correct.
+#
+# Items are named by SKU or exact name, never by id.
+
+name: Correct consumption item (DEC-20260903-001)
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_item:
+        description: 'SKU or exact name of the item the batches wrongly consumed (on live: Pet Resin).'
+        type: string
+        default: ''
+      to_item:
+        description: 'SKU or exact name of the item they physically ran on (on live: Relpet).'
+        type: string
+        default: ''
+      write:
+        description: 'Actually post the correction movements. Leave false for a dry run that prints the statement and changes nothing.'
+        type: boolean
+        default: false
+      expected_batches:
+        description: 'The "batches" number you read in the dry run, e.g. 115. The write is refused if it no longer matches.'
+        type: string
+        default: ''
+      confirm:
+        description: 'To write, type exactly:  CORRECT CONSUMPTION  (ignored on a dry run)'
+        type: string
+        default: ''
+
+concurrency:
+  group: correct-consumption-item
+  cancel-in-progress: false
+
+jobs:
+  correct:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse empty item names
+        env:
+          FROM_ITEM: ${{ inputs.from_item }}
+          TO_ITEM: ${{ inputs.to_item }}
+        run: |
+          if [ -z "$(printf '%s' "$FROM_ITEM" | tr -d '[:space:]')" ] || [ -z "$(printf '%s' "$TO_ITEM" | tr -d '[:space:]')" ]; then
+            echo "::error::Both from_item and to_item are required (SKU or exact name)."
+            exit 1
+          fi
+          case "$FROM_ITEM$TO_ITEM" in
+            *"'"*) echo "::error::Item names must not contain a single quote."; exit 1 ;;
+          esac
+
+      - name: Refuse a write without the typed confirmation
+        if: ${{ inputs.write }}
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "CORRECT CONSUMPTION" ]; then
+            echo "::error::Write refused. To post, set write=true AND type CORRECT CONSUMPTION in the confirm box. A dry run (write=false) needs no confirmation."
+            exit 1
+          fi
+
+      - name: Refuse a write without a plain expected batch count
+        if: ${{ inputs.write }}
+        env:
+          EXPECTED: ${{ inputs.expected_batches }}
+        run: |
+          case "$EXPECTED" in
+            ''|*[!0-9]*)
+              echo "::error::Write refused. expected_batches must be the plain number you read in the dry run (digits only), e.g. 115. Got: '$EXPECTED'"
+              exit 1
+              ;;
+          esac
+          echo "::warning::POSTING correction stock movements on the LIVE database, expecting $EXPECTED batches, after a full backup."
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          keys=""
+          for attempt in 1 2 3; do
+            keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+            if [ -n "$keys" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "ssh-keyscan attempt ${attempt} returned no host key; retrying in $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            fi
+          done
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Re-running usually clears a transient failure; if not, brute-force protection may have banned the runner."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Dry run first (the correction statement)
+        env:
+          FROM_ITEM: ${{ inputs.from_item }}
+          TO_ITEM: ${{ inputs.to_item }}
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan inventory:correct-consumption-item --from-item='$FROM_ITEM' --to-item='$TO_ITEM'" \
+            2>&1 | tee dry-run.txt
+
+      - name: Refuse if the dry run no longer shows the batches that were approved
+        if: ${{ inputs.write }}
+        env:
+          EXPECTED: ${{ inputs.expected_batches }}
+        run: |
+          ACTUAL="$(sed -n 's/^batches[[:space:]]*\([0-9][0-9]*\).*/\1/p' dry-run.txt | head -1)"
+          if [ -z "$ACTUAL" ]; then
+            echo "::error::Write refused. Could not read a 'batches' count from the dry run, so the set about to be corrected cannot be checked against the one you approved."
+            exit 1
+          fi
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::Write refused. You approved $EXPECTED batches; this run's dry run shows $ACTUAL. The ledger changed since you read the statement — read it again."
+            exit 1
+          fi
+          echo "Count gate passed: dry run shows $ACTUAL batches, matching the approved $EXPECTED."
+
+      - name: Back up the database before writing
+        if: ${{ inputs.write }}
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && bash scripts/backup-db.sh" \
+            2>&1 | tee backup.txt
+          echo "Backup written on the server: $(tail -1 backup.txt)"
+
+      - name: Write
+        if: ${{ inputs.write }}
+        env:
+          FROM_ITEM: ${{ inputs.from_item }}
+          TO_ITEM: ${{ inputs.to_item }}
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan inventory:correct-consumption-item --from-item='$FROM_ITEM' --to-item='$TO_ITEM' --write" \
+            2>&1 | tee write.txt
+
+      - name: Ledger invariant after the write
+        if: ${{ inputs.write }}
+        run: |
+          set -o pipefail
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan inventory:check-ledger" \
+            2>&1 | tee ledger.txt
+
+      - name: Summarise
+        if: always()
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+          EXPECTED: ${{ inputs.expected_batches }}
+          FROM_ITEM: ${{ inputs.from_item }}
+          TO_ITEM: ${{ inputs.to_item }}
+        run: |
+          {
+            echo "### Correct consumption item (DEC-20260903-001)"
+            echo
+            echo "from: \`$FROM_ITEM\` · to: \`$TO_ITEM\` · write: \`$WRITE_RAW\` · expected_batches: \`$EXPECTED\`"
+            echo
+            echo "#### Correction statement (the dry run — hand this to the accountant)"
+            echo '```'
+            cat dry-run.txt 2>/dev/null || echo "(no output captured)"
+            echo '```'
+            if [ "$WRITE_RAW" = "true" ]; then
+              echo
+              echo "#### Backup"
+              echo '```'
+              cat backup.txt 2>/dev/null || echo "(no backup output — a gate refused before it ran, or the step failed)"
+              echo '```'
+              echo
+              echo "#### Write"
+              echo '```'
+              cat write.txt 2>/dev/null || echo "(no write output — the backup or a gate refused before it ran)"
+              echo '```'
+              echo
+              echo "#### Ledger invariant"
+              echo '```'
+              cat ledger.txt 2>/dev/null || echo "(not run)"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

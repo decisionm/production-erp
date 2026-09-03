@@ -30,6 +30,8 @@ export interface StockLedgerFilters {
     warehouseId?: number | null;
     /** A substring of the movement's reference — "PO-4", "MR-12". */
     q?: string | null;
+    /** One of STOCK_LEDGER_SORT_FIELDS, bare or "-" prefixed; absent is the default. */
+    sort?: string | null;
     page?: number;
     perPage?: number;
 }
@@ -39,16 +41,33 @@ export interface StockLedgerRequest {
     item_id?: number;
     warehouse_id?: number;
     q?: string;
+    sort?: string;
     page?: number;
     per_page?: number;
 }
 
+/**
+ * The columns the SERVER orders the ledger by (ListStockMovementsRequest::
+ * SORTABLE, 03-Sep-2026). Sorting happens there because the ledger is paged:
+ * a column sorter here would order the twenty rows on screen and present
+ * that as the order of the factory's history.
+ */
+export const STOCK_LEDGER_SORT_FIELDS: readonly string[] = ['movement_date', 'type', 'purpose', 'quantity'];
+
+/** StockMovementService's order when no sort is asked for: newest movement first. */
+export const STOCK_LEDGER_DEFAULT_SORT = '-movement_date';
+
 /** The Stock Movements page's URL keys beyond q / page / per_page. */
-export const STOCK_LEDGER_SPEC: ListParamsSpec = { numbers: ['item_id', 'warehouse_id'] };
+export const STOCK_LEDGER_SPEC: ListParamsSpec = {
+    numbers: ['item_id', 'warehouse_id'],
+    strings: ['sort'],
+    allowed: { sort: STOCK_LEDGER_SORT_FIELDS.flatMap((field) => [field, `-${field}`]) },
+};
 
 export type StockLedgerListParams = ListParams & {
     item_id?: number;
     warehouse_id?: number;
+    sort?: string;
 };
 
 /**
@@ -64,6 +83,12 @@ export function stockLedgerParams(filters: StockLedgerFilters): StockLedgerReque
     if (typeof filters.warehouseId === 'number') params.warehouse_id = filters.warehouseId;
     const q = (filters.q ?? '').trim();
     if (q !== '') params.q = q;
+    // The default order is the bare request: the server's own, and one
+    // query key for "unsorted" and "sorted the default way".
+    const sort = (filters.sort ?? '').trim();
+    if (sort !== '' && sort !== STOCK_LEDGER_DEFAULT_SORT && (STOCK_LEDGER_SPEC.allowed?.sort ?? []).includes(sort)) {
+        params.sort = sort;
+    }
     if (typeof filters.page === 'number' && filters.page > 1) params.page = filters.page;
     if (typeof filters.perPage === 'number' && filters.perPage > 0) params.per_page = filters.perPage;
 

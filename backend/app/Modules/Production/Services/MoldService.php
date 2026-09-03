@@ -2,11 +2,13 @@
 
 namespace App\Modules\Production\Services;
 
+use App\Modules\Production\Http\Requests\ListMoldsRequest;
 use App\Modules\Production\Models\Enums\MoldStatus;
 use App\Modules\Production\Models\Mold;
 use App\Support\Configuration\ActiveFlag;
 use App\Support\Configuration\DependencyCheck;
 use App\Support\Configuration\ManagesConfigurationLifecycle;
+use App\Support\Lists\ListSort;
 use Closure;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
@@ -22,13 +24,14 @@ class MoldService
      *                             different states and neither is "active"),
      *                             null = the whole master.
      */
-    public function paginate(int $perPage = 20, ?bool $activeOnly = null): LengthAwarePaginator
+    public function paginate(int $perPage = 20, ?bool $activeOnly = null, ?string $sort = null): LengthAwarePaginator
     {
-        return Mold::query()
+        $query = Mold::query()
             ->when($activeOnly === true, fn ($q) => $q->where('status', MoldStatus::Active->value))
-            ->when($activeOnly === false, fn ($q) => $q->where('status', '!=', MoldStatus::Active->value))
-            ->orderBy('code')
-            ->paginate($perPage);
+            ->when($activeOnly === false, fn ($q) => $q->where('status', '!=', MoldStatus::Active->value));
+
+        // The master's own order is by code; a sort asked for replaces it.
+        return ListSort::apply($query, $sort, ListMoldsRequest::SORTABLE, 'code')->paginate($perPage);
     }
 
     public function create(array $data): Mold

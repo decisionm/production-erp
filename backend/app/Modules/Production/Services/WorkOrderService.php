@@ -9,9 +9,11 @@ use App\Modules\Inventory\Services\BatchService;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Exceptions\ExcessCompletionException;
 use App\Modules\Production\Exceptions\MissingBomException;
+use App\Modules\Production\Http\Requests\ListWorkOrdersRequest;
 use App\Modules\Production\Models\Bom;
 use App\Modules\Production\Models\Enums\WorkOrderStatus;
 use App\Modules\Production\Models\WorkOrder;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
@@ -32,12 +34,18 @@ class WorkOrderService
         private readonly BatchService $batches,
     ) {}
 
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return WorkOrder::query()
-            ->with(['item', 'warehouse', 'materials.component', 'scraps.reason'])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+        $query = WorkOrder::query()
+            ->with(['item', 'warehouse', 'materials.component', 'scraps.reason']);
+
+        return ListSort::apply(
+            $query,
+            $sort,
+            ListWorkOrdersRequest::SORTABLE,
+            ListSort::DEFAULT,
+            ListWorkOrdersRequest::NULLABLE_DATES,
+        )->paginate($perPage);
     }
 
     public function openCount(): int

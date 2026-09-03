@@ -2821,6 +2821,72 @@ from the day-bin load to the Store Issue) cannot be designed until (a) is
 answered, because (a) decides which ledger the scan feeds.
 *Open since 2026-09-02.*
 
+## Q95 · Live batches consume "Pet Resin" (item 592) while the Store issues "Relpet" (item 606) — which item is the resin, and what happens to the 15.5 t already booked? — RESOLVED
+
+**Resolved 2026-09-03: (a) and (b) by DEC-20260903-001 — "Pet Resin" is demo
+data, the batches since 04-Aug ran on Relpet, the 15.5 t is corrected to Relpet
+by append-only correction movements with the accountant's matching Tally entry,
+and the Master Batch Amber negative is examined and corrected with it; (c) by
+DEC-20260903-002 — the 23-Jul demo rows on the Production/WIP row are removed
+by exact record through the sanctioned reset path; (d) by DEC-20260903-003 — a
+batch whose resin the Store has not issued closes and is shown as a warning at
+approval, never refused. Builds: the approval warning (-003) ships with the
+pre-fill fix in PR #87 (metrics.unissued_materials, amber on the approval
+desk); the correction movements and statement (-001) and the by-id removal
+(-002) are owed.** The original question follows.
+
+What the read-only spot check of the live database found (03-Sep-2026 03:41 IST,
+893 movements, 289 balances, 20-Jul to 02-Sep; report:
+https://claude.ai/code/artifact/5ce797b3-a2a0-4a5d-b657-53d7c65251d6):
+
+- The Store has issued twice, both on 18-Aug: SI-000001, 20 kg of Arihant Super
+  White 1002 (item 298), and SI-000002, 1,000 kg of Relpet (item 606), into the
+  Production/WIP row (warehouse 2). Fifteen days later both still stand at their
+  issued quantity — nothing has ever been consumed from that row.
+- Every batch since 04-Aug (374 consumption rows, 17,452 kg; 115 batches, net
+  15,555.81 kg) consumed item 592 "Pet Resin" straight from the Store godown
+  (warehouse 10). The Store's Pet Resin balance is −2,860.37 kg and its Master
+  Batch Amber (item 557) −113.47 kg.
+- DEC-20260805-002 records that "Pet Resin" appears in no real journal and is
+  demo data; the real resins are Relpet G5801M and PET Polyster Chips. Q9 (which
+  resin per product) is still open.
+- Why the wire failed: the completion screen pre-filled the resin from the
+  consumption history, and the history is made of item 592, so every new batch
+  named 592 again and the resolver correctly drew it from the Store — nothing of
+  THAT item stood in Production/WIP (DEC-20260831-009). The pre-fill is fixed in
+  code: an open Store Issue standing in Production/WIP now outranks the history,
+  so the next batch is offered Relpet. What was booked before the fix is not.
+- Also on the Production/WIP row: 19 unstamped movements from 23-Jul 04:44 UTC
+  (items 1 to 11: 6,000 labels, 4,000 caps, 950 preforms, 860 kg "PET Resin
+  (Virgin Grade)", 270 kg HDPE, small masterbatch amounts). None of it is factory
+  material.
+
+Four things only the factory can settle:
+
+(a) **Is item 592 to be retired as demo data, and were the batches since 04-Aug
+    physically running on Relpet?** If yes, should the 15.5 t of consumption
+    booked against 592 be corrected to 606 — and how, given those batches'
+    Tally vouchers have already posted under "Pet Resin"? The ERP will not
+    rewrite posted history on its own (transactions are append-only); a
+    correction is a decision plus the accountant's own entry.
+(b) **The Store's negatives** (Pet Resin −2,860 kg, Master Batch Amber −113 kg):
+    opening balances never entered, or the same item split as (a)? A Tally
+    reconcile through the sanctioned workflow (matching, never adding) only
+    makes sense after (a) is answered.
+(c) **The 23-Jul demo rows on the Production/WIP row**: retire them through the
+    sanctioned reset path — by id, never by name pattern, never anything with
+    history (migration `2026_08_01_120001` is the precedent) — or leave them?
+(d) **Should a completion be refused, or only flagged, when its resin is not a
+    material the Store has issued?** Today it is neither: the batch draws from
+    the Store and records no shortfall, because nothing of that item stands in
+    Production/WIP. This is the same choice as Q54(e), asked one item earlier.
+
+**Blocks:** the Production/WIP "Estimated" PET resin figure (DEC-20260902-039)
+means nothing until batches consume the item the Store issued, and the Store's
+Tally reconciliation figure carries all of September's consumption on the
+wrong item. The pre-fill fix stops the split growing from the next batch; only
+(a) decides what to do with what is already booked. *Open since 2026-09-03.*
+
 ## Q96 · The ERP's own Sales Invoice: retire it, or keep it as a disciplined proforma? — RESOLVED
 
 **Resolved 2026-09-03 by DEC-20260903-004 — option A: the ERP's own sales

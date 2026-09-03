@@ -2,12 +2,14 @@
 
 namespace App\Modules\HRMS\Services;
 
+use App\Modules\HRMS\Http\Requests\ListEmployeesRequest;
 use App\Modules\HRMS\Models\Employee;
 use App\Modules\HRMS\Models\Enums\EmployeeStatus;
 use App\Support\Configuration\ActiveFlag;
 use App\Support\Configuration\DependencyCheck;
 use App\Support\Configuration\HardDeleteAuthority;
 use App\Support\Configuration\ManagesConfigurationLifecycle;
+use App\Support\Lists\ListSort;
 use Closure;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -37,9 +39,10 @@ class EmployeeService
     /**
      * The list page's read. Every filter is ListEmployeesRequest's — `q`
      * over code, name, department and designation (one clause, shared with
-     * the leave and attendance lists), `status` exact. Ordered by name as it
-     * always was, with id breaking ties so two employees of one name never
-     * swap places between page loads.
+     * the leave and attendance lists), `status` exact. Ordered by `sort`
+     * (ListSort; the request already refused an unknown column), by name as
+     * it always was when absent, with id breaking ties so two employees of
+     * one name never swap places between page loads.
      *
      * @param  array<string, mixed>  $filters
      */
@@ -55,9 +58,7 @@ class EmployeeService
             $query->where('status', $filters['status']);
         }
 
-        return $query
-            ->orderBy('name')
-            ->orderBy('id')
+        return ListSort::apply($query, $filters['sort'] ?? null, ListEmployeesRequest::SORTABLE, 'name')
             ->paginate($perPage)
             ->withQueryString();
     }
@@ -269,6 +270,11 @@ class EmployeeService
                 ->label('shift production entry'),
             DependencyCheck::table('shift_summaries', 'supervisor_id')
                 ->label('shift summary'),
+            // The punch-report import's review copy (03-Sep). SET NULL: a
+            // line would survive with its employee blanked, which is the
+            // quiet failure this list exists to count.
+            DependencyCheck::table('attendance_import_lines', 'employee_id')
+                ->label('attendance import line'),
         ];
     }
 }

@@ -5,6 +5,7 @@ namespace App\Modules\Production\Http\Controllers;
 use App\Http\Controllers\Controller;
 use App\Modules\Production\Http\Controllers\Concerns\ManagesConfigurationRecords;
 use App\Modules\Production\Http\Requests\ArchiveConfigurationRequest;
+use App\Modules\Production\Http\Requests\ListScrapReasonsRequest;
 use App\Modules\Production\Http\Requests\StoreScrapReasonRequest;
 use App\Modules\Production\Http\Requests\UpdateScrapReasonRequest;
 use App\Modules\Production\Http\Resources\ScrapReasonResource;
@@ -31,11 +32,11 @@ class ScrapReasonController extends Controller
     }
 
     /** `?active=1` is the completion screen's contract; omitted is the master. */
-    public function index(Request $request): AnonymousResourceCollection
+    public function index(ListScrapReasonsRequest $request): AnonymousResourceCollection
     {
         $active = $request->has('active') ? $request->boolean('active') : null;
 
-        $page = $this->scrapReasons->paginate($this->perPage($request), $active);
+        $page = $this->scrapReasons->paginate($request->perPage(), $active, $request->sort());
 
         $this->withAbilitiesForEach($request, $this->scrapReasons, $page->getCollection());
 

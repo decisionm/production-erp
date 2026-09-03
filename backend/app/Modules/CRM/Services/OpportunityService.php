@@ -2,8 +2,10 @@
 
 namespace App\Modules\CRM\Services;
 
+use App\Modules\CRM\Http\Requests\ListOpportunitiesRequest;
 use App\Modules\CRM\Models\Enums\OpportunityStage;
 use App\Modules\CRM\Models\Opportunity;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 /**
@@ -15,12 +17,13 @@ use Illuminate\Contracts\Pagination\LengthAwarePaginator;
  */
 class OpportunityService
 {
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /** Newest first when no sort is asked for; an undated expected close sorts last either way. */
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return Opportunity::query()
-            ->with(['customer', 'lead', 'assignedTo'])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+        $query = Opportunity::query()->with(['customer', 'lead', 'assignedTo']);
+        ListSort::apply($query, $sort, ListOpportunitiesRequest::SORTABLE, '-id', ['expected_close_date']);
+
+        return $query->paginate($perPage);
     }
 
     /** Deals still in the pipeline — any stage before won or lost. */

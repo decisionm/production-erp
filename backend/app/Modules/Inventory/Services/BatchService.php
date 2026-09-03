@@ -2,9 +2,11 @@
 
 namespace App\Modules\Inventory\Services;
 
+use App\Modules\Inventory\Http\Requests\ListBatchesRequest;
 use App\Modules\Inventory\Models\Batch;
 use App\Modules\Inventory\Models\Enums\StockMovementType;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Str;
@@ -41,9 +43,9 @@ class BatchService
      * second query with its own SoftDeletes scope, so without this the row
      * lists with a NULL item and the SKU the searcher typed is not on screen.
      */
-    public function paginate(?int $itemId, int $perPage = 20, ?string $search = null, ?string $code = null): LengthAwarePaginator
+    public function paginate(?int $itemId, int $perPage = 20, ?string $search = null, ?string $code = null, ?string $sort = null): LengthAwarePaginator
     {
-        return Batch::query()
+        $query = Batch::query()
             ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
             ->when($code !== null, fn ($query) => $query->whereRaw(
                 'lower(batch_number) = ?', [Str::lower($code)]
@@ -55,8 +57,11 @@ class BatchService
                     ->orWhereHas('item', fn ($item) => $item->withTrashed()
                         ->where(fn ($q) => $q->where('sku', 'like', $like)->orWhere('name', 'like', $like))));
             })
-            ->with(['item' => fn ($item) => $item->withTrashed()])
-            ->orderByDesc('id')
+            ->with(['item' => fn ($item) => $item->withTrashed()]);
+
+        // Newest first unless asked otherwise; an undated batch sorts last
+        // on either date, whichever way the column points.
+        return ListSort::apply($query, $sort, ListBatchesRequest::SORTABLE, '-id', ListBatchesRequest::NULLABLE_DATES)
             ->paginate($perPage);
     }
 

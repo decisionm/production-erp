@@ -2,9 +2,22 @@ import type { User } from '@/features/auth/types';
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type { PermissionCatalogEntry, Role } from './types';
+import type { UserListFilters } from './userList';
 
+/**
+ * The name-ordered first page — what the person pickers (PersonSelect, the
+ * production approval and entry pages) hand straight to TanStack as their
+ * queryFn, so it takes NO argument: a filters parameter here would receive
+ * the query context. The Users page reads listUsersPage.
+ */
 export async function listUsers(): Promise<Paginated<User>> {
     const { data } = await api.get<Paginated<User>>('/users');
+    return data;
+}
+
+/** ONE page of users, sorted and paged on the SERVER (ListUsersRequest). */
+export async function listUsersPage(filters: UserListFilters = {}): Promise<Paginated<User>> {
+    const { data } = await api.get<Paginated<User>>('/users', { params: filters });
     return data;
 }
 

@@ -16,7 +16,7 @@ import {
     listSalesOrders,
 } from '@/features/sales/api';
 import { availabilityByItem, availabilityChips, availabilityItemIds } from '@/features/sales/availability';
-import { hasActiveFilters } from '@/features/sales/filters';
+import { hasActiveFilters, SALES_DEFAULT_SORT, SALES_SORT_FIELDS } from '@/features/sales/filters';
 import SalesDocumentDrawer from '@/features/sales/SalesDocumentDrawer';
 import SalesFilterBar from '@/features/sales/SalesFilterBar';
 import TallyMirrorPanel from '@/features/sales/TallyMirrorPanel';
@@ -33,6 +33,8 @@ import { salesRateSourceLabel } from '@/features/sales/types';
 import { useSalesListParams } from '@/features/sales/useSalesListParams';
 import { formatDate } from '@/lib/datetime';
 import { itemLabel } from '@/lib/itemLabel';
+import { TABLE_STICKY } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { INVOICED_CAPTION, listEmptyText } from '@/features/sales/drawer';
 
 const orderSchema = z.object({
@@ -568,7 +570,15 @@ export default function SalesOrdersPage() {
 
             <Table<SalesOrder>
                 scroll={{ x: 'max-content' }}
+                sticky={TABLE_STICKY}
                 rowKey="id"
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries; the list is paginated, so sorting the loaded
+                // page would misorder the whole result set.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setFilters((prev) => ({ ...prev, sort: sortParamFromSorter(sorter, SALES_SORT_FIELDS.sales_order, SALES_DEFAULT_SORT) }));
+                }}
                 loading={isLoading}
                 dataSource={data?.data}
                 locale={{ emptyText: listEmptyText({ isPending, isError, error }, 'sales_order', filtersActive) }}
@@ -586,7 +596,13 @@ export default function SalesOrdersPage() {
                         : false
                 }
                 columns={[
-                    { title: 'Number', render: (_, row) => <strong>{row.document_number ?? `SO-${row.id}`}</strong> },
+                    {
+                        title: 'Number',
+                        key: 'id',
+                        sorter: true,
+                        sortOrder: columnSortOrder('id', filters.sort, SALES_DEFAULT_SORT),
+                        render: (_, row) => <strong>{row.document_number ?? `SO-${row.id}`}</strong>,
+                    },
                     {
                         title: 'Status',
                         dataIndex: 'status',
@@ -607,7 +623,13 @@ export default function SalesOrdersPage() {
                         ),
                     },
                     { title: 'Customer', render: (_, row) => row.customer?.name ?? '—' },
-                    { title: 'Order Date', dataIndex: 'order_date' },
+                    {
+                        title: 'Order Date',
+                        key: 'order_date',
+                        dataIndex: 'order_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('order_date', filters.sort, SALES_DEFAULT_SORT),
+                    },
                     { title: 'Lines', render: (_, row) => row.lines.length },
                     {
                         title: (

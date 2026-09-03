@@ -4,6 +4,7 @@ namespace App\Modules\Inventory\Services;
 
 use App\Modules\Inventory\Exceptions\IncomingQcHoldException;
 use App\Modules\Inventory\Exceptions\InsufficientStockException;
+use App\Modules\Inventory\Http\Requests\ListStockMovementsRequest;
 use App\Modules\Inventory\Models\Batch;
 use App\Modules\Inventory\Models\Enums\ReturnedQualityState;
 use App\Modules\Inventory\Models\Enums\SerialNumberStatus;
@@ -14,6 +15,7 @@ use App\Modules\Inventory\Models\SerialNumber;
 use App\Modules\Inventory\Models\StockBalance;
 use App\Modules\Inventory\Models\StockMovement;
 use App\Modules\Inventory\Models\Warehouse;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -607,8 +609,9 @@ class StockMovementService
         ?array $purposes = null,
         int $perPage = 20,
         ?string $reference = null,
+        ?string $sort = null,
     ): LengthAwarePaginator {
-        return StockMovement::query()
+        $query = StockMovement::query()
             // createdBy: two columns, eager-loaded, so a page of the ledger
             // can say who recorded each row without becoming one query per
             // row. StockMovementResource gates it behind whenLoaded, so every
@@ -626,9 +629,11 @@ class StockMovementService
             // The reference needle (ListStockMovementsRequest `q`): a
             // substring of the one free-text column a person arrives with —
             // a GRN's "PO #4", a material request's "MR-12".
-            ->when($reference !== null, fn ($query) => $query->where('reference', 'like', "%{$reference}%"))
-            ->orderByDesc('movement_date')
-            ->orderByDesc('id')
+            ->when($reference !== null, fn ($query) => $query->where('reference', 'like', "%{$reference}%"));
+
+        // The ledger's own columns (ListStockMovementsRequest::SORTABLE);
+        // absent is what it always read — newest movement first, id desc.
+        return ListSort::apply($query, $sort, ListStockMovementsRequest::SORTABLE, '-movement_date')
             ->paginate($perPage);
     }
 

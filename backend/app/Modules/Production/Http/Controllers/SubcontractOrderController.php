@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Production\Http\Requests\ListSubcontractOrdersRequest;
 use App\Modules\Production\Http\Requests\ReceiveSubcontractOrderRequest;
 use App\Modules\Production\Http\Requests\StoreSubcontractOrderRequest;
 use App\Modules\Production\Http\Resources\SubcontractOrderResource;
@@ -14,9 +15,9 @@ class SubcontractOrderController extends Controller
 {
     public function __construct(private readonly SubcontractOrderService $subcontractOrders) {}
 
-    public function index(): AnonymousResourceCollection
+    public function index(ListSubcontractOrdersRequest $request): AnonymousResourceCollection
     {
-        return SubcontractOrderResource::collection($this->subcontractOrders->paginate());
+        return SubcontractOrderResource::collection($this->subcontractOrders->paginate($request->perPage(), $request->sort()));
     }
 
     public function store(StoreSubcontractOrderRequest $request): SubcontractOrderResource

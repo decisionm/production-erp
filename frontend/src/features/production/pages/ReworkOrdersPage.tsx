@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Descriptions, Drawer, Form, InputNumber, Modal, Select, Space, Table, Tag, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { listAllItems, listAllWarehouses } from '@/features/inventory/api';
@@ -13,8 +13,19 @@ import {
     listWorkOrders,
     releaseReworkOrder,
 } from '@/features/production/api';
+import {
+    REWORK_ORDER_DEFAULT_SORT,
+    REWORK_ORDER_LIST_SPEC,
+    REWORK_ORDER_SORT_FIELDS,
+    type ReworkOrderListParams,
+    reworkOrderServerFilters,
+    reworkOrdersQueryKey,
+} from '@/features/production/reworkOrdersList';
 import type { ReworkOrder, ReworkOrderStatus } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const createSchema = z.object({
     item_id: z.number({ error: 'Item is required' }),
@@ -43,10 +54,17 @@ export default function ReworkOrdersPage() {
     const [detailRow, setDetailRow] = useState<ReworkOrder | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['production', 'rework-orders'], queryFn: listReworkOrders });
+    // THE REGISTER'S VIEW IS ITS URL (useListParams): sort, page, page size.
+    const { params, setParams, setPage } = useListParams<ReworkOrderListParams>(REWORK_ORDER_LIST_SPEC);
+    const filters = useMemo(() => reworkOrderServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: reworkOrdersQueryKey(filters),
+        queryFn: () => listReworkOrders(filters),
+        placeholderData: (previous) => previous,
+    });
     const { data: items } = useQuery({ queryKey: ['inventory', 'items', 'all'], queryFn: listAllItems });
     const { data: warehouses } = useQuery({ queryKey: ['inventory', 'warehouses', 'all'], queryFn: listAllWarehouses });
-    const { data: workOrders } = useQuery({ queryKey: ['production', 'work-orders'], queryFn: listWorkOrders });
+    const { data: workOrders } = useQuery({ queryKey: ['production', 'work-orders'], queryFn: () => listWorkOrders() });
     const { data: boms } = useQuery({ queryKey: ['production', 'boms'], queryFn: () => listBoms() });
 
     const itemOptions = items?.data.map((i) => ({ value: i.id, label: itemLabel(i) })) ?? [];
@@ -111,22 +129,50 @@ export default function ReworkOrdersPage() {
             </Typography.Paragraph>
 
             <Table<ReworkOrder>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queries the
+                // whole paginated register rather than the loaded page.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, REWORK_ORDER_SORT_FIELDS, REWORK_ORDER_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'rework orders')}
                 columns={[
                     { title: 'Item', render: (_, row) => itemLabel(row.item) },
                     { title: 'Source WO', render: (_, row) => row.source_work_order_id ?? '—' },
-                    { title: 'Input Qty', dataIndex: 'quantity_input' },
-                    { title: 'Recovered', dataIndex: 'quantity_recovered' },
+                    {
+                        title: 'Input Qty',
+                        dataIndex: 'quantity_input',
+                        key: 'quantity_input',
+                        sorter: true,
+                        sortOrder: columnSortOrder('quantity_input', params.sort, REWORK_ORDER_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Recovered',
+                        dataIndex: 'quantity_recovered',
+                        key: 'quantity_recovered',
+                        sorter: true,
+                        sortOrder: columnSortOrder('quantity_recovered', params.sort, REWORK_ORDER_DEFAULT_SORT),
+                    },
                     { title: 'Material Cost', dataIndex: 'material_cost' },
                     { title: 'Labor Cost', dataIndex: 'labor_cost' },
-                    { title: 'Total Cost', dataIndex: 'total_cost' },
+                    {
+                        title: 'Total Cost',
+                        dataIndex: 'total_cost',
+                        key: 'total_cost',
+                        sorter: true,
+                        sortOrder: columnSortOrder('total_cost', params.sort, REWORK_ORDER_DEFAULT_SORT),
+                    },
                     {
                         title: 'Status',
                         dataIndex: 'status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, REWORK_ORDER_DEFAULT_SORT),
                         render: (status: ReworkOrderStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
                     {

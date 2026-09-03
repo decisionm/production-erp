@@ -1,6 +1,31 @@
 import type { Item, Warehouse } from '@/features/inventory/types';
+import type { ListParams } from '@/lib/listParams';
 
 export type AssetStatus = 'active' | 'under_maintenance' | 'retired';
+
+/** GET /maintenance/assets (ListAssetsRequest): sort / page / per_page. */
+export interface AssetListFilters extends ListParams {
+    /** id / code / name / category / location / status, bare or "-" prefixed; absent is the server's default (name). */
+    sort?: string;
+}
+
+/** GET /maintenance/schedules (ListMaintenanceSchedulesRequest): asset_id plus sort / page / per_page. */
+export interface MaintenanceScheduleListFilters extends ListParams {
+    asset_id?: number;
+    /** id / name / frequency_days / next_due_date, bare or "-" prefixed; absent is the server's default (next_due_date). */
+    sort?: string;
+}
+
+/** GET /maintenance/work-orders (ListMaintenanceWorkOrdersRequest): asset_id plus sort / page / per_page. */
+export interface MaintenanceWorkOrderListFilters extends ListParams {
+    asset_id?: number;
+    /**
+     * id / type / status / reported_date / labor_cost, bare or "-" prefixed;
+     * parts_cost / total_cost only for finance eyes (FC-06). Absent is the
+     * server's default (-id).
+     */
+    sort?: string;
+}
 
 export interface Asset {
     id: number;

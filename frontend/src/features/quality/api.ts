@@ -7,6 +7,8 @@ import type { Capa, IncomingInspection, InspectionResult, MeasuringInstrument, N
 export interface IncomingInspectionListParams extends ListParams {
     /** The verdict to narrow to; absent is every result. */
     result?: InspectionResult;
+    /** A column in the ListSort spelling (INSPECTION_SORT_FIELDS); absent is newest first. */
+    sort?: string;
 }
 
 /**
@@ -41,8 +43,14 @@ export async function createIncomingInspection(
     return data.data;
 }
 
-export async function listNonConformanceReports(): Promise<Paginated<NonConformanceReport>> {
-    const { data } = await api.get<Paginated<NonConformanceReport>>('/quality/ncrs');
+/**
+ * ONE page of the NCR register, sorted and paged on the server
+ * (ListNonConformanceReportsRequest): `sort`, `page`, `per_page`. Bare —
+ * the CAPA form's NCR picker — it is the first twenty, newest first, as
+ * before.
+ */
+export async function listNonConformanceReports(params: ListParams = {}): Promise<Paginated<NonConformanceReport>> {
+    const { data } = await api.get<Paginated<NonConformanceReport>>('/quality/ncrs', { params: compactParams(params) });
     return data;
 }
 
@@ -67,8 +75,9 @@ export async function closeNonConformanceReport(id: number, resolution: string):
     return data.data;
 }
 
-export async function listCapas(): Promise<Paginated<Capa>> {
-    const { data } = await api.get<Paginated<Capa>>('/quality/capas');
+/** ONE page of the CAPA register, sorted and paged on the server (ListCapasRequest). */
+export async function listCapas(params: ListParams = {}): Promise<Paginated<Capa>> {
+    const { data } = await api.get<Paginated<Capa>>('/quality/capas', { params: compactParams(params) });
     return data;
 }
 
@@ -108,10 +117,16 @@ export async function closeCapa(id: number, verifiedEffective: boolean): Promise
     return data.data;
 }
 
-export async function listMeasuringInstruments(dueOnly?: boolean): Promise<Paginated<MeasuringInstrument>> {
-    const { data } = await api.get<Paginated<MeasuringInstrument>>('/quality/instruments', {
-        params: dueOnly ? { due: 1 } : undefined,
-    });
+/**
+ * ONE page of the gauge register, sorted and paged on the server
+ * (ListMeasuringInstrumentsRequest). `due: 1` is the "Due for calibration
+ * only" switch, exactly the query this function always sent for it;
+ * instrumentListRequest (qualityLists.ts) builds it from the URL.
+ */
+export async function listMeasuringInstruments(
+    params: Record<string, string | number | undefined> = {},
+): Promise<Paginated<MeasuringInstrument>> {
+    const { data } = await api.get<Paginated<MeasuringInstrument>>('/quality/instruments', { params: compactParams(params) });
     return data;
 }
 
@@ -141,10 +156,14 @@ export async function recordCalibration(instrumentId: number, payload: RecordCal
     return data.data;
 }
 
-export async function listSpcCharacteristics(itemId?: number): Promise<Paginated<SpcCharacteristic>> {
-    const { data } = await api.get<Paginated<SpcCharacteristic>>('/quality/spc-characteristics', {
-        params: itemId ? { item_id: itemId } : undefined,
-    });
+/**
+ * ONE page of the SPC characteristic register, sorted and paged on the
+ * server (ListSpcCharacteristicsRequest). `item_id` narrows to one
+ * product, as before. Bare — the chart page's lookup — it is the first
+ * twenty by name, as before.
+ */
+export async function listSpcCharacteristics(params: ListParams = {}): Promise<Paginated<SpcCharacteristic>> {
+    const { data } = await api.get<Paginated<SpcCharacteristic>>('/quality/spc-characteristics', { params: compactParams(params) });
     return data;
 }
 

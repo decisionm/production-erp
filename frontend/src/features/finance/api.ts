@@ -1,9 +1,12 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
+import type { GLAccountListFilters } from './glAccountList';
+import type { JournalEntryListFilters } from './journalEntryList';
 import type { BalanceSheet, ClientOutstandingReport, GLAccount, JournalEntry, ProfitAndLoss, Receivable, TrialBalanceRow } from './types';
 
-export async function listGLAccounts(): Promise<Paginated<GLAccount>> {
-    const { data } = await api.get<Paginated<GLAccount>>('/finance/gl-accounts');
+/** ONE page of the chart, sorted and paged on the SERVER (ListGlAccountsRequest). No argument is the code-ordered first page. */
+export async function listGLAccounts(filters: GLAccountListFilters = {}): Promise<Paginated<GLAccount>> {
+    const { data } = await api.get<Paginated<GLAccount>>('/finance/gl-accounts', { params: filters });
     return data;
 }
 
@@ -35,8 +38,9 @@ export async function updateGLAccount(id: number, payload: UpdateGLAccountPayloa
     return data.data;
 }
 
-export async function listJournalEntries(): Promise<Paginated<JournalEntry>> {
-    const { data } = await api.get<Paginated<JournalEntry>>('/finance/journal-entries');
+/** ONE page of the register, sorted and paged on the SERVER (ListJournalEntriesRequest). No argument is the newest-first first page. */
+export async function listJournalEntries(filters: JournalEntryListFilters = {}): Promise<Paginated<JournalEntry>> {
+    const { data } = await api.get<Paginated<JournalEntry>>('/finance/journal-entries', { params: filters });
     return data;
 }
 

@@ -13,11 +13,18 @@ import {
     listLeaveRequests,
     rejectLeaveRequest,
 } from '@/features/hrms/api';
-import { LEAVE_REQUEST_LIST_SPEC, noMatchLine, pageRangeLine } from '@/features/hrms/list';
+import {
+    LEAVE_REQUEST_DEFAULT_SORT,
+    LEAVE_REQUEST_LIST_SPEC,
+    LEAVE_REQUEST_SORT_FIELDS,
+    noMatchLine,
+    pageRangeLine,
+} from '@/features/hrms/list';
 import type { LeaveRequest, LeaveRequestListParams, LeaveRequestStatus } from '@/features/hrms/types';
 import { ListEmpty, ListReadAlert } from '@/lib/ListEmpty';
 import { compactParams, narrowingKeys } from '@/lib/listParams';
 import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 import { useListParams } from '@/lib/useListParams';
 
 const requestSchema = z.object({
@@ -182,17 +189,44 @@ export default function LeaveRequestsPage() {
                 rowKey="id"
                 loading={query.isFetching}
                 dataSource={query.data?.data}
+                // SORTED BY THE SERVER: sortOrder-controlled, re-queried.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, LEAVE_REQUEST_SORT_FIELDS, LEAVE_REQUEST_DEFAULT_SORT) });
+                }}
                 pagination={serverPagination(query.data?.meta, setPage, 'leave requests')}
                 locale={{ emptyText: <ListEmpty state={query} entity="leave requests" empty={emptyText} /> }}
                 columns={[
+                    // Names through relations, not columns of this table: no server sort.
                     { title: 'Employee', render: (_, row) => row.employee?.name },
                     { title: 'Leave Type', render: (_, row) => row.leave_type.name },
-                    { title: 'Start', dataIndex: 'start_date' },
-                    { title: 'End', dataIndex: 'end_date' },
-                    { title: 'Days', dataIndex: 'days' },
+                    {
+                        title: 'Start',
+                        dataIndex: 'start_date',
+                        key: 'start_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('start_date', params.sort, LEAVE_REQUEST_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'End',
+                        dataIndex: 'end_date',
+                        key: 'end_date',
+                        sorter: true,
+                        sortOrder: columnSortOrder('end_date', params.sort, LEAVE_REQUEST_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Days',
+                        dataIndex: 'days',
+                        key: 'days',
+                        sorter: true,
+                        sortOrder: columnSortOrder('days', params.sort, LEAVE_REQUEST_DEFAULT_SORT),
+                    },
                     {
                         title: 'Status',
                         dataIndex: 'status',
+                        key: 'status',
+                        sorter: true,
+                        sortOrder: columnSortOrder('status', params.sort, LEAVE_REQUEST_DEFAULT_SORT),
                         render: (status: LeaveRequestStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
                     },
                     {

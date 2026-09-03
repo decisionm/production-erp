@@ -3,11 +3,13 @@
 namespace App\Modules\CRM\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
+use App\Modules\CRM\Http\Requests\ListQuotationsRequest;
 use App\Modules\CRM\Models\Enums\QuotationStatus;
 use App\Modules\CRM\Models\Opportunity;
 use App\Modules\CRM\Models\Quotation;
 use App\Modules\Sales\Models\SalesOrder;
 use App\Modules\Sales\Services\SalesOrderService;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
@@ -21,12 +23,13 @@ class QuotationService
 {
     public function __construct(private readonly SalesOrderService $salesOrders) {}
 
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /** Newest first when no sort is asked for — what this list always was. */
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return Quotation::query()
-            ->with(['lines.item', 'customer', 'opportunity'])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+        $query = Quotation::query()->with(['lines.item', 'customer', 'opportunity']);
+        ListSort::apply($query, $sort, ListQuotationsRequest::SORTABLE, '-id');
+
+        return $query->paginate($perPage);
     }
 
     public function withDetails(Quotation $quotation): Quotation

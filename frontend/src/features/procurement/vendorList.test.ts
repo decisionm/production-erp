@@ -1,7 +1,9 @@
 import type { AxiosRequestConfig, AxiosResponse } from 'axios';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { listAllVendors, listVendors } from './api';
+import { VENDOR_DEFAULT_SORT, VENDOR_LIST_SPEC, vendorListSort } from './vendorList';
 import { api } from '@/lib/api';
+import { readListParams } from '@/lib/listParams';
 
 /**
  * THE VENDOR MASTER IS PAGED ON THE SERVER, AND THE SCREEN SAYS SO.
@@ -136,6 +138,50 @@ describe('the vendors table asks the server for one page at a time', () => {
         await listVendors(1, 50, undefined, [], true);
 
         expect(requests[0].params).toEqual({ page: 1, per_page: 50, unclassified: 1 });
+    });
+});
+
+/**
+ * SORTED BY THE SERVER (ListVendorsRequest::SORTABLE, 03-Sep-2026). The URL
+ * carries one `sort` beside the classification filter; an unknown column is
+ * dropped on read so it never reaches a 422, and name order — the service's
+ * own default — is the bare request.
+ */
+describe('the vendors table sorts on the server', () => {
+    let requests: AxiosRequestConfig[];
+    const originalAdapter = api.defaults.adapter;
+
+    beforeEach(() => {
+        requests = captureRequests();
+    });
+
+    afterEach(() => {
+        api.defaults.adapter = originalAdapter;
+    });
+
+    it('drops a sort nobody defined rather than sending it to a 422', () => {
+        const params = readListParams(new URLSearchParams('sort=email&classification=resin'), VENDOR_LIST_SPEC);
+
+        expect(params.sort).toBeUndefined();
+        expect(params.classification).toEqual(['resin']);
+        expect(vendorListSort('email')).toBeUndefined();
+    });
+
+    it('sends a known column, trailing the filters, in the server\'s spelling', async () => {
+        const params = readListParams(new URLSearchParams('sort=-state_code'), VENDOR_LIST_SPEC);
+
+        expect(vendorListSort(params.sort as string)).toBe('-state_code');
+        await listVendors(1, 50, undefined, ['resin'], false, vendorListSort(params.sort as string));
+
+        expect(requests[0].params).toEqual({ page: 1, per_page: 50, classification: ['resin'], sort: '-state_code' });
+    });
+
+    it('leaves the default order — name — off the request, as the service defaults to it', async () => {
+        expect(VENDOR_DEFAULT_SORT).toBe('name');
+        expect(vendorListSort('name')).toBeUndefined();
+        await listVendors(1, 50, undefined, undefined, false, vendorListSort(undefined));
+
+        expect(requests[0].params).toEqual({ page: 1, per_page: 50 });
     });
 });
 

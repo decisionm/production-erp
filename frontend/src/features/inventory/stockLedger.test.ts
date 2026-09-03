@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import { readListParams } from '@/lib/listParams';
 import {
+    STOCK_LEDGER_DEFAULT_SORT,
+    STOCK_LEDGER_SPEC,
+    type StockLedgerListParams,
     ledgerNoMatchLine,
     movementPurposeLabel,
     PURPOSE_TEXT,
@@ -46,9 +50,37 @@ describe('what the ledger asks the server for', () => {
      * ListStockMovementsRequest began reading it (02-Sep-2026).
      */
     it('sends no key the movements endpoint cannot read', () => {
-        const params = stockLedgerParams({ itemId: 7, warehouseId: 3, q: 'PO-4', page: 2, perPage: 50 });
+        const params = stockLedgerParams({ itemId: 7, warehouseId: 3, q: 'PO-4', sort: '-quantity', page: 2, perPage: 50 });
 
-        expect(Object.keys(params).sort()).toEqual(['item_id', 'page', 'per_page', 'q', 'warehouse_id']);
+        expect(Object.keys(params).sort()).toEqual(['item_id', 'page', 'per_page', 'q', 'sort', 'warehouse_id']);
+    });
+});
+
+/**
+ * SORTED BY THE SERVER (ListStockMovementsRequest::SORTABLE, 03-Sep-2026).
+ * The URL carries one `sort`; an unknown column is dropped on read so it
+ * never reaches a 422, and the server's default order is the bare request.
+ */
+describe('the ledger sort', () => {
+    it('drops a sort nobody defined rather than sending it to a 422', () => {
+        const params = readListParams(new URLSearchParams('sort=colour'), STOCK_LEDGER_SPEC);
+
+        expect(params.sort).toBeUndefined();
+        expect(stockLedgerParams({ sort: 'colour' })).toEqual({});
+    });
+
+    it('sends a known column, in either direction, to the server', () => {
+        const params = readListParams(new URLSearchParams('sort=-quantity&item_id=7'), STOCK_LEDGER_SPEC) as StockLedgerListParams;
+
+        expect(params.sort).toBe('-quantity');
+        expect(stockLedgerParams({ itemId: params.item_id, sort: params.sort })).toEqual({ item_id: 7, sort: '-quantity' });
+        expect(stockLedgerParams({ sort: 'type' })).toEqual({ sort: 'type' });
+    });
+
+    it('leaves the default order — newest movement first — off the request', () => {
+        expect(STOCK_LEDGER_DEFAULT_SORT).toBe('-movement_date');
+        expect(stockLedgerParams({ sort: STOCK_LEDGER_DEFAULT_SORT })).toEqual({});
+        expect(stockLedgerParams({ sort: null })).toEqual({});
     });
 });
 

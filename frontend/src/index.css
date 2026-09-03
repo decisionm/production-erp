@@ -1,3 +1,62 @@
+/* Visual refresh (03-Sep-2026). The values here mirror src/theme/tokens.ts;
+   antd tokens carry the components, these custom properties carry the few
+   rules a token cannot reach (the sider's chevron rail, solid status pills,
+   the sort arrows on a navy header, focus rings on bare buttons). */
+:root {
+    --brand-navy: #12256b;
+    --brand-navy-deep: #0a145b;
+    --brand-ink: #141b33;
+    --brand-orange: #f07c1a;
+    --brand-orange-soft: #fff4ea;
+    --brand-glass: #f2f6fb;
+    --brand-teal: #0e9aa7;
+    --brand-rule: #d9e0ec;
+    --brand-rule-soft: #eaeff6;
+    --brand-text-secondary: #5b6579;
+    --brand-success: #1b8a4c;
+    --brand-warning: #d98e04;
+    --brand-danger: #c8321f;
+    --brand-font: 'Archivo Variable', 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+        'Helvetica Neue', Arial, sans-serif;
+    /* The sidebar is dark navy in BOTH modes, so its edge is its own value. */
+    --brand-sider-edge: #0a1741;
+    /* What the page ground and the words on it are, per mode. */
+    --app-bg: var(--brand-glass);
+    --app-text: var(--brand-ink);
+    --app-text-secondary: var(--brand-text-secondary);
+    --app-surface: #ffffff;
+    --app-rule: var(--brand-rule);
+}
+
+/* ------------------------------------------------------------------ */
+/* Dark mode. Set by theme/store.ts as data-theme on <html>, so the       */
+/* ground is painted before the first component and every portal (a      */
+/* Modal, a Dropdown, a Select's list) is inside the same scope.         */
+/*                                                                       */
+/* The words come first: #e9edf7 on #0f1526 clears WCAG AAA, and the      */
+/* secondary tone clears AA — a dark screen the floor cannot read is      */
+/* worse than a bright one. theme/tokens.ts carries the same values for   */
+/* the antd side; these are the few rules a token cannot reach.          */
+/* ------------------------------------------------------------------ */
+
+:root[data-theme='dark'] {
+    --brand-glass: #0f1526;
+    --brand-ink: #e9edf7;
+    --brand-text-secondary: #afb9d0;
+    --brand-rule: #2a3450;
+    --brand-rule-soft: #212b42;
+    --brand-navy: #5b7bd6;
+    --brand-navy-deep: #ffffff;
+    --brand-orange: #ff9440;
+    --brand-orange-soft: #232e4c;
+    --brand-sider-edge: #060b1c;
+    --app-bg: #0f1526;
+    --app-text: #e9edf7;
+    --app-text-secondary: #afb9d0;
+    --app-surface: #171f33;
+    --app-rule: #2a3450;
+}
+
 html,
 body,
 #root {
@@ -10,12 +69,203 @@ body,
     overflow-x: clip;
 }
 
+body {
+    font-family: var(--brand-font);
+    background: var(--app-bg);
+    color: var(--app-text);
+    -webkit-font-smoothing: antialiased;
+    /* The scrollbars and form controls the browser paints follow the mode too. */
+    color-scheme: light;
+}
+
+:root[data-theme='dark'] body {
+    color-scheme: dark;
+}
+
+/* ------------------------------------------------------------------ */
+/* Type                                                                  */
+/* ------------------------------------------------------------------ */
+
+/* Page titles: Archivo one width step wider and heavy. The extra width is
+   the one typographic gesture on a page; everything below it is width 100. */
+h1.ant-typography,
+h2.ant-typography,
+h3.ant-typography {
+    font-stretch: 112%;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+}
+
+h4.ant-typography,
+h5.ant-typography {
+    font-weight: 700;
+}
+
+/* Figures line up in a column, so a quantity can be compared by eye. */
+.ant-table-cell,
+.ant-statistic-content,
+.ant-descriptions-item-content,
+.ant-input-number-input {
+    font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------------ */
+/* Shell                                                                 */
+/* ------------------------------------------------------------------ */
+
+.app-sider {
+    border-inline-end: 1px solid var(--brand-sider-edge);
+}
+
+.app-sider .ant-menu-inline,
+.app-sider .ant-menu-inline-collapsed {
+    border-inline-end: 0 !important;
+    background: transparent;
+}
+
+.app-sider .ant-menu-submenu-title {
+    font-weight: 600;
+}
+
+.app-sider .ant-menu-item {
+    position: relative;
+    font-weight: 500;
+}
+
+/* The brand mark is a chevron; the active item wears one. */
+.app-sider .ant-menu-item-selected::before {
+    content: '';
+    position: absolute;
+    inset-inline-start: -4px;
+    top: 50%;
+    width: 10px;
+    height: 16px;
+    transform: translateY(-50%);
+    background: var(--brand-orange);
+    clip-path: polygon(0 0, 100% 50%, 0 100%, 35% 50%);
+}
+
+.app-sider .ant-menu-item-selected {
+    font-weight: 700;
+}
+
+/* ------------------------------------------------------------------ */
+/* Sidebar icons: motion that answers a hand, never motion on its own.  */
+/* ------------------------------------------------------------------ */
+
+.app-sider .ant-menu-item .anticon,
+.app-sider .ant-menu-submenu-title .anticon {
+    transition:
+        transform 180ms cubic-bezier(0.2, 0.7, 0.3, 1),
+        color 180ms ease;
+    will-change: transform;
+}
+
+.app-sider .ant-menu-item:hover .anticon,
+.app-sider .ant-menu-submenu-title:hover .anticon {
+    transform: scale(1.16) translateX(1px);
+    color: var(--brand-orange);
+}
+
+.app-sider .ant-menu-item:active .anticon,
+.app-sider .ant-menu-submenu-title:active .anticon {
+    transform: scale(0.94);
+}
+
+/* The one you are on sits a shade larger and wears the accent. */
+.app-sider .ant-menu-item-selected .anticon {
+    transform: scale(1.1);
+    color: var(--brand-orange);
+}
+
+/* The group caret turns rather than jumps. */
+.app-sider .ant-menu-submenu-arrow {
+    transition: transform 200ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+/* Collapsing is the one width change worth easing. */
+.app-sider,
+.app-sider .ant-layout-sider-children {
+    transition: width 200ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+/* ------------------------------------------------------------------ */
+/* The sidebar's drag handle.                                           */
+/* ------------------------------------------------------------------ */
+
+.app-sider-resize {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    z-index: 11;
+    cursor: col-resize;
+    background: transparent;
+    transition: background 140ms ease;
+    touch-action: none;
+}
+
+.app-sider-resize:hover,
+.app-sider-resize:focus-visible {
+    background: var(--brand-orange);
+    outline: none;
+}
+
+/* While dragging: no text selection anywhere, and the edge tracks the
+   finger instead of easing behind it. */
+body.is-resizing-sider {
+    user-select: none;
+    cursor: col-resize;
+}
+
+body.is-resizing-sider .app-sider,
+body.is-resizing-sider .app-sider .ant-layout-sider-children,
+body.is-resizing-sider .ant-layout {
+    transition: none !important;
+}
+
+.app-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+.app-theme-toggle {
+    flex: 0 0 auto;
+}
+
+.app-theme-toggle .anticon {
+    font-size: 17px;
+    transition: transform 220ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.app-theme-toggle:hover .anticon {
+    transform: rotate(-14deg) scale(1.1);
+}
+
+.app-header {
+    border-bottom: 1px solid var(--brand-rule);
+}
+
 .app-header-leading {
     display: flex;
     align-items: center;
     gap: 12px;
     min-width: 0;
     flex: 1 1 auto;
+}
+
+.app-breadcrumb {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.app-breadcrumb .ant-breadcrumb-link:last-child,
+.app-breadcrumb li:last-child .ant-breadcrumb-link {
+    font-weight: 700;
 }
 
 .skip-to-content {
@@ -26,7 +276,7 @@ body,
     transform: translateY(-160%);
     padding: 8px 12px;
     border-radius: 6px;
-    background: #1677ff;
+    background: var(--brand-navy);
     color: #fff;
     font-weight: 600;
 }
@@ -34,12 +284,6 @@ body,
 .skip-to-content:focus {
     transform: translateY(0);
     color: #fff;
-}
-
-.app-breadcrumb {
-    min-width: 0;
-    overflow: hidden;
-    white-space: nowrap;
 }
 
 .account-menu-button {
@@ -52,6 +296,60 @@ body,
 .account-user-name {
     max-width: 190px;
 }
+
+/* ------------------------------------------------------------------ */
+/* Tables                                                                */
+/* ------------------------------------------------------------------ */
+
+.ant-table-wrapper .ant-table-thead > tr > th {
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+}
+
+/* Sort arrows must be visible on navy, and the active one is the accent. */
+.ant-table-wrapper .ant-table-column-sorter {
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.ant-table-wrapper .ant-table-column-sorter-up.active,
+.ant-table-wrapper .ant-table-column-sorter-down.active {
+    color: var(--brand-orange);
+}
+
+.ant-table-wrapper .ant-table-filter-trigger {
+    color: rgba(255, 255, 255, 0.65);
+}
+
+.ant-table-wrapper .ant-table-filter-trigger.active {
+    color: var(--brand-orange);
+}
+
+.ant-table-wrapper .ant-table-thead th.ant-table-column-has-sorters:hover {
+    color: #fff;
+}
+
+.ant-table-wrapper .ant-table-tbody > tr > td {
+    border-bottom-color: var(--brand-rule-soft);
+}
+
+.ant-table-wrapper .ant-table-row-expand-icon {
+    color: var(--brand-navy);
+}
+
+/* ------------------------------------------------------------------ */
+/* Status pills. The ConfigProvider sets every Tag to the solid variant     */
+/* so a state reads from across a table; this only sets the weight.       */
+/* ------------------------------------------------------------------ */
+
+.ant-tag {
+    font-weight: 600;
+    padding-inline: 10px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Mobile                                                                */
+/* ------------------------------------------------------------------ */
 
 @media (max-width: 768px) {
     .login-brand-panel {
@@ -90,7 +388,7 @@ body,
    :focus-visible, not :focus — a thumb tap must not leave a ring behind on a
    shop-floor tablet. */
 .floor-attention-chip:focus-visible {
-    outline: 2px solid #1677ff;
+    outline: 2px solid var(--brand-orange);
     outline-offset: 2px;
     border-radius: 8px;
 }
@@ -106,6 +404,25 @@ body,
     .ant-card-hoverable {
         transition: none;
     }
+
+    /* The sidebar's icon motion and its width easing are decoration; a
+       device that asked for less gets the same layout with none of it. */
+    .app-sider,
+    .app-sider .ant-layout-sider-children,
+    .app-sider .ant-menu-item .anticon,
+    .app-sider .ant-menu-submenu-title .anticon,
+    .app-sider .ant-menu-submenu-arrow,
+    .app-sider-resize,
+    .app-theme-toggle .anticon {
+        transition: none;
+    }
+
+    .app-sider .ant-menu-item:hover .anticon,
+    .app-sider .ant-menu-submenu-title:hover .anticon,
+    .app-sider .ant-menu-item-selected .anticon,
+    .app-theme-toggle:hover .anticon {
+        transform: none;
+    }
 }
 
 /* Item Master category facets (27-Aug-2026).
@@ -119,7 +436,42 @@ body,
    :focus-visible, not :focus — choosing a category with a thumb on a store
    tablet must not leave a ring behind. */
 .category-facet:focus-visible {
-    outline: 2px solid #1677ff;
+    outline: 2px solid var(--brand-orange);
     outline-offset: -2px;
     border-radius: 6px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Production Queue (03-Sep-2026): one flat grid of the real queue.      */
+/* ------------------------------------------------------------------ */
+
+.queue-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px 24px;
+    margin-bottom: 16px;
+}
+
+.queue-count {
+    font-size: 14px;
+}
+
+/* The queue position is the one figure that means "how soon": wide, heavy, navy. */
+.queue-position {
+    display: inline-block;
+    min-width: 28px;
+    font-size: 20px;
+    font-weight: 800;
+    font-stretch: 112%;
+    line-height: 1;
+    color: var(--brand-navy);
+    font-variant-numeric: tabular-nums;
+}
+
+/* A product run's merged cell sits on the glass tint so the run reads as one. */
+.queue-table .ant-table-tbody > tr > td[rowspan] {
+    background: var(--brand-glass);
+    vertical-align: top;
 }

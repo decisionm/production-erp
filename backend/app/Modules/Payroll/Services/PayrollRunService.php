@@ -5,11 +5,13 @@ namespace App\Modules\Payroll\Services;
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\HRMS\Models\Employee;
 use App\Modules\HRMS\Services\EmployeeService;
+use App\Modules\Payroll\Http\Requests\ListPayrollRunsRequest;
 use App\Modules\Payroll\Models\Enums\PayrollRunStatus;
 use App\Modules\Payroll\Models\Enums\PayslipLineType;
 use App\Modules\Payroll\Models\Enums\SalaryComponentType;
 use App\Modules\Payroll\Models\PayrollRun;
 use App\Modules\Payroll\Models\SalaryStructure;
+use App\Support\Lists\ListSort;
 use Carbon\Carbon;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
@@ -47,13 +49,37 @@ class PayrollRunService
     {
         $query = PayrollRun::query();
         $this->applyFilters($query, $filters);
+        $this->applySort($query, $filters['sort'] ?? null);
 
         return $query
-            ->orderByDesc('year')
-            ->orderByDesc('month')
-            ->orderByDesc('id')
             ->paginate($this->query->perPage($filters))
             ->withQueryString();
+    }
+
+    /**
+     * `period` is the one sort ListSort cannot spell on its own: a run's
+     * identity is (year, month), two real columns read as one — so `period`
+     * and `-period` order year then month the same way, and absent is
+     * `-period`, the order this list has always had. Every other allowed
+     * column is ListSort's, with the two nullable stamps' empties last.
+     */
+    private function applySort(Builder $query, ?string $sort): void
+    {
+        $sort = trim((string) $sort);
+
+        if ($sort === '' || ltrim($sort, '-') === 'period') {
+            $direction = $sort === 'period' ? 'asc' : 'desc';
+            $query->orderBy('year', $direction)->orderBy('month', $direction)->orderByDesc('id');
+
+            return;
+        }
+
+        ListSort::apply(
+            $query,
+            $sort,
+            array_values(array_diff(ListPayrollRunsRequest::SORTABLE, ['period'])),
+            nullableDates: ['processed_at', 'paid_at'],
+        );
     }
 
     /**

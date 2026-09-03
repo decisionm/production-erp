@@ -1,11 +1,22 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Form, Input, InputNumber, Modal, Space, Switch, Table, Typography } from 'antd';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { createGstRate, listGstRates, updateGstRate } from '@/features/compliance/api';
+import {
+    GST_RATE_DEFAULT_SORT,
+    GST_RATE_LIST_SPEC,
+    GST_RATE_SORT_FIELDS,
+    type GstRateListParams,
+    gstRateServerFilters,
+    gstRatesQueryKey,
+} from '@/features/compliance/gstRateList';
 import type { GstRate } from '@/features/compliance/types';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
+import { useListParams } from '@/lib/useListParams';
 
 const rateSchema = z.object({
     hsn_sac_code: z.string().min(1, 'HSN/SAC code is required').max(20),
@@ -19,7 +30,15 @@ export default function GstRatesPage() {
     const [editingRate, setEditingRate] = useState<GstRate | null>(null);
     const queryClient = useQueryClient();
 
-    const { data, isLoading } = useQuery({ queryKey: ['compliance', 'gst-rates'], queryFn: listGstRates });
+    // THE LIST'S VIEW IS ITS URL: sort, page and page size, sorted and paged
+    // on the SERVER over every rate.
+    const { params, setParams, setPage } = useListParams<GstRateListParams>(GST_RATE_LIST_SPEC);
+    const filters = useMemo(() => gstRateServerFilters(params), [params]);
+    const { data, isLoading } = useQuery({
+        queryKey: gstRatesQueryKey(filters),
+        queryFn: () => listGstRates(filters),
+        placeholderData: (previous) => previous,
+    });
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['compliance', 'gst-rates'] });
 
@@ -68,18 +87,46 @@ export default function GstRatesPage() {
             </Space>
 
             <Table<GstRate>
+                sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
                 rowKey="id"
                 loading={isLoading}
                 dataSource={data?.data}
-                pagination={false}
+                // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                // and re-queries every rate.
+                onChange={(_pagination, _filters, sorter, extra) => {
+                    if (extra.action !== 'sort') return;
+                    setParams({ sort: sortParamFromSorter(sorter, GST_RATE_SORT_FIELDS, GST_RATE_DEFAULT_SORT) });
+                }}
+                pagination={serverPagination(data?.meta, setPage, 'rates')}
                 columns={[
-                    { title: 'HSN/SAC Code', dataIndex: 'hsn_sac_code' },
-                    { title: 'Description', dataIndex: 'description' },
-                    { title: 'Rate %', dataIndex: 'rate_percent' },
+                    {
+                        title: 'HSN/SAC Code',
+                        dataIndex: 'hsn_sac_code',
+                        key: 'hsn_sac_code',
+                        sorter: true,
+                        sortOrder: columnSortOrder('hsn_sac_code', params.sort, GST_RATE_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Description',
+                        dataIndex: 'description',
+                        key: 'description',
+                        sorter: true,
+                        sortOrder: columnSortOrder('description', params.sort, GST_RATE_DEFAULT_SORT),
+                    },
+                    {
+                        title: 'Rate %',
+                        dataIndex: 'rate_percent',
+                        key: 'rate_percent',
+                        sorter: true,
+                        sortOrder: columnSortOrder('rate_percent', params.sort, GST_RATE_DEFAULT_SORT),
+                    },
                     {
                         title: 'Active',
                         dataIndex: 'is_active',
+                        key: 'is_active',
+                        sorter: true,
+                        sortOrder: columnSortOrder('is_active', params.sort, GST_RATE_DEFAULT_SORT),
                         render: (active: boolean, row) => (
                             <Switch
                                 checked={active}

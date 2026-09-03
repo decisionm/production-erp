@@ -65,6 +65,27 @@ Watch it in the repo's **Actions** tab. To redeploy without a code change, use *
 ### Database changes
 Just add a normal Laravel migration and push — `deploy.sh` runs `migrate --force` automatically. ⚠️ On MySQL, custom composite index/unique names must stay **≤ 64 characters** (dev uses SQLite, which doesn't enforce this — name them explicitly, e.g. `$table->unique([...], 'short_name')`).
 
+### Live data corrections (never a migration, always dry-run first)
+
+Changing live ROWS — as opposed to schema — happens through a manually
+dispatched workflow, never as a side effect of a deploy. Every one of them
+defaults to a dry run, needs a typed confirmation to write, and takes a full
+database dump on the server first (`backend/scripts/backup-db.sh`, which
+refuses to let the write proceed if the dump fails or comes back empty).
+
+| Workflow | What it does |
+|---|---|
+| *Correct consumption item* | Prints the correction statement for the accountant; with `write=true`, posts append-only movements moving batch consumption from one item to another. Originals and Tally are never touched. |
+| *Remove WIP demo rows* | Lists demo-seeded stock movements standing on Production/WIP; with `write=true --ids=`, removes exactly the ids a person read off the dry run and recomputes the touched balances. |
+
+Each workflow's header names the owner decision it implements, and
+`docs/factory/CURRENT-DECISIONS.md` is the readable index of those.
+
+Both refuse fail-closed with counts rather than guessing, and the removal also
+refuses an id that is not a candidate, a row another record references, and one
+leg of a transfer pair. Read the dry run, then run the write with the ids or
+counts it printed — the write is the lead's step, not the agent's.
+
 ### Manual deploy (fallback, no CI)
 The server has no Node, so the frontend must be built elsewhere. From a machine with Node:
 

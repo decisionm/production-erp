@@ -41,11 +41,14 @@ export const MAX_PER_PAGE = 100;
  * prefixed for descending. Anything else the server answers with a 422, so
  * buildSalesQuery() drops it instead of sending it.
  */
-const SORT_FIELDS: Record<SalesDocumentKind, readonly string[]> = {
+export const SALES_SORT_FIELDS: Record<SalesDocumentKind, readonly string[]> = {
     sales_order: ['id', 'order_date', 'expected_date'],
     delivery: ['id', 'delivered_date'],
     invoice: ['id', 'invoice_date'],
 };
+
+/** The server's order when `sort` is absent (SalesDocumentQuery::SORT_DEFAULT): newest first. */
+export const SALES_DEFAULT_SORT = '-id';
 
 const SORT_LABELS: Record<string, string> = {
     id: 'Number',
@@ -69,7 +72,7 @@ function calendarDay(value: string): string {
 }
 
 function sortAllowed(kind: SalesDocumentKind, sort: string): boolean {
-    return SORT_FIELDS[kind].includes(sort.replace(/^-/, ''));
+    return SALES_SORT_FIELDS[kind].includes(sort.replace(/^-/, ''));
 }
 
 /**
@@ -247,7 +250,7 @@ export function parseDocumentRef(
 
 /** The sort dropdown's choices for one document, newest first as the first (default) choice. */
 export function sortOptions(kind: SalesDocumentKind): { value: string; label: string }[] {
-    return SORT_FIELDS[kind].flatMap((field) => [
+    return SALES_SORT_FIELDS[kind].flatMap((field) => [
         { value: `-${field}`, label: `${SORT_LABELS[field] ?? field} ↓` },
         { value: field, label: `${SORT_LABELS[field] ?? field} ↑` },
     ]);

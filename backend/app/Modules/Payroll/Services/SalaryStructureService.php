@@ -3,21 +3,26 @@
 namespace App\Modules\Payroll\Services;
 
 use App\Modules\Payroll\Exceptions\MissingBasicComponentException;
+use App\Modules\Payroll\Http\Requests\ListSalaryStructuresRequest;
 use App\Modules\Payroll\Models\Enums\SalaryCalculationType;
 use App\Modules\Payroll\Models\SalaryComponent;
 use App\Modules\Payroll\Models\SalaryStructure;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
 class SalaryStructureService
 {
-    public function paginate(?int $employeeId, int $perPage = 20): LengthAwarePaginator
+    /** Ordered by `sort` (ListSort; validated by ListSalaryStructuresRequest), latest effective date first as it always was when absent. */
+    public function paginate(?int $employeeId, int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return SalaryStructure::query()
+        $query = SalaryStructure::query()
             ->when($employeeId, fn ($query) => $query->where('employee_id', $employeeId))
-            ->with(['employee', 'lines.component'])
-            ->orderByDesc('effective_from')
-            ->paginate($perPage);
+            ->with(['employee', 'lines.component']);
+
+        return ListSort::apply($query, $sort, ListSalaryStructuresRequest::SORTABLE, '-effective_from')
+            ->paginate($perPage)
+            ->withQueryString();
     }
 
     /**

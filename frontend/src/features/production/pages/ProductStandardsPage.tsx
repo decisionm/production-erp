@@ -85,6 +85,7 @@ import type {
 } from '@/features/production/types';
 import { itemLabel } from '@/lib/itemLabel';
 import { showApiError } from '@/lib/showApiError';
+import { columnSortOrder, sortParamFromSorter } from '@/lib/tableSort';
 
 /**
  * THE PRODUCT CONFIGURATION WORKSPACE — one screen that answers, for every
@@ -135,6 +136,13 @@ import { showApiError } from '@/lib/showApiError';
 const APP_HEADER_HEIGHT = 64;
 
 const DEFAULT_PAGE_SIZE = PRODUCT_STANDARDS_PAGE_SIZES[0];
+
+/**
+ * The columns the server sorts the workspace on (IndexProductionStandardsRequest
+ * `sort`). No default: absent is the workspace's own order (product name,
+ * cavities, id), which no single column header describes.
+ */
+const STANDARD_SORT_FIELDS: readonly string[] = ['source_product_name', 'status'];
 
 /** Figures line up column-wise only if the digits are the same width. */
 const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
@@ -1975,6 +1983,10 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
     );
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
+    // Column-header sort in the server's spelling (`status`, `-status`);
+    // undefined is the workspace's own order. The server reorders the whole
+    // assessed set before cutting the page, so the page number resets.
+    const [sort, setSort] = useState<string | undefined>(undefined);
     const [searchInput, setSearchInput] = useState('');
     const [search, setSearch] = useState('');
     const [missingTally, setMissingTally] = useState(false);
@@ -2029,13 +2041,14 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
             'production',
             'standards',
             'workspace',
-            { view, page, pageSize, search, missingTally, packingMode, machineId },
+            { view, page, pageSize, sort, search, missingTally, packingMode, machineId },
         ],
         queryFn: () =>
             listProductionStandards({
                 view,
                 page,
                 per_page: pageSize,
+                sort,
                 search: search === '' ? undefined : search,
                 // Literal 1, never a boolean: Laravel's `boolean` rule refuses
                 // the string "true" axios would send.
@@ -2359,6 +2372,14 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                     // sticky at top:0 and 64px tall (measured in the browser,
                     // not assumed), so the table header freezes at 64.
                     sticky={{ offsetHeader: APP_HEADER_HEIGHT }}
+                    // SORTED BY THE SERVER: every sorter is sortOrder-controlled
+                    // and re-queries; the master is paginated, so sorting the
+                    // loaded page would misorder the whole result set.
+                    onChange={(_pagination, _filters, sorter, extra) => {
+                        if (extra.action !== 'sort') return;
+                        setSort(sortParamFromSorter(sorter, STANDARD_SORT_FIELDS));
+                        setPage(1);
+                    }}
                     pagination={{
                         current: page,
                         pageSize,
@@ -2394,6 +2415,9 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                         },
                         {
                             title: 'PRODUCT',
+                            key: 'source_product_name',
+                            sorter: true,
+                            sortOrder: columnSortOrder('source_product_name', sort),
                             width: 240,
                             fixed: 'left' as const,
                             render: (_, r) => (
@@ -2633,6 +2657,9 @@ export default function ProductStandardsPage({ embedded = false }: { embedded?: 
                         },
                         {
                             title: 'Status',
+                            key: 'status',
+                            sorter: true,
+                            sortOrder: columnSortOrder('status', sort),
                             width: 150,
                             render: (_, r) => {
                                 const s = STATUS[r.status] ?? { colour: 'default', label: r.status, help: '' };

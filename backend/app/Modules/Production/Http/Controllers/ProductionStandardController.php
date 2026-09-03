@@ -63,6 +63,7 @@ class ProductionStandardController extends Controller
             $filters,
             $this->workspace->resolvePerPage($request->query('per_page', 25)),
             max(1, (int) $request->query('page', 1)),
+            $filters['sort'] ?? null,
         );
 
         // The row's `can` came out of the workspace as the RECORD's

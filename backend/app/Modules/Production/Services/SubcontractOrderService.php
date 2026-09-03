@@ -5,9 +5,11 @@ namespace App\Modules\Production\Services;
 use App\Exceptions\InvalidStatusTransitionException;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Exceptions\MissingBomException;
+use App\Modules\Production\Http\Requests\ListSubcontractOrdersRequest;
 use App\Modules\Production\Models\Bom;
 use App\Modules\Production\Models\Enums\SubcontractOrderStatus;
 use App\Modules\Production\Models\SubcontractOrder;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
@@ -28,12 +30,12 @@ class SubcontractOrderService
         private readonly BomService $boms,
     ) {}
 
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return SubcontractOrder::query()
-            ->with(['vendor', 'item', 'warehouse', 'materials.component'])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+        $query = SubcontractOrder::query()
+            ->with(['vendor', 'item', 'warehouse', 'materials.component']);
+
+        return ListSort::apply($query, $sort, ListSubcontractOrdersRequest::SORTABLE)->paginate($perPage);
     }
 
     /**

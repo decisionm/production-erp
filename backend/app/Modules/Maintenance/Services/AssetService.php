@@ -2,15 +2,17 @@
 
 namespace App\Modules\Maintenance\Services;
 
+use App\Modules\Maintenance\Http\Requests\ListAssetsRequest;
 use App\Modules\Maintenance\Models\Asset;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 
 class AssetService
 {
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /** Name order unless a sort is asked for (ListAssetsRequest::SORTABLE); id desc tiebreaks. */
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return Asset::query()
-            ->orderBy('name')
+        return ListSort::apply(Asset::query(), $sort, ListAssetsRequest::SORTABLE, 'name')
             ->paginate($perPage);
     }
 

@@ -1,16 +1,16 @@
 import {
     AccountBookOutlined,
     BuildOutlined,
+    BulbFilled,
+    BulbOutlined,
     ContactsOutlined,
     DashboardOutlined,
-    DownloadOutlined,
     FileProtectOutlined,
     InboxOutlined,
     KeyOutlined,
     LogoutOutlined,
     MenuFoldOutlined,
     MenuUnfoldOutlined,
-    QuestionCircleOutlined,
     SafetyCertificateOutlined,
     SettingOutlined,
     ShopOutlined,
@@ -22,7 +22,7 @@ import {
 } from '@ant-design/icons';
 import { useMutation } from '@tanstack/react-query';
 import { Avatar, Breadcrumb, Button, Dropdown, Layout, Menu, type MenuProps, Space, Typography } from 'antd';
-import { type PropsWithChildren, type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type PropsWithChildren, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { logout } from '@/features/auth/api';
 import { hasModuleAccess } from '@/features/auth/permissions';
@@ -32,6 +32,8 @@ import type { User } from '@/features/auth/types';
 // decision, shared with the dashboard's Office band. Full rationale lives
 // on the constant itself.
 import { ADOPTED_MODULES } from '@/lib/adoptedModules';
+import { SIDER_WIDTH_MAX, SIDER_WIDTH_MIN } from '@/theme/mode';
+import { useDisplayStore } from '@/theme/store';
 
 /**
  * WIDE ENOUGH FOR THE LONGEST LABEL, measured rather than guessed.
@@ -52,7 +54,9 @@ import { ADOPTED_MODULES } from '@/lib/adoptedModules';
  * AppLayout.nav.test.ts, and renaming a page to fit a number is the wrong way
  * round. Widen the shelf, keep the words.
  */
-const SIDER_WIDTH = 248;
+/* The measured width above is the SHIPPED default, kept in theme/mode.ts as
+   SIDER_WIDTH_DEFAULT because a person may now drag their own; this file
+   only needs the collapsed rail. */
 const SIDER_COLLAPSED_WIDTH = 80;
 
 interface NavLeaf {
@@ -406,6 +410,7 @@ export const allNavItems: readonly NavGroup[] = [
             { key: '/hrms/leave-balances', label: 'Leave Balances' },
             { key: '/hrms/leave-requests', label: 'Leave Requests' },
             { key: '/hrms/attendance', label: 'Attendance' },
+            { key: '/hrms/attendance-imports', label: 'Attendance Import' },
         ],
     },
     {
@@ -478,17 +483,32 @@ export const allNavItems: readonly NavGroup[] = [
     // (if any) that login is offered. Gating the entry by one module here
     // would hide the Tally Sync downloads from an accountant who holds no
     // production permission, or the reverse.
-    { key: '/exports', icon: <DownloadOutlined />, label: 'Downloads' },
-    { key: '/help', icon: <QuestionCircleOutlined />, label: 'Help' },
-    {
-        key: 'administration',
-        icon: <SettingOutlined />,
-        label: 'Administration',
-        children: [
-            { key: '/administration/users', label: 'Users', module: 'users' },
-            { key: '/administration/roles', label: 'Roles', module: 'roles' },
-        ],
-    },
+    // Downloads, Help and Administration are now CARDS ON THE SETTINGS PAGE
+    // (owner, 03-Sep-2026), so one entry sits below the divider where three
+    // did. Their routes are untouched, so every deep link into them still
+    // opens, and the page gates each card exactly as this list gated each
+    // entry — Downloads and Help ungated, Users and Roles by module.
+    { key: '/settings', icon: <SettingOutlined />, label: 'Settings' },
+];
+
+/**
+ * The pages the Settings page gathers (owner, 03-Sep-2026). They are NOT
+ * sidebar children — the ask was one entry that opens a page of cards, not a
+ * fourth submenu — but they are still part of the app's OUTLINE: the Help
+ * page documents every screen a login can reach, and each of these keeps a
+ * breadcrumb that says where it lives. `outlineNavItems` below is that
+ * outline; the sidebar itself renders `buildNavItems`, where Settings is a
+ * plain leaf.
+ *
+ * The gates are the ones these four carried as menu entries: Downloads and
+ * Help ungated, Users and Roles by their own module. `settingsSections` on
+ * the page repeats them, and its test pins the same answers.
+ */
+export const SETTINGS_PAGES: readonly NavLeaf[] = [
+    { key: '/exports', label: 'Downloads' },
+    { key: '/help', label: 'Help' },
+    { key: '/administration/users', label: 'Users', module: 'users' },
+    { key: '/administration/roles', label: 'Roles', module: 'roles' },
 ];
 
 export function buildNavItems(user: User | null) {
@@ -556,7 +576,33 @@ export function navTrailForPath(items: readonly NavGroup[], pathname: string): s
         if (child) return [item.label, child.label];
     }
 
+    // A page the Settings page gathers: it has no menu entry of its own, but
+    // it is not "direct-only" either — it sits under Settings and says so.
+    // Only when Settings itself is visible, so the trail still never names
+    // something this login cannot reach.
+    if (items.some((item) => item.key === '/settings')) {
+        const gathered = SETTINGS_PAGES.find((leaf) => leaf.key === pathname);
+        if (gathered) return ['Settings', gathered.label];
+    }
+
     return [];
+}
+
+/**
+ * The nav as an OUTLINE of the whole app: the sidebar's own items, with the
+ * Settings leaf carrying the pages its page gathers. The Help page walks
+ * this so every reachable screen is documented; the sidebar never sees it.
+ */
+export function outlineNavItems(user: User | null): NavGroup[] {
+    return buildNavItems(user).map((item) => {
+        if (item.key !== '/settings') return item;
+
+        const children = SETTINGS_PAGES.filter(
+            (leaf) => !leaf.module || (ADOPTED_MODULES.has(leaf.module) && hasModuleAccess(user, leaf.module)),
+        );
+
+        return children.length > 0 ? { ...item, children } : item;
+    });
 }
 
 export default function AppLayout({ children }: PropsWithChildren) {
@@ -566,6 +612,44 @@ export default function AppLayout({ children }: PropsWithChildren) {
     const setUser = useAuthStore((state) => state.setUser);
     const [collapsed, setCollapsed] = useState(false);
     const [isMobile, setIsMobile] = useState(false);
+    const mode = useDisplayStore((state) => state.mode);
+    const toggleMode = useDisplayStore((state) => state.toggleMode);
+    const siderWidth = useDisplayStore((state) => state.siderWidth);
+    const setSiderWidth = useDisplayStore((state) => state.setSiderWidth);
+    const resetSiderWidth = useDisplayStore((state) => state.resetSiderWidth);
+    const dragging = useRef(false);
+
+    /*
+     * The sidebar is dragged by its right edge. Pointer events (not mouse)
+     * so a stylus or a tablet thumb drags it too; the listeners live on the
+     * window for the duration of the drag, because the pointer leaves the
+     * 6px handle almost immediately. `is-resizing-sider` on <body> kills
+     * text selection and the sider's width transition while dragging, so
+     * the edge tracks the finger instead of easing after it.
+     */
+    const startResize = useCallback(
+        (event: { preventDefault: () => void }) => {
+            event.preventDefault();
+            dragging.current = true;
+            document.body.classList.add('is-resizing-sider');
+
+            const move = (moved: PointerEvent) => {
+                if (dragging.current) setSiderWidth(moved.clientX);
+            };
+            const stop = () => {
+                dragging.current = false;
+                document.body.classList.remove('is-resizing-sider');
+                window.removeEventListener('pointermove', move);
+                window.removeEventListener('pointerup', stop);
+                window.removeEventListener('pointercancel', stop);
+            };
+
+            window.addEventListener('pointermove', move);
+            window.addEventListener('pointerup', stop);
+            window.addEventListener('pointercancel', stop);
+        },
+        [setSiderWidth],
+    );
 
     const mutation = useMutation({
         mutationFn: logout,
@@ -605,8 +689,8 @@ export default function AppLayout({ children }: PropsWithChildren) {
     const menuItems = useMemo(() => {
         const items: unknown[] = [];
         navItems.forEach((item) => {
-            if (item.key === '/exports') {
-                items.push({ type: 'divider', key: 'divider-utility', style: { borderColor: 'rgba(255,255,255,0.12)', margin: '8px 16px' } });
+            if (item.key === '/settings') {
+                items.push({ type: 'divider', key: 'divider-utility', style: { borderColor: 'var(--brand-rule)', margin: '8px 16px' } });
             }
             items.push(item);
         });
@@ -619,6 +703,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
                 Skip to page content
             </a>
             <Layout.Sider
+                className="app-sider"
                 theme="dark"
                 collapsible
                 collapsed={collapsed}
@@ -627,7 +712,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
                     if (type === 'responsive') setIsMobile(value);
                 }}
                 breakpoint="lg"
-                width={SIDER_WIDTH}
+                width={siderWidth}
                 collapsedWidth={isMobile ? 0 : SIDER_COLLAPSED_WIDTH}
                 trigger={null}
                 style={{
@@ -673,7 +758,8 @@ export default function AppLayout({ children }: PropsWithChildren) {
                     <div
                         style={{
                             background: '#fff',
-                            borderRadius: 8,
+                            borderRadius: 10,
+                            border: '1px solid var(--brand-rule)',
                             padding: collapsed ? '6px 8px' : '8px 12px',
                             display: 'flex',
                             alignItems: 'center',
@@ -698,7 +784,12 @@ export default function AppLayout({ children }: PropsWithChildren) {
                     theme="dark"
                     mode="inline"
                     selectedKeys={[location.pathname]}
-                    openKeys={openKeys}
+                    /* Collapsed, the rail is 80px of icons: a controlled
+                       openKeys would keep the open group's children mounted
+                       inline and clip their labels to two letters. Hand the
+                       Menu nothing to open and it uses hover popups, which
+                       is what the collapsed rail is for. */
+                    openKeys={collapsed ? [] : openKeys}
                     onOpenChange={(keys) => {
                         const nextOpenKey = keys.find((key) => !openKeys.includes(key));
                         setOpenKeys(nextOpenKey && rootSubmenuKeys.includes(nextOpenKey) ? [nextOpenKey] : keys);
@@ -710,6 +801,35 @@ export default function AppLayout({ children }: PropsWithChildren) {
                     }}
                 />
             </Layout.Sider>
+            {/* The sidebar's right edge, dragged. `separator` with a value is
+                what a screen reader announces, and the arrow keys move it in
+                16px steps for anyone not using a pointer; a double-click puts
+                it back to the shipped width. */}
+            {!isMobile && !collapsed && (
+                <div
+                    className="app-sider-resize"
+                    role="separator"
+                    aria-label="Resize navigation"
+                    aria-orientation="vertical"
+                    aria-valuenow={siderWidth}
+                    aria-valuemin={SIDER_WIDTH_MIN}
+                    aria-valuemax={SIDER_WIDTH_MAX}
+                    tabIndex={0}
+                    style={{ insetInlineStart: siderWidth - 3 }}
+                    onPointerDown={startResize}
+                    onDoubleClick={resetSiderWidth}
+                    onKeyDown={(event) => {
+                        if (event.key === 'ArrowLeft') {
+                            event.preventDefault();
+                            setSiderWidth(siderWidth - 16);
+                        }
+                        if (event.key === 'ArrowRight') {
+                            event.preventDefault();
+                            setSiderWidth(siderWidth + 16);
+                        }
+                    }}
+                />
+            )}
             {isMobile && !collapsed && (
                 <button
                     type="button"
@@ -727,7 +847,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
             )}
             <Layout
                 style={{
-                    marginInlineStart: isMobile ? 0 : collapsed ? SIDER_COLLAPSED_WIDTH : SIDER_WIDTH,
+                    marginInlineStart: isMobile ? 0 : collapsed ? SIDER_COLLAPSED_WIDTH : siderWidth,
                     transition: 'margin-inline-start 0.2s',
                 }}
             >
@@ -738,8 +858,9 @@ export default function AppLayout({ children }: PropsWithChildren) {
                         alignItems: 'center',
                         justifyContent: 'space-between',
                         padding: '0 16px',
-                        background: '#fff',
-                        borderBottom: '1px solid #f0f0f0',
+                        // No hardcoded white: the header follows the mode
+                        // through Layout.headerBg, or a dark page is read
+                        // through near-white text on a white strip.
                         position: 'sticky',
                         top: 0,
                         zIndex: 9,
@@ -772,6 +893,18 @@ export default function AppLayout({ children }: PropsWithChildren) {
                             style={{ height: 26, width: 'auto', display: 'block' }}
                         />
                     )}
+                    {/* Grouped, because the header is space-between: two bare
+                        children would drift to opposite ends of it. */}
+                    <div className="app-header-actions">
+                    <Button
+                        className="app-theme-toggle"
+                        type="text"
+                        aria-label={mode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                        title={mode === 'dark' ? 'Light mode' : 'Dark mode'}
+                        aria-pressed={mode === 'dark'}
+                        icon={mode === 'dark' ? <BulbFilled /> : <BulbOutlined />}
+                        onClick={toggleMode}
+                    />
                     <Dropdown
                         menu={{
                             items: [
@@ -799,7 +932,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
                             title="Open account menu"
                         >
                             <Space>
-                                <Avatar size="small" style={{ backgroundColor: '#1677ff' }}>
+                                <Avatar size="small" style={{ backgroundColor: 'var(--brand-navy)' }}>
                                     {user?.name?.charAt(0).toUpperCase() ?? '?'}
                                 </Avatar>
                                 <Typography.Text className="account-user-name" ellipsis={{ tooltip: user?.name }}>
@@ -808,6 +941,7 @@ export default function AppLayout({ children }: PropsWithChildren) {
                             </Space>
                         </Button>
                     </Dropdown>
+                    </div>
                 </Layout.Header>
                 <Layout.Content
                     id="main-content"

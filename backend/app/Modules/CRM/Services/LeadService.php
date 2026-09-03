@@ -3,9 +3,11 @@
 namespace App\Modules\CRM\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
+use App\Modules\CRM\Http\Requests\ListLeadsRequest;
 use App\Modules\CRM\Models\Enums\LeadStatus;
 use App\Modules\CRM\Models\Lead;
 use App\Modules\Sales\Services\CustomerService;
+use App\Support\Lists\ListSort;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 
@@ -13,12 +15,13 @@ class LeadService
 {
     public function __construct(private readonly CustomerService $customers) {}
 
-    public function paginate(int $perPage = 20): LengthAwarePaginator
+    /** Newest first when no sort is asked for — what this list always was. */
+    public function paginate(int $perPage = 20, ?string $sort = null): LengthAwarePaginator
     {
-        return Lead::query()
-            ->with(['assignedTo', 'convertedCustomer', 'latestActivity'])
-            ->orderByDesc('id')
-            ->paginate($perPage);
+        $query = Lead::query()->with(['assignedTo', 'convertedCustomer', 'latestActivity']);
+        ListSort::apply($query, $sort, ListLeadsRequest::SORTABLE, '-id');
+
+        return $query->paginate($perPage);
     }
 
     /** Leads still being worked — anything not yet converted or disqualified. */
