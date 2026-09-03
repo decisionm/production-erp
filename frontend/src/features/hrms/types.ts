@@ -72,6 +72,59 @@ export interface Attendance {
     notes: string | null;
 }
 
+/** One person's range on the Attendance page: the days, and what they came to. */
+export interface AttendancePersonRange {
+    employee: {
+        id: number;
+        employee_code: string;
+        name: string;
+        department: string | null;
+        designation: string | null;
+    };
+    from: string;
+    to: string;
+    days: {
+        id: number;
+        date: string;
+        status: AttendanceStatus;
+        check_in: string | null;
+        check_out: string | null;
+        notes: string | null;
+    }[];
+    summary: AttendanceTally;
+}
+
+/** One count per status the master knows, plus what was recorded at all. */
+export interface AttendanceTally {
+    present: number;
+    absent: number;
+    half_day: number;
+    on_leave: number;
+    recorded: number;
+}
+
+export interface AttendanceDepartmentRow extends AttendanceTally {
+    department: string;
+    employees: number;
+    /** Present days over recorded days, a half day counting as half. */
+    present_percent: number;
+}
+
+/** The management read: the factory's attendance for a range, by department. */
+export interface AttendanceSummary {
+    from: string;
+    to: string;
+    departments: AttendanceDepartmentRow[];
+    totals: AttendanceTally & { employees: number; departments: number; present_percent: number };
+    most_absent: {
+        employee_id: number;
+        employee_code: string;
+        name: string;
+        department: string | null;
+        absent: number;
+    }[];
+}
+
 // ---- the punch-report import (03-Sep design, Track 2) --------------------
 
 export type AttendanceImportStatus = 'review' | 'applied';
