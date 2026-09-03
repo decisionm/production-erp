@@ -39,7 +39,7 @@ function run(id: number, status: AttendanceImport['status']): AttendanceImport {
         day_count: 1829,
         issue_count: 594,
         open_count: status === 'applied' ? 0 : 3,
-        counts: { open: 3, in_no_out: 1, out_no_in: 0, no_punch: 1, unknown_employee: 1, resolved: 0, clean: 1235 },
+        counts: { open: 3, in_no_out: 1, out_no_in: 0, no_punch: 1, unknown_employee: 1, hours_unclear: 0, worked_on_week_off: 0, resolved: 0, clean: 1235 },
         uploaded_by: { id: 1, name: 'Vimal' },
         applied_at: null,
         created_at: '2026-09-03T10:00:00+00:00',

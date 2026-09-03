@@ -990,6 +990,7 @@ Route::prefix('v1')->group(function () {
             Route::get('attendance-imports/{attendance_import}/employees', [AttendanceImportController::class, 'employees']);
             Route::get('attendance-imports/{attendance_import}/lines', [AttendanceImportController::class, 'lines']);
             Route::post('attendance-imports/{attendance_import}/lines/bulk-resolve', [AttendanceImportController::class, 'bulkResolve']);
+            Route::post('attendance-imports/{attendance_import}/recheck', [AttendanceImportController::class, 'recheck']);
             Route::patch('attendance-imports/{attendance_import}/lines/{line}', [AttendanceImportController::class, 'resolveLine']);
             Route::post('attendance-imports/{attendance_import}/apply', [AttendanceImportController::class, 'apply']);
         });

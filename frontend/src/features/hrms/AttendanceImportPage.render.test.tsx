@@ -55,7 +55,7 @@ function run(overrides: Partial<AttendanceImport> = {}): AttendanceImport {
         day_count: 1829,
         issue_count: 594,
         open_count: 3,
-        counts: { open: 3, in_no_out: 1, out_no_in: 0, no_punch: 1, unknown_employee: 1, resolved: 2, clean: 1233 },
+        counts: { open: 3, in_no_out: 1, out_no_in: 0, no_punch: 1, unknown_employee: 1, hours_unclear: 0, worked_on_week_off: 0, resolved: 2, clean: 1233 },
         uploaded_by: { id: 1, name: 'Vimal' },
         applied_at: null,
         created_at: '2026-09-03T10:00:00+00:00',
@@ -270,7 +270,7 @@ describe('AttendanceImportPage — one answer for one kind of problem', () => {
         const html = render(
             '/hrms/attendance-imports/7?view=days&issue=no_punch',
             { issue: 'no_punch' },
-            run({ counts: { open: 366, in_no_out: 0, out_no_in: 0, no_punch: 366, unknown_employee: 0, resolved: 0, clean: 1240 } }),
+            run({ counts: { open: 366, in_no_out: 0, out_no_in: 0, no_punch: 366, unknown_employee: 0, hours_unclear: 0, worked_on_week_off: 0, resolved: 0, clean: 1240 } }),
             { lines: page([line(4, { issue: 'no_punch', first_in: null, last_out: null })], 366) },
         );
 
@@ -281,7 +281,7 @@ describe('AttendanceImportPage — one answer for one kind of problem', () => {
         const html = render(
             '/hrms/attendance-imports/7?view=days&issue=in_no_out',
             { issue: 'in_no_out' },
-            run({ counts: { open: 223, in_no_out: 223, out_no_in: 0, no_punch: 0, unknown_employee: 0, resolved: 0, clean: 1240 } }),
+            run({ counts: { open: 223, in_no_out: 223, out_no_in: 0, no_punch: 0, unknown_employee: 0, hours_unclear: 0, worked_on_week_off: 0, resolved: 0, clean: 1240 } }),
             { lines: page([line(5)], 223) },
         );
 
@@ -292,7 +292,7 @@ describe('AttendanceImportPage — one answer for one kind of problem', () => {
         const html = render(
             '/hrms/attendance-imports/7?view=days&issue=unknown_employee',
             { issue: 'unknown_employee' },
-            run({ counts: { open: 12, in_no_out: 0, out_no_in: 0, no_punch: 0, unknown_employee: 12, resolved: 0, clean: 1240 } }),
+            run({ counts: { open: 12, in_no_out: 0, out_no_in: 0, no_punch: 0, unknown_employee: 12, hours_unclear: 0, worked_on_week_off: 0, resolved: 0, clean: 1240 } }),
             { lines: page([], 12) },
         );
 
@@ -304,7 +304,7 @@ describe('AttendanceImportPage — one answer for one kind of problem', () => {
         const html = render(
             '/hrms/attendance-imports/7?view=days&issue=no_punch',
             { issue: 'no_punch' },
-            run({ counts: { open: 366, in_no_out: 0, out_no_in: 0, no_punch: 366, unknown_employee: 0, resolved: 0, clean: 1240 } }),
+            run({ counts: { open: 366, in_no_out: 0, out_no_in: 0, no_punch: 366, unknown_employee: 0, hours_unclear: 0, worked_on_week_off: 0, resolved: 0, clean: 1240 } }),
             { lines: page([], 366) },
             ['hrms.view'],
         );
@@ -333,7 +333,7 @@ describe('AttendanceImportPage — applying', () => {
             run({
                 status: 'applied',
                 open_count: 0,
-                counts: { open: 0, in_no_out: 0, out_no_in: 0, no_punch: 0, unknown_employee: 0, resolved: 5, clean: 1233 },
+                counts: { open: 0, in_no_out: 0, out_no_in: 0, no_punch: 0, unknown_employee: 0, hours_unclear: 0, worked_on_week_off: 0, resolved: 5, clean: 1233 },
                 applied_at: '2026-09-03T11:00:00+00:00',
             }),
             {

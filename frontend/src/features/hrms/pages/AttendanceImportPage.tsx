@@ -32,6 +32,7 @@ import {
     bulkResolveAttendanceImportLines,
     getAttendanceImport,
     listAttendanceImportEmployees,
+    recheckAttendanceImport,
     listAttendanceImportLines,
     resolveAttendanceImportLine,
 } from '@/features/hrms/api';
@@ -84,6 +85,8 @@ const issueColor: Record<AttendanceImportIssue, string> = {
     out_no_in: 'volcano',
     no_punch: 'red',
     unknown_employee: 'purple',
+    hours_unclear: 'gold',
+    worked_on_week_off: 'geekblue',
 };
 
 const resolutionColor: Record<AttendanceImportResolution, string> = {
@@ -266,6 +269,22 @@ export default function AttendanceImportPage() {
         onError: (error) => showApiError(error, 'Could not answer these days'),
     });
 
+    // The hours rule can change (DEC-20260903-005 changed it once), and a
+    // month already uploaded should not have to be uploaded again to be
+    // judged by it. Only days nobody has answered are re-judged.
+    const recheck = useMutation({
+        mutationFn: () => recheckAttendanceImport(id),
+        onSuccess: (result) => {
+            setPersonSaid(
+                result.changed === 0
+                    ? `Re-checked ${result.checked} days, nothing changed.`
+                    : `Re-checked ${result.checked} days, ${result.changed} re-judged by hours worked.`,
+            );
+            invalidate();
+        },
+        onError: (error) => showApiError(error, 'Could not re-check the hours'),
+    });
+
     const apply = useMutation({
         mutationFn: () => applyAttendanceImport(id),
         onSuccess: invalidate,
@@ -318,6 +337,16 @@ export default function AttendanceImportPage() {
                     {data ? <Typography.Text type="secondary">{`${data.employee_count} people`}</Typography.Text> : null}
                 </Space>
                 <Space wrap>
+                    {mayWrite && data?.status === 'review' ? (
+                        <Popconfirm
+                            title="Re-check every day against the hours rule"
+                            description="Eight hours is a full day, four a half. Days somebody has answered are left alone."
+                            okText="Re-check"
+                            onConfirm={() => recheck.mutate()}
+                        >
+                            <Button loading={recheck.isPending}>Re-check hours</Button>
+                        </Popconfirm>
+                    ) : null}
                     {mayWrite && data ? (
                         <Button
                             type="primary"
