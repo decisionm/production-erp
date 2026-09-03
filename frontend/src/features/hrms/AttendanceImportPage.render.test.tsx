@@ -128,7 +128,7 @@ function render(
     client.setQueryData(['hrms', 'attendance-imports', seededRun.id], seededRun);
     client.setQueryData(['hrms', 'attendance-imports', seededRun.id, 'lines', params], seeded.lines ?? page([], 0));
     client.setQueryData(
-        ['hrms', 'attendance-imports', seededRun.id, 'employees', { q: '', page: 1 }],
+        ['hrms', 'attendance-imports', seededRun.id, 'employees', { q: '', page: 1, per_page: 25 }],
         seeded.people ?? page([], 0),
     );
 
@@ -156,12 +156,16 @@ describe('AttendanceImportPage — the people view', () => {
         expect(html).toContain('Week Off');
         expect(html).toContain('ant-input-search');
         expect(html).toContain('1–20 of 59 people');
+        // Code and name are their own columns, so each sorts and reads alone.
+        expect(html).toContain('>Code<');
+        expect(html).toContain('>Name<');
     });
 
-    it('gives each person their name, their department and what they still owe', () => {
+    it('gives each person their code, their name, their department and what they still owe', () => {
         const html = render('/hrms/attendance-imports/7', {}, run(), { people: page([person()], 1) });
 
-        expect(html).toContain('TST-01 — EMPLOYEE 01');
+        expect(html).toContain('TST-01');
+        expect(html).toContain('EMPLOYEE 01');
         expect(html).toContain('Human Resource');
         expect(html).toContain('2 days');
         expect(html).toContain('Answer');
@@ -184,7 +188,8 @@ describe('AttendanceImportPage — the people view', () => {
             people: page([person({ employee_code: 'ZZZ-99', employee_name: 'NOBODY', employee_id: null, known: false, department: null })], 1),
         });
 
-        expect(html).toContain('ZZZ-99 — NOBODY');
+        expect(html).toContain('ZZZ-99');
+        expect(html).toContain('NOBODY');
         expect(html).toContain('Not in the employee master');
     });
 
@@ -192,7 +197,7 @@ describe('AttendanceImportPage — the people view', () => {
         const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
         const seeded = run();
         client.setQueryData(['hrms', 'attendance-imports', 7], seeded);
-        client.setQueryData(['hrms', 'attendance-imports', 7, 'employees', { q: '', page: 1 }], page([], 0));
+        client.setQueryData(['hrms', 'attendance-imports', 7, 'employees', { q: '', page: 1, per_page: 25 }], page([], 0));
 
         const html = renderToString(
             <QueryClientProvider client={client}>
@@ -224,7 +229,8 @@ describe('AttendanceImportPage — the day view', () => {
     it('renders an open line with its punches in words, its issue and a Correct button for a manager', () => {
         const html = render('/hrms/attendance-imports/7?view=days', {}, run(), { lines: page([line(1)], 1) });
 
-        expect(html).toContain('TST-01 — EMPLOYEE 01');
+        expect(html).toContain('TST-01');
+        expect(html).toContain('EMPLOYEE 01');
         expect(html).toContain('In 09:58, no out');
         expect(html).toContain('Fri 3 Jul');
         expect(html).toContain('In without Out');
@@ -239,7 +245,8 @@ describe('AttendanceImportPage — the day view', () => {
             ),
         });
 
-        expect(html).toContain('ZZZ-99 — NOBODY');
+        expect(html).toContain('ZZZ-99');
+        expect(html).toContain('NOBODY');
         expect(html).toContain('/hrms/employees?q=ZZZ-99');
     });
 

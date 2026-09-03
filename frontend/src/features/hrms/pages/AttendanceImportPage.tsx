@@ -178,11 +178,22 @@ export default function AttendanceImportPage() {
     const [peopleQ, setPeopleQ] = useState('');
     const [peopleQDraft, setPeopleQDraft] = useState('');
     const [peoplePage, setPeoplePage] = useState(1);
+    const [peoplePerPage, setPeoplePerPage] = useState(PEOPLE_PER_PAGE);
+
+    /**
+     * The pager hands back BOTH the page and the size. Taking only the
+     * page is what made the size chooser look broken: pick 50, the request
+     * still asked for 25, and the control snapped back on the next render.
+     */
+    const turnPeoplePage = (page: number, perPage: number) => {
+        setPeoplePage(page);
+        setPeoplePerPage(perPage);
+    };
 
     const people = useQuery({
-        queryKey: ['hrms', 'attendance-imports', id, 'employees', { q: peopleQ, page: peoplePage }],
+        queryKey: ['hrms', 'attendance-imports', id, 'employees', { q: peopleQ, page: peoplePage, per_page: peoplePerPage }],
         queryFn: () =>
-            listAttendanceImportEmployees(id, { q: peopleQ || undefined, page: peoplePage, per_page: PEOPLE_PER_PAGE }),
+            listAttendanceImportEmployees(id, { q: peopleQ || undefined, page: peoplePage, per_page: peoplePerPage }),
         enabled: Number.isFinite(id) && view === 'people',
         placeholderData: (previous) => previous,
     });
@@ -387,7 +398,7 @@ export default function AttendanceImportPage() {
                         rowKey="employee_code"
                         loading={people.isFetching}
                         dataSource={people.data?.data}
-                        pagination={serverPagination(people.data?.meta, setPeoplePage, 'people')}
+                        pagination={serverPagination(people.data?.meta, turnPeoplePage, 'people')}
                         expandable={{
                             expandedRowKeys: expanded,
                             onExpandedRowsChange: (keys) => setExpanded(keys.slice(-1) as string[]),
@@ -435,10 +446,16 @@ export default function AttendanceImportPage() {
                         }}
                         columns={[
                             {
-                                title: 'Employee',
+                                title: 'Code',
+                                dataIndex: 'employee_code',
+                                width: 110,
+                                render: (code: string) => <span style={{ whiteSpace: 'nowrap' }}>{code}</span>,
+                            },
+                            {
+                                title: 'Name',
                                 render: (_, row) => (
-                                    <Space direction="vertical" size={0}>
-                                        <span style={{ whiteSpace: 'nowrap' }}>{`${row.employee_code} — ${row.employee_name}`}</span>
+                                    <Space orientation="vertical" size={0}>
+                                        <span style={{ whiteSpace: 'nowrap' }}>{row.employee_name}</span>
                                         <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                                             {row.known ? row.department ?? '' : 'Not in the employee master'}
                                         </Typography.Text>
@@ -559,10 +576,16 @@ export default function AttendanceImportPage() {
                         locale={{ emptyText: <ListEmpty state={lines} entity="lines" empty={emptyText} /> }}
                         columns={[
                             {
-                                title: 'Employee',
+                                title: 'Code',
+                                dataIndex: 'employee_code',
+                                width: 110,
+                                render: (code: string) => <span style={{ whiteSpace: 'nowrap' }}>{code}</span>,
+                            },
+                            {
+                                title: 'Name',
                                 render: (_, row) => (
-                                    <Space direction="vertical" size={0}>
-                                        <span style={{ whiteSpace: 'nowrap' }}>{`${row.employee_code} — ${row.employee?.name ?? row.employee_name}`}</span>
+                                    <Space orientation="vertical" size={0}>
+                                        <span style={{ whiteSpace: 'nowrap' }}>{row.employee?.name ?? row.employee_name}</span>
                                         {row.issue === 'unknown_employee' && row.employee_id === null ? (
                                             <Link to={`/hrms/employees?q=${encodeURIComponent(row.employee_code)}`}>Employees</Link>
                                         ) : null}
