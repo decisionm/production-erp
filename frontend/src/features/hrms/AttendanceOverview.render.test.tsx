@@ -27,20 +27,23 @@ const person: AttendancePersonRange = {
     from: range.from,
     to: range.to,
     days: [
-        { id: 1, date: '2026-09-01', status: 'present', check_in: '2026-09-01T00:30:00+00:00', check_out: '2026-09-01T08:30:00+00:00', notes: null },
-        { id: 2, date: '2026-09-02', status: 'absent', check_in: null, check_out: null, notes: 'no punch' },
+        { id: 1, date: '2026-09-01', status: 'present', check_in: '2026-09-01T00:30:00+00:00', check_out: '2026-09-01T08:30:00+00:00', notes: null, source: 'attendance', needs_review: false },
+        { id: 2, date: '2026-09-02', status: 'absent', check_in: null, check_out: null, notes: 'no punch', source: 'attendance', needs_review: false },
+        // Read from an upload nobody has applied, and not yet answered.
+        { id: null, date: '2026-09-03', status: null, check_in: '2026-09-03T00:30:00+00:00', check_out: null, notes: null, source: 'import', needs_review: true },
     ],
-    summary: { present: 18, absent: 2, half_day: 1, on_leave: 1, recorded: 22 },
+    summary: { present: 18, absent: 2, half_day: 1, on_leave: 1, recorded: 22, week_off: 2, needs_review: 3, from_import: 5 },
 };
 
 const summary: AttendanceSummary = {
     from: range.from,
     to: range.to,
     departments: [
-        { department: 'Production Department', present: 40, absent: 5, half_day: 2, on_leave: 1, recorded: 48, employees: 12, present_percent: 85.4 },
-        { department: 'Stores Department', present: 8, absent: 0, half_day: 0, on_leave: 0, recorded: 8, employees: 2, present_percent: 100 },
+        { department: 'Production Department', present: 40, absent: 5, half_day: 2, on_leave: 1, recorded: 48, week_off: 4, needs_review: 6, from_import: 40, employees: 12, present_percent: 85.4 },
+        { department: 'Stores Department', present: 8, absent: 0, half_day: 0, on_leave: 0, recorded: 8, week_off: 0, needs_review: 0, from_import: 0, employees: 2, present_percent: 100 },
     ],
-    totals: { present: 48, absent: 5, half_day: 2, on_leave: 1, recorded: 56, employees: 14, departments: 2, present_percent: 87.5 },
+    totals: { present: 48, absent: 5, half_day: 2, on_leave: 1, recorded: 56, week_off: 4, needs_review: 6, from_import: 40, employees: 14, departments: 2, present_percent: 87.5 },
+    imports: [{ id: 1, file_name: 'july.xlsx', status: 'review', period_from: '2026-09-01', period_to: '2026-09-30' }],
     most_absent: [{ employee_id: 7, employee_code: 'SPP-40', name: 'Pandiyan', department: 'Logistics & Transportation', absent: 5 }],
 };
 
@@ -91,7 +94,7 @@ describe('PersonAttendanceCard', () => {
             client.setQueryData(['hrms', 'attendance', 'person', 11, range.from, range.to], {
                 ...person,
                 days: [],
-                summary: { present: 0, absent: 0, half_day: 0, on_leave: 0, recorded: 0 },
+                summary: { present: 0, absent: 0, half_day: 0, on_leave: 0, recorded: 0, week_off: 0, needs_review: 0, from_import: 0 },
             });
         });
 
@@ -141,7 +144,8 @@ describe('DepartmentAttendanceCard', () => {
             client.setQueryData(['hrms', 'attendance', 'summary', range.from, range.to], {
                 ...summary,
                 departments: [],
-                totals: { present: 0, absent: 0, half_day: 0, on_leave: 0, recorded: 0, employees: 0, departments: 0, present_percent: 0 },
+                totals: { present: 0, absent: 0, half_day: 0, on_leave: 0, recorded: 0, week_off: 0, needs_review: 0, from_import: 0, employees: 0, departments: 0, present_percent: 0 },
+                imports: [],
                 most_absent: [],
             });
         });

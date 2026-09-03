@@ -4,12 +4,16 @@ namespace App\Modules\HRMS\Services;
 
 use App\Modules\HRMS\Http\Requests\ListAttendanceRequest;
 use App\Modules\HRMS\Models\Attendance;
+use App\Modules\HRMS\Models\AttendanceImport;
+use App\Modules\HRMS\Models\AttendanceImportLine;
 use App\Modules\HRMS\Models\Employee;
+use App\Modules\HRMS\Models\Enums\AttendanceImportResolution;
 use App\Modules\HRMS\Models\Enums\AttendanceStatus;
 use App\Support\Lists\ListSort;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class AttendanceService
@@ -65,18 +69,47 @@ class AttendanceService
      */
     public function personRange(Employee $employee, string $from, string $to): array
     {
-        $days = Attendance::query()
-            ->where('employee_id', $employee->id)
-            ->whereBetween('date', [$from, $to])
-            ->orderBy('date')
-            ->orderBy('id')
-            ->get();
+        $rows = [];
 
-        $counted = [];
-        foreach ($days as $day) {
-            $key = $day->status->value;
-            $counted[$key] = ($counted[$key] ?? 0) + 1;
+        foreach (
+            Attendance::query()
+                ->where('employee_id', $employee->id)
+                ->whereBetween('date', [$from, $to])
+                ->get() as $day
+        ) {
+            $rows[$day->date->toDateString()] = [
+                'id' => $day->id,
+                'date' => $day->date->toDateString(),
+                'status' => $day->status->value,
+                'check_in' => $day->check_in?->toIso8601String(),
+                'check_out' => $day->check_out?->toIso8601String(),
+                'notes' => $day->notes,
+                'source' => 'attendance',
+                'needs_review' => false,
+            ];
         }
+
+        // Whatever the applied record does not cover, the UPLOAD may.
+        foreach ($this->uploadedDays($employee->id, $from, $to) as $line) {
+            $date = $line->date->toDateString();
+            $resolution = $line->resolution?->value;
+
+            $rows[$date] = [
+                'id' => null,
+                'date' => $date,
+                'status' => $resolution,
+                'check_in' => $this->instant($date, $line->resolved_check_in ?? $line->first_in),
+                'check_out' => $this->instant($date, $line->resolved_check_out ?? $line->last_out),
+                'notes' => $line->notes,
+                'source' => 'import',
+                // Not present, not absent, not anything yet — and the
+                // software does not get to pick on the reviewer's behalf.
+                'needs_review' => $resolution === null,
+            ];
+        }
+
+        ksort($rows);
+        $days = array_values($rows);
 
         return [
             'employee' => [
@@ -88,16 +121,57 @@ class AttendanceService
             ],
             'from' => $from,
             'to' => $to,
-            'days' => $days->map(static fn (Attendance $day) => [
-                'id' => $day->id,
-                'date' => $day->date->toDateString(),
-                'status' => $day->status->value,
-                'check_in' => $day->check_in?->toIso8601String(),
-                'check_out' => $day->check_out?->toIso8601String(),
-                'notes' => $day->notes,
-            ])->all(),
-            'summary' => $this->tally($counted),
+            'days' => $days,
+            'summary' => $this->tally(
+                array_count_values(array_filter(array_column($days, 'status'))),
+                needsReview: count(array_filter($days, static fn (array $day) => $day['needs_review'])),
+                fromImport: count(array_filter($days, static fn (array $day) => $day['source'] === 'import')),
+            ),
         ];
+    }
+
+    /**
+     * The uploaded days for one person that the APPLIED RECORD DOES NOT
+     * COVER — per day, not per period.
+     *
+     * Per day matters for two reasons. A month is reviewed over days, so
+     * half of it can be applied while the rest is not. And `attendances`
+     * has no week-off status, so even a fully applied month has no row for
+     * those days and the upload stays the only place that knows.
+     *
+     * @return \Illuminate\Database\Eloquent\Collection<int, AttendanceImportLine>
+     */
+    private function uploadedDays(int $employeeId, string $from, string $to)
+    {
+        return AttendanceImportLine::query()
+            ->where('employee_id', $employeeId)
+            ->whereBetween('date', [$from, $to])
+            ->whereNotExists(fn ($query) => $query
+                ->selectRaw('1')
+                ->from('attendances')
+                ->whereColumn('attendances.employee_id', 'attendance_import_lines.employee_id')
+                ->whereColumn('attendances.date', 'attendance_import_lines.date'))
+            // The newest upload of a day wins: a month re-uploaded as it goes
+            // carries the same day more than once.
+            ->orderBy('date')
+            ->orderBy('id')
+            ->get();
+    }
+
+    /**
+     * A date and the report's wall-clock time as a stored instant, so an
+     * uploaded day and an applied one read identically to the caller.
+     * `attendances` holds UTC (app.timezone), and the report prints IST.
+     */
+    private function instant(string $date, ?string $wallClock): ?string
+    {
+        if ($wallClock === null || trim($wallClock) === '') {
+            return null;
+        }
+
+        return CarbonImmutable::parse($date.' '.substr($wallClock, 0, 5), config('tally-sync.factory_timezone', 'Asia/Kolkata'))
+            ->utc()
+            ->toIso8601String();
     }
 
     /**
@@ -143,6 +217,11 @@ class AttendanceService
                 'check_in' => $this->wallClock($day['check_in'] ?? null, $zone),
                 'check_out' => $this->wallClock($day['check_out'] ?? null, $zone),
                 'notes' => $day['notes'] ?? null,
+                // Three different silences, and the sheet must not print
+                // them alike: no data at all, a day the reviewer has not
+                // answered, and a day that IS answered but not yet applied.
+                'present_in_data' => $day !== null,
+                'needs_review' => (bool) ($day['needs_review'] ?? false),
             ];
             $cursor = $cursor->addDay();
         }
@@ -156,6 +235,10 @@ class AttendanceService
             'days' => $days,
             'summary' => $range['summary'],
             'printed_at' => now($zone)->format('j M Y H:i'),
+            // A sheet printed from an upload nobody has applied is
+            // PROVISIONAL, and has to say so on the page — otherwise it
+            // circulates as the final word on somebody's month.
+            'provisional' => $range['summary']['from_import'] > 0,
         ];
     }
 
@@ -190,6 +273,8 @@ class AttendanceService
         /** @var array<string, array<string, int>> $counted */
         $counted = [];
         $factory = [];
+        $needsReview = [];
+        $fromImport = [];
         foreach ($rows as $row) {
             $name = $this->departmentName($row->department);
             $status = (string) $row->status;
@@ -197,6 +282,31 @@ class AttendanceService
 
             $counted[$name][$status] = ($counted[$name][$status] ?? 0) + $days;
             $factory[$status] = ($factory[$status] ?? 0) + $days;
+        }
+
+        // The same fallback the person read uses, in aggregate: days the
+        // applied record does not cover, taken from the upload. A line with
+        // NO EMPLOYEE is skipped — it belongs to no department, and guessing
+        // one would put somebody's day under a heading nobody chose.
+        foreach ($this->uploadedDaysByDepartment($from, $to) as $row) {
+            $name = $this->departmentName($row->department);
+            $days = (int) $row->days;
+            $fromImport[$name] = ($fromImport[$name] ?? 0) + $days;
+
+            if ($row->resolution === null) {
+                $needsReview[$name] = ($needsReview[$name] ?? 0) + $days;
+
+                continue;
+            }
+
+            $status = (string) $row->resolution;
+            $counted[$name][$status] = ($counted[$name][$status] ?? 0) + $days;
+            $factory[$status] = ($factory[$status] ?? 0) + $days;
+        }
+
+        // A department may exist only in the upload.
+        foreach (array_keys($fromImport) as $name) {
+            $counted[$name] ??= [];
         }
 
         // A head-count cannot be added up from the rows above — one person
@@ -216,7 +326,7 @@ class AttendanceService
 
         $departments = [];
         foreach ($counted as $name => $statuses) {
-            $tally = $this->tally($statuses);
+            $tally = $this->tally($statuses, $needsReview[$name] ?? 0, $fromImport[$name] ?? 0);
             $departments[] = [
                 'department' => $name,
                 ...$tally,
@@ -232,7 +342,7 @@ class AttendanceService
             static fn (array $a, array $b) => [$b['recorded'], $a['department']] <=> [$a['recorded'], $b['department']],
         );
 
-        $factoryTally = $this->tally($factory);
+        $factoryTally = $this->tally($factory, array_sum($needsReview), array_sum($fromImport));
 
         return [
             'from' => $from,
@@ -240,15 +350,82 @@ class AttendanceService
             'departments' => $departments,
             'totals' => [
                 ...$factoryTally,
-                'employees' => DB::table('attendances')
-                    ->whereBetween('date', [$from, $to])
-                    ->distinct()
-                    ->count('employee_id'),
+                'employees' => $this->peopleInRange($from, $to),
                 'departments' => count($departments),
                 'present_percent' => $this->presentPercent($factoryTally),
             ],
+            // Which uploads these numbers are partly read from, and whether
+            // anybody has applied them — so a screen can say "provisional"
+            // rather than leaving the reader to assume.
+            'imports' => $this->importsCovering($from, $to),
             'most_absent' => $this->mostAbsent($from, $to),
         ];
+    }
+
+    /**
+     * The uploaded days the applied record does not cover, grouped by
+     * department and by what the reviewer answered — `resolution` null
+     * being the days still waiting for one.
+     *
+     * A line with NO EMPLOYEE is left out: it belongs to no department, and
+     * filing it under a guessed one would put somebody's day beneath a
+     * heading nobody chose.
+     */
+    private function uploadedDaysByDepartment(string $from, string $to): Collection
+    {
+        return DB::table('attendance_import_lines as l')
+            ->join('employees', 'employees.id', '=', 'l.employee_id')
+            ->whereBetween('l.date', [$from, $to])
+            ->whereNotNull('l.employee_id')
+            ->whereNotExists(fn ($query) => $query
+                ->selectRaw('1')
+                ->from('attendances as a')
+                ->whereColumn('a.employee_id', 'l.employee_id')
+                ->whereColumn('a.date', 'l.date'))
+            ->groupBy('employees.department', 'l.resolution')
+            ->selectRaw('employees.department as department')
+            ->selectRaw('l.resolution as resolution')
+            ->selectRaw('COUNT(*) as days')
+            ->get();
+    }
+
+    /** Everybody with a day in the range, applied or merely uploaded. */
+    private function peopleInRange(string $from, string $to): int
+    {
+        $applied = DB::table('attendances')
+            ->whereBetween('date', [$from, $to])
+            ->distinct()
+            ->pluck('employee_id');
+
+        $uploaded = DB::table('attendance_import_lines')
+            ->whereBetween('date', [$from, $to])
+            ->whereNotNull('employee_id')
+            ->distinct()
+            ->pluck('employee_id');
+
+        return $applied->merge($uploaded)->unique()->count();
+    }
+
+    /**
+     * The uploads whose period touches this range, newest first.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function importsCovering(string $from, string $to): array
+    {
+        return AttendanceImport::query()
+            ->where('period_from', '<=', $to)
+            ->where('period_to', '>=', $from)
+            ->orderByDesc('id')
+            ->get()
+            ->map(static fn (AttendanceImport $import) => [
+                'id' => $import->id,
+                'file_name' => $import->file_name,
+                'status' => $import->status->value,
+                'period_from' => $import->period_from->toDateString(),
+                'period_to' => $import->period_to->toDateString(),
+            ])
+            ->all();
     }
 
     /**
@@ -298,13 +475,19 @@ class AttendanceService
      * @param  array<string, int>  $counted
      * @return array<string, int>
      */
-    private function tally(array $counted): array
+    private function tally(array $counted, int $needsReview = 0, int $fromImport = 0): array
     {
         $tally = [];
         foreach (AttendanceStatus::cases() as $status) {
             $tally[$status->value] = (int) ($counted[$status->value] ?? 0);
         }
+        // `recorded` is the four ATTENDANCE statuses and nothing else. A week
+        // off is not attendance — it is the absence of a working day — and a
+        // day nobody has answered is not attendance either.
         $tally['recorded'] = array_sum($tally);
+        $tally['week_off'] = (int) ($counted[AttendanceImportResolution::WeekOff->value] ?? 0);
+        $tally['needs_review'] = $needsReview;
+        $tally['from_import'] = $fromImport;
 
         return $tally;
     }

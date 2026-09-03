@@ -1,6 +1,6 @@
 import { PrinterOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { Button, Card, Empty, Select, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Empty, Select, Space, Table, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useMemo, useState } from 'react';
 import { downloadAttendanceSheet, getAttendancePerson, listAllEmployees } from '@/features/hrms/api';
@@ -10,21 +10,34 @@ import type { AttendanceStatus, AttendanceTally } from '@/features/hrms/types';
 import { downloadBlob } from '@/lib/csv';
 import { showApiError } from '@/lib/showApiError';
 
-const STATUS_LABELS: Record<AttendanceStatus, string> = {
+const STATUS_LABELS: Record<AttendanceStatus | 'week_off', string> = {
     present: 'Present',
     absent: 'Absent',
     half_day: 'Half Day',
     on_leave: 'On Leave',
+    week_off: 'Week Off',
 };
 
-const STATUS_COLORS: Record<AttendanceStatus, string> = {
+const STATUS_COLORS: Record<AttendanceStatus | 'week_off', string> = {
     present: 'green',
     absent: 'red',
     half_day: 'orange',
     on_leave: 'blue',
+    week_off: 'default',
 };
 
 const clock = (value: string | null): string => (value ? dayjs(value).format('HH:mm') : '—');
+
+/**
+ * Says the numbers are read from an upload nobody has applied, so nobody
+ * treats them as the final word on somebody's month.
+ */
+function provisionalLine(summary: AttendanceTally): string {
+    const days = `${summary.from_import} ${summary.from_import === 1 ? 'day' : 'days'}`;
+    const review = summary.needs_review > 0 ? ` ${summary.needs_review} still need an answer.` : '';
+
+    return `${days} read from an attendance upload that has not been applied yet.${review}`;
+}
 
 /** The four counts and the total, as tiles rather than a sentence to parse. */
 function Tally({ summary }: { summary: AttendanceTally }) {
@@ -33,8 +46,13 @@ function Tally({ summary }: { summary: AttendanceTally }) {
         { label: 'Half Day', value: summary.half_day, color: '#ef6c00' },
         { label: 'Absent', value: summary.absent, color: '#c62828' },
         { label: 'On Leave', value: summary.on_leave, color: '#1565c0' },
+        { label: 'Week Off', value: summary.week_off },
         { label: 'Days recorded', value: summary.recorded },
     ];
+
+    if (summary.needs_review > 0) {
+        tiles.splice(4, 0, { label: 'Needs review', value: summary.needs_review, color: '#b45309' });
+    }
 
     return (
         <Space wrap size="middle">
@@ -140,6 +158,14 @@ export default function PersonAttendanceCard({ range }: { range: DateRange }) {
                         </Typography.Text>
                     </Space>
 
+                    {data && data.summary.from_import > 0 ? (
+                        <Alert
+                            type="info"
+                            showIcon
+                            message={provisionalLine(data.summary)}
+                        />
+                    ) : null}
+
                     {data ? <Tally summary={data.summary} /> : null}
 
                     <Table
@@ -161,10 +187,15 @@ export default function PersonAttendanceCard({ range }: { range: DateRange }) {
                             { title: 'Day', dataIndex: 'date', render: (date: string) => dayLabel(date) },
                             {
                                 title: 'Counts as',
-                                dataIndex: 'status',
-                                render: (status: AttendanceStatus) => (
-                                    <Tag color={STATUS_COLORS[status]}>{STATUS_LABELS[status]}</Tag>
-                                ),
+                                render: (_, row) =>
+                                    row.status === null ? (
+                                        // Not present, not absent — nobody has
+                                        // answered it yet, and the screen does
+                                        // not get to pick either.
+                                        <Tag color="gold">Needs review</Tag>
+                                    ) : (
+                                        <Tag color={STATUS_COLORS[row.status]}>{STATUS_LABELS[row.status]}</Tag>
+                                    ),
                             },
                             { title: 'In', render: (_, row) => clock(row.check_in) },
                             { title: 'Out', render: (_, row) => clock(row.check_out) },

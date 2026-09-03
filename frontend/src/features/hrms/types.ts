@@ -84,23 +84,35 @@ export interface AttendancePersonRange {
     from: string;
     to: string;
     days: {
-        id: number;
+        id: number | null;
         date: string;
-        status: AttendanceStatus;
+        /** Null when the reviewer has not answered the day yet. */
+        status: AttendanceStatus | 'week_off' | null;
         check_in: string | null;
         check_out: string | null;
         notes: string | null;
+        /** Where the day came from: the applied record, or an upload. */
+        source: 'attendance' | 'import';
+        needs_review: boolean;
     }[];
     summary: AttendanceTally;
 }
 
-/** One count per status the master knows, plus what was recorded at all. */
+/**
+ * One count per status the master knows, plus the three the upload fallback
+ * adds: a week off is not attendance, an unanswered day is not yet
+ * anything, and `from_import` is how many of these days come from an upload
+ * nobody has applied.
+ */
 export interface AttendanceTally {
     present: number;
     absent: number;
     half_day: number;
     on_leave: number;
     recorded: number;
+    week_off: number;
+    needs_review: number;
+    from_import: number;
 }
 
 export interface AttendanceDepartmentRow extends AttendanceTally {
@@ -116,6 +128,14 @@ export interface AttendanceSummary {
     to: string;
     departments: AttendanceDepartmentRow[];
     totals: AttendanceTally & { employees: number; departments: number; present_percent: number };
+    /** The uploads these numbers are partly read from, and whether applied. */
+    imports: {
+        id: number;
+        file_name: string | null;
+        status: 'review' | 'applied';
+        period_from: string;
+        period_to: string;
+    }[];
     most_absent: {
         employee_id: number;
         employee_code: string;
