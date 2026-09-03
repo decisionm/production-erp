@@ -2,11 +2,34 @@
 
 namespace App\Modules\HRMS\Http\Resources;
 
+use App\Modules\HRMS\Models\Enums\AttendanceImportIssue;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 class AttendanceImportResource extends JsonResource
 {
+    /**
+     * The review chips' numbers, ONE PER ISSUE KIND, built from the enum
+     * rather than listed by hand — a hand-written list forgot the two
+     * kinds the hours rule added and hid 68 real days on live.
+     *
+     * @return array<string, int>
+     */
+    private function counts(): array
+    {
+        $counts = ['open' => (int) ($this->open_count ?? 0)];
+
+        foreach (AttendanceImportIssue::cases() as $issue) {
+            $counts[$issue->value] = (int) ($this->{$issue->value.'_count'} ?? 0);
+        }
+
+        $counts['report_changed'] = (int) ($this->report_changed_count ?? 0);
+        $counts['resolved'] = (int) ($this->resolved_count ?? 0);
+        $counts['clean'] = (int) ($this->clean_count ?? 0);
+
+        return $counts;
+    }
+
     public function toArray(Request $request): array
     {
         return [
@@ -24,15 +47,7 @@ class AttendanceImportResource extends JsonResource
             'open_count' => (int) ($this->open_count ?? 0),
             // The review chips' numbers: open issues by kind, answered
             // issues, and lines that never needed anyone.
-            'counts' => [
-                'open' => (int) ($this->open_count ?? 0),
-                'in_no_out' => (int) ($this->in_no_out_count ?? 0),
-                'out_no_in' => (int) ($this->out_no_in_count ?? 0),
-                'no_punch' => (int) ($this->no_punch_count ?? 0),
-                'unknown_employee' => (int) ($this->unknown_employee_count ?? 0),
-                'resolved' => (int) ($this->resolved_count ?? 0),
-                'clean' => (int) ($this->clean_count ?? 0),
-            ],
+            'counts' => $this->counts(),
             'uploaded_by' => $this->when($this->relationLoaded('uploader') && $this->uploader, fn () => [
                 'id' => $this->uploader->id,
                 'name' => $this->uploader->name,

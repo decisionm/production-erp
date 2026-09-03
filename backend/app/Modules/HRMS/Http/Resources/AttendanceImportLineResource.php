@@ -43,6 +43,10 @@ class AttendanceImportLineResource extends JsonResource
                 'name' => $this->resolver->name,
             ]),
             'resolved_at' => $this->resolved_at?->toIso8601String(),
+            // Set when the punch app changed its own figures for a day
+            // somebody had already answered — the answer stands, this asks
+            // for a second look.
+            'report_changed_at' => $this->report_changed_at?->toIso8601String(),
             'notes' => $this->notes,
             'applied_at' => $this->applied_at?->toIso8601String(),
         ];

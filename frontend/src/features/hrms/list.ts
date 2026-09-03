@@ -86,6 +86,7 @@ export const ATTENDANCE_IMPORT_LINE_FILTERS: readonly AttendanceImportLineFilter
     'unknown_employee',
     'hours_unclear',
     'worked_on_week_off',
+    'report_changed',
     'resolved',
     'clean',
 ];
@@ -134,6 +135,7 @@ export function lineFilterChips(
         { value: 'unknown_employee', label: `${ISSUE_LABELS.unknown_employee}${n('unknown_employee')}` },
         { value: 'hours_unclear', label: `${ISSUE_LABELS.hours_unclear}${n('hours_unclear')}` },
         { value: 'worked_on_week_off', label: `${ISSUE_LABELS.worked_on_week_off}${n('worked_on_week_off')}` },
+        { value: 'report_changed', label: `Report changed${n('report_changed')}` },
         { value: 'resolved', label: `Resolved${n('resolved')}` },
         { value: 'clean', label: `Clean${n('clean')}` },
     ];
