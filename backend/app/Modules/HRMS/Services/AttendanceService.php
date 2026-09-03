@@ -7,6 +7,7 @@ use App\Modules\HRMS\Models\Attendance;
 use App\Modules\HRMS\Models\Employee;
 use App\Modules\HRMS\Models\Enums\AttendanceStatus;
 use App\Support\Lists\ListSort;
+use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -97,6 +98,71 @@ class AttendanceService
             ])->all(),
             'summary' => $this->tally($counted),
         ];
+    }
+
+    /**
+     * ONE PERSON'S MONTH, LAID OUT FOR PAPER.
+     *
+     * Two things separate this from personRange():
+     *
+     * EVERY DAY OF THE RANGE APPEARS, recorded or not. On a screen a gap is
+     * a row that is not there; on a sheet somebody is paid against, a
+     * missing day is exactly what they would query, so it is printed and
+     * marked "not recorded" rather than left out — and never called absent,
+     * which would be asserting something nobody recorded.
+     *
+     * THE CLOCK IS SHOWN IN THE FACTORY'S OWN TIME. `attendances` stores an
+     * instant in UTC (app.timezone is UTC and must stay so); a sheet handed
+     * to somebody on the floor has to read in IST or every time on it is
+     * five and a half hours wrong.
+     *
+     * @return array<string, mixed>
+     */
+    public function monthSheet(Employee $employee, string $from, string $to): array
+    {
+        $zone = config('tally-sync.factory_timezone', 'Asia/Kolkata');
+        $range = $this->personRange($employee, $from, $to);
+
+        $recorded = [];
+        foreach ($range['days'] as $day) {
+            $recorded[$day['date']] = $day;
+        }
+
+        $days = [];
+        $cursor = CarbonImmutable::parse($from);
+        $end = CarbonImmutable::parse($to);
+        while ($cursor->lessThanOrEqualTo($end)) {
+            $date = $cursor->toDateString();
+            $day = $recorded[$date] ?? null;
+
+            $days[] = [
+                'date' => $date,
+                'label' => $cursor->format('D j'),
+                'is_sunday' => $cursor->dayOfWeek === 0,
+                'status' => $day['status'] ?? null,
+                'check_in' => $this->wallClock($day['check_in'] ?? null, $zone),
+                'check_out' => $this->wallClock($day['check_out'] ?? null, $zone),
+                'notes' => $day['notes'] ?? null,
+            ];
+            $cursor = $cursor->addDay();
+        }
+
+        return [
+            'employee' => $range['employee'],
+            'from' => $from,
+            'to' => $to,
+            'from_label' => CarbonImmutable::parse($from)->format('j M Y'),
+            'to_label' => CarbonImmutable::parse($to)->format('j M Y'),
+            'days' => $days,
+            'summary' => $range['summary'],
+            'printed_at' => now($zone)->format('j M Y H:i'),
+        ];
+    }
+
+    /** A stored UTC instant as the factory's own wall clock, or null. */
+    private function wallClock(?string $instant, string $zone): ?string
+    {
+        return $instant === null ? null : CarbonImmutable::parse($instant)->setTimezone($zone)->format('H:i');
     }
 
     /**

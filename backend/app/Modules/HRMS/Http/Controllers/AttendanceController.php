@@ -11,8 +11,10 @@ use App\Modules\HRMS\Http\Resources\AttendanceResource;
 use App\Modules\HRMS\Models\Employee;
 use App\Modules\HRMS\Services\AttendanceService;
 use App\Modules\HRMS\Services\HrmsListQuery;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\Response;
 
 class AttendanceController extends Controller
 {
@@ -39,6 +41,22 @@ class AttendanceController extends Controller
         return response()->json([
             'data' => $this->attendance->personRange($employee, $filters['from'], $filters['to']),
         ]);
+    }
+
+    /**
+     * The same month, on paper. The floor corrects attendance on paper
+     * already, so the sheet is what a supervisor hands over and gets back
+     * written on.
+     */
+    public function sheet(AttendancePersonRequest $request): Response
+    {
+        $filters = $request->validated();
+        $employee = Employee::query()->findOrFail((int) $filters['employee_id']);
+
+        $sheet = $this->attendance->monthSheet($employee, $filters['from'], $filters['to']);
+        $name = "attendance-{$employee->employee_code}-{$filters['from']}-to-{$filters['to']}.pdf";
+
+        return Pdf::loadView('pdf.attendance-month', $sheet)->download($name);
     }
 
     /**

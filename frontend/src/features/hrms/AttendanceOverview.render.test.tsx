@@ -77,6 +77,9 @@ describe('PersonAttendanceCard', () => {
         expect(html).toContain('Tue 1 Sep');
         expect(html).toContain('Wed 2 Sep');
         expect(html).toContain('no punch');
+        // The sheet is what the floor corrects on, so printing is offered
+        // beside the person rather than buried in Downloads.
+        expect(html).toContain('Print sheet');
     });
 
     it('says the period is empty for that person rather than showing a bare table', () => {

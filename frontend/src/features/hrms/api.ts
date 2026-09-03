@@ -174,6 +174,20 @@ export async function getAttendancePerson(employeeId: number, from: string, to: 
     return data.data;
 }
 
+/**
+ * The same month as a PDF to print. Asked for as a BLOB through the shared
+ * axios instance rather than opened as a link, so the session cookie goes
+ * with it and a refusal arrives as an error rather than as a broken tab.
+ */
+export async function downloadAttendanceSheet(employeeId: number, from: string, to: string): Promise<{ filename: string; blob: Blob }> {
+    const response = await api.get('/hrms/attendance/person/sheet', {
+        params: { employee_id: employeeId, from, to },
+        responseType: 'blob',
+    });
+
+    return { filename: `attendance-${from}-to-${to}.pdf`, blob: response.data as Blob };
+}
+
 /** The factory by department for one range — needs hrms.manage. */
 export async function getAttendanceSummary(from: string, to: string): Promise<AttendanceSummary> {
     const { data } = await api.get<{ data: AttendanceSummary }>('/hrms/attendance/summary', { params: { from, to } });

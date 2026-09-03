@@ -1,11 +1,14 @@
+import { PrinterOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { Card, Empty, Select, Space, Table, Tag, Typography } from 'antd';
+import { Button, Card, Empty, Select, Space, Table, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { useMemo, useState } from 'react';
-import { getAttendancePerson, listAllEmployees } from '@/features/hrms/api';
+import { downloadAttendanceSheet, getAttendancePerson, listAllEmployees } from '@/features/hrms/api';
 import type { DateRange } from '@/features/hrms/attendanceRange';
 import { dayLabel } from '@/features/hrms/attendanceReview';
 import type { AttendanceStatus, AttendanceTally } from '@/features/hrms/types';
+import { downloadBlob } from '@/lib/csv';
+import { showApiError } from '@/lib/showApiError';
 
 const STATUS_LABELS: Record<AttendanceStatus, string> = {
     present: 'Present',
@@ -80,20 +83,47 @@ export default function PersonAttendanceCard({ range }: { range: DateRange }) {
     });
     const data = person.data;
 
+    // The sheet is what the floor actually corrects on, so printing is a
+    // button beside the person rather than something buried in Downloads.
+    const [printing, setPrinting] = useState(false);
+    const print = async () => {
+        if (employeeId === null) return;
+        setPrinting(true);
+        try {
+            const file = await downloadAttendanceSheet(employeeId, range.from, range.to);
+            const code = data?.employee.employee_code ?? employeeId;
+            downloadBlob(`attendance-${code}-${range.from}-to-${range.to}.pdf`, file.blob);
+        } catch (error) {
+            showApiError(error, 'Could not print the sheet');
+        } finally {
+            setPrinting(false);
+        }
+    };
+
     return (
         <Card
             title="One person"
             extra={
-                <Select
-                    showSearch
-                    loading={employees.isFetching}
-                    style={{ minWidth: 280 }}
-                    placeholder="Pick an employee"
-                    optionFilterProp="label"
-                    value={employeeId ?? undefined}
-                    options={options}
-                    onChange={setChosen}
-                />
+                <Space wrap>
+                    <Button
+                        icon={<PrinterOutlined />}
+                        disabled={employeeId === null}
+                        loading={printing}
+                        onClick={print}
+                    >
+                        Print sheet
+                    </Button>
+                    <Select
+                        showSearch
+                        loading={employees.isFetching}
+                        style={{ minWidth: 280 }}
+                        placeholder="Pick an employee"
+                        optionFilterProp="label"
+                        value={employeeId ?? undefined}
+                        options={options}
+                        onChange={setChosen}
+                    />
+                </Space>
             }
         >
             {employeeId === null ? (
