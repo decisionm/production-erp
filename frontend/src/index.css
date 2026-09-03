@@ -246,6 +246,10 @@ body.is-resizing-sider .ant-layout {
 
 .app-header {
     border-bottom: 1px solid var(--brand-rule);
+    /* Opaque in its own right. The antd token paints it too, but the app bar
+       is what rows scroll behind — it must never be see-through, whatever a
+       component token does next. */
+    background: var(--app-surface);
 }
 
 .app-header-leading {

@@ -868,7 +868,14 @@ export default function AppLayout({ children }: PropsWithChildren) {
                         // through near-white text on a white strip.
                         position: 'sticky',
                         top: 0,
-                        zIndex: 9,
+                        /*
+                         * ABOVE the table's own sticky header, which antd
+                         * gives z-index 27. At 9 the frozen table header —
+                         * and the rows passing behind it — drew OVER the app
+                         * bar, so a row appeared beside the account menu.
+                         * Well under antd's popups and modals (1000+).
+                         */
+                        zIndex: 30,
                     }}
                 >
                     <div className="app-header-leading">

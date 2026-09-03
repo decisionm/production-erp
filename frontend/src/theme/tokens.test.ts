@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { TABLE_STICKY } from '@/lib/tableProps';
 import { FONT_FAMILY, appTheme, brand, dark } from './tokens';
 
 /**
@@ -77,6 +78,19 @@ describe('appTheme', () => {
         expect(contrast(dark.primary, dark.bg)).toBeGreaterThan(3);
         expect(contrast(dark.orange, dark.bg)).toBeGreaterThan(3);
         expect(dark.primary).not.toBe(brand.navy);
+    });
+
+    /*
+     * The regression this pins (03-Sep-2026, found on live): antd derives the
+     * Layout header's height from `controlHeight` x2, so raising controls to
+     * 38 silently made the app bar 76px while every list froze its table
+     * header at TABLE_STICKY's 64. Rows scrolled through the 12px band and
+     * appeared beside the account menu.
+     */
+    it('freezes table headers exactly at the app bar height, in both modes', () => {
+        for (const mode of ['light', 'dark'] as const) {
+            expect(appTheme(mode).components?.Layout?.headerHeight).toBe(TABLE_STICKY.offsetHeader);
+        }
     });
 
     it('keeps the semantic colours distinct from each other and from the accent', () => {
