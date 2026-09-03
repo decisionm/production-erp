@@ -479,3 +479,72 @@ body.is-resizing-sider .ant-layout {
     background: var(--brand-glass);
     vertical-align: top;
 }
+
+/* ------------------------------------------------------------------ */
+/* Shift Floor (03-Sep-2026). Motion only where it MEANS something: the  */
+/* rail of a machine that is actually running. Everything else is still. */
+/* ------------------------------------------------------------------ */
+
+/* The card's status rail carries a slow travelling light while the machine
+   runs — the way a line looks when it is going. Drawn over the card's own
+   inline-start edge, so it rides the rail the card already has. */
+.floor-card-running {
+    position: relative;
+    overflow: hidden;
+}
+
+.floor-card-running::before {
+    content: '';
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: -4px;
+    width: 4px;
+    background: linear-gradient(180deg, transparent 0%, rgba(255, 255, 255, 0.85) 45%, transparent 90%);
+    animation: floor-rail-travel 2.6s linear infinite;
+    pointer-events: none;
+}
+
+@keyframes floor-rail-travel {
+    from {
+        transform: translateY(-100%);
+    }
+    to {
+        transform: translateY(200%);
+    }
+}
+
+/* The proportional strip: one glance says what the shift looks like. */
+.floor-bar {
+    display: flex;
+    gap: 3px;
+    height: 10px;
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.floor-bar > span {
+    display: block;
+    transition: flex-grow 320ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.floor-bar > span:first-child {
+    border-start-start-radius: 999px;
+    border-end-start-radius: 999px;
+}
+
+.floor-bar > span:last-child {
+    border-start-end-radius: 999px;
+    border-end-end-radius: 999px;
+}
+
+/* A floor tablet that asked for less motion gets a still screen. */
+@media (prefers-reduced-motion: reduce) {
+    .floor-card-running::before {
+        animation: none;
+        opacity: 0.25;
+    }
+
+    .floor-bar > span {
+        transition: none;
+    }
+}
