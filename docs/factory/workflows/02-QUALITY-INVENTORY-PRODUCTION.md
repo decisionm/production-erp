@@ -221,9 +221,9 @@ separately, one at a time.
   The existing allow-same-user flag may relax it only when explicitly enabled
   for a one-person operation, never automatically because someone holds both
   roles. The system records who performed both actions.
-- **GAP:** the Plant Manager approval has no comparison against the checker
-  today; the build adds the third comparison beside the two that exist, under
-  the same flag.
+- **Built (sub-project 2):** the third four-eyes comparison is in place, proven
+  end to end through the real quality-check then approve path, with no
+  Administrator exemption.
 
 Section 4 is complete: DEC-20260902-006 to -010 cover the screen, the weight
 check, the observations, the sample count and the checker rule.
@@ -379,8 +379,10 @@ record's source.
   this purpose. The count of active products not Ready is taken on live, never
   assumed, before the switch.
 - **VERIFIED (code):** the switch, the per-check severities and the named-gap
-  strings already exist; the build is the rollout and the colour-only warning
-  check.
+  strings already exist.
+- **Pinned (sub-project 2):** `item_active` refuses and colour only warns under
+  enforcement; the shipped default is pinned in the source, so a change to it
+  fails a test. The rollout itself is still owed.
 - **GAP (from the review):** the gate has ten checks; DEC-20260902-017 lists
   eight refusals plus colour. `item_active` is a refusal in the shipped gate
   and is NOT dropped by enforcing the list: an inactive item still refuses.
@@ -403,8 +405,9 @@ record's source.
   batch whose Stock Journal cannot post, naming the cause. Same rollout as the
   readiness gate: Tally masters loaded and the preview checked against real
   batches on live first, then the switch. Fixture batches exempt.
-- **GAP (rollout, not code):** the switch exists; the live preview run and the
-  master-data corrections have not been done for this purpose.
+- **Pinned (sub-project 2):** the switch ships off, in the source as well as at
+  runtime. The live preview run and the master-data corrections are still owed
+  before it is switched on.
 
 ## 9. Completion: what a run may consume
 
@@ -417,8 +420,8 @@ record's source.
   reason and person are audited. Nothing is classified automatically. Category
   restrictions come only through a new decision once every active live item is
   categorised. Q90 closed.
-- **GAP:** the completion drawer does not show the added item's category or a
-  warning today; the refusal set and the audit already exist.
+- **Built:** the completion drawer names the added item's real category with a
+  warning tag (sub-project 2).
 
 ## 10. Start Batch: which packaging
 
@@ -429,8 +432,11 @@ record's source.
   without a default ask the supervisor at Start Batch. The choice is saved in
   the batch snapshot. No forced default. Q45 closed.
 - **VERIFIED (code):** the at-most-one-default rule, the Shift Floor question
-  on a real choice, and the snapshot already exist; the build confirms the
-  single-option auto-select and that the ask happens at Start Batch.
+  on a real choice, and the snapshot already exist.
+- **Built (sub-project 2):** the single option selects itself; a standard with
+  several packings and no default now REFUSES a start that names none, and a
+  packing that belongs to another product's standard is refused rather than
+  silently dropped.
 
 ## 11. Start Batch: an override needs a reason
 
@@ -442,8 +448,10 @@ record's source.
   reason never bypasses one. Reason, original value, selected value and person
   go to the snapshot and audit. The other nine stay reference values, Not in
   use. Q93 closed.
-- **GAP:** the override reason is recorded when given but not demanded; the
-  build makes it required and adds the reader beside the colour map.
+- **Built (sub-project 2):** the reason was already demanded under an approved
+  configuration, so it is pinned; the Factory Rules row now reads "Enforced at
+  Start Batch". A cycle time outside the configuration's or the machine's
+  bounds is now REFUSED, as the decision says, matching cavities.
 
 ## 12. Completion and approvals: variance is advisory
 
@@ -455,8 +463,9 @@ record's source.
   before signing. No automatic refusal. Both blocking settings stay disabled;
   no workbook figure is copied. Thresholds, if ever, come through a new
   decision.
-- **GAP:** the figures exist at completion; the build shows them on the Quality
-  screen and both approval screens.
+- **Built (sub-project 2):** expected, actual, variance and unaccounted kg show
+  on the Quality screen and on both approval stages; both blocking settings stay
+  off and are pinned so a changed default fails a test.
 
 ## 13. Chapter 1 leftovers recorded here
 
