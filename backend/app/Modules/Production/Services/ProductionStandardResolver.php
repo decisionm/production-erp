@@ -89,19 +89,40 @@ class ProductionStandardResolver
      * EXPLICITLY chosen incomplete id gets the same null — a stale client
      * must not do what the picker no longer offers.
      *
-     * $requireChoice (DEC-20260902-020) turns the one truly ambiguous case —
-     * several complete packagings, none default, and no id named at all —
-     * from a silent null into a 422 naming the field. It is OFF by default
-     * on purpose: BatchPreviewController, ProductStandardsWorkspaceService
-     * and SalesCostInsightService all call this method to DESCRIBE a
-     * standard (a preview, a workspace row, a cost estimate), never to
-     * gate one, and warningsFor() already tells the preview screen
-     * 'packaging_choice_required' as an advisory. Only startBatch() — the
-     * one call that actually creates the batch and freezes its packaging
-     * into the snapshot — opts in. The other two null-producing paths above
-     * (no standard; an explicit id that does not resolve) are unchanged
-     * even with $requireChoice true: this refuses exactly the case the
-     * decision names, nothing wider.
+     * $requireChoice (DEC-20260902-020) turns two silent-null cases into a
+     * 422 naming the field, because both leave a run with no real packing
+     * basis while a person believes a real choice was honoured:
+     *
+     *   - several complete packagings, none default, and no id named at
+     *     all — the supervisor never got asked;
+     *   - an id WAS named but does not belong to this run's standard at
+     *     all — a different standard's packaging, a different product's
+     *     packaging, or an id that does not exist. The supervisor (or a
+     *     stale client) believed they chose, and silently falling back to
+     *     the item master's packing would run the batch against a packing
+     *     nobody actually confirmed.
+     *
+     * It is OFF by default on purpose: BatchPreviewController,
+     * ProductStandardsWorkspaceService and SalesCostInsightService all call
+     * this method to DESCRIBE a standard (a preview, a workspace row, a
+     * cost estimate), never to gate one, and warningsFor() already tells
+     * the preview screen 'packaging_choice_required' as an advisory. Only
+     * startBatch() — the one call that actually creates the batch and
+     * freezes its packaging into the snapshot — opts in.
+     *
+     * NOT refused, even with $requireChoice true: an id that DOES belong to
+     * this standard but is incomplete (a half-stated workbook row). That is
+     * the existing, deliberately unchanged degrade — "an EXPLICITLY chosen
+     * incomplete id gets the same null" below — because the id genuinely
+     * names a real row on this product; it is missing a figure, not
+     * misdirected to a different product or a fiction. Nor is
+     * DEC-20260821-001's separate-product refusal duplicated here: that
+     * check (ShiftProductionEntryService, after this method returns) fires
+     * on a packaging that DID resolve, when the packaging row's OWN item_id
+     * conflicts with the product being run — a data-integrity problem on a
+     * row that belongs to this standard. This method's new check fires
+     * BEFORE any resolution succeeds, on an id that is not part of this
+     * standard's packagings in the first place. Different stage, no overlap.
      */
     public function resolvePackaging(?ProductionStandard $standard, ?int $packagingId = null, bool $requireChoice = false): ?ProductionStandardPackaging
     {
@@ -114,7 +135,20 @@ class ProductionStandardResolver
         );
 
         if ($packagingId !== null) {
-            return $complete->firstWhere('id', $packagingId);
+            $chosen = $complete->firstWhere('id', $packagingId);
+
+            if ($chosen !== null) {
+                return $chosen;
+            }
+
+            if ($requireChoice && ! $standard->packagings->contains('id', $packagingId)) {
+                throw ValidationException::withMessages([
+                    'production_standard_packaging_id' => 'That packing does not belong to this product.',
+                ]);
+            }
+
+            // Belongs to this standard but incomplete — unchanged fallback.
+            return null;
         }
 
         if ($complete->count() === 1) {
