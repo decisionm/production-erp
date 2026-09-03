@@ -489,6 +489,117 @@ class StoreToProductionAndBackTest extends TestCase
 
     // ---- helpers -----------------------------------------------------------
 
+    /**
+     * THE LIVE DEAD END, 04-Sep-2026. Pet Resin stood 360 Kgs. in
+     * DISPATCH-BAY — a retired location no picker offers, whose stock
+     * PreviewWarehouseStockRecovery withholds because moving it would credit
+     * the Store with material the factory never received. soleStoreHolding()
+     * counted it as a second store, so an unambiguous handover was refused
+     * with "name the one it is coming out of" on a screen that has no field
+     * to name one. The storekeeper could not issue resin at all.
+     *
+     * A retired location is not a store you can pick, so it is not an
+     * ambiguity either.
+     */
+    public function test_stock_stranded_in_a_retired_location_is_not_a_second_store(): void
+    {
+        $retired = Warehouse::create(['code' => 'DISPATCH-BAY', 'name' => 'Dispatch Bay', 'is_active' => false]);
+
+        $this->stockIn($this->store, '500');
+        $this->stockIn($retired, '360');
+
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'received_by' => $this->supervisor->id,
+            'lines' => [['item_id' => $this->resin->id, 'quantity' => '100']],
+        ])->assertCreated();
+
+        // Out of the live store, and the stranded row is untouched.
+        $this->assertSame('400.0000', $this->balance($this->store));
+        $this->assertSame('100.0000', $this->balance($this->wip));
+        $this->assertSame('360.0000', $this->balance($retired));
+    }
+
+    /** A soft-deleted store is no more pickable than a deactivated one. */
+    public function test_stock_in_a_deleted_store_is_not_a_second_store(): void
+    {
+        $deleted = Warehouse::create(['code' => 'OLD-RM', 'name' => 'Old Store', 'is_active' => true]);
+        $this->stockIn($this->store, '500');
+        $this->stockIn($deleted, '75');
+        $deleted->delete();
+
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'received_by' => $this->supervisor->id,
+            'lines' => [['item_id' => $this->resin->id, 'quantity' => '100']],
+        ])->assertCreated();
+
+        $this->assertSame('400.0000', $this->balance($this->store));
+    }
+
+    /** Two REAL stores is a real question — and the refusal names them. */
+    public function test_two_live_stores_are_refused_by_name(): void
+    {
+        $second = Warehouse::create(['code' => 'RM-STORE-2', 'name' => 'Second Store', 'is_active' => true]);
+        $this->stockIn($this->store, '500');
+        $this->stockIn($second, '200');
+
+        $response = $this->postJson('/api/v1/inventory/store-issues', [
+            'received_by' => $this->supervisor->id,
+            'lines' => [['item_id' => $this->resin->id, 'quantity' => '100']],
+        ])->assertStatus(422);
+
+        $message = json_encode($response->json('errors'));
+        $this->assertStringContainsString('more than one store', $message);
+        // Named, not counted — the whole point of the message.
+        $this->assertStringContainsString('Store', $message);
+        $this->assertStringContainsString('Second Store', $message);
+
+        // Refused means nothing moved.
+        $this->assertSame('500.0000', $this->balance($this->store));
+        $this->assertSame('0.0000', $this->balance($this->wip));
+    }
+
+    /**
+     * Held ONLY in a retired location gets its own answer. Saying "no store
+     * holds this" would send the storekeeper hunting for material the balance
+     * says is there, and saying "already in Production/WIP" — which the old
+     * branch would now have said — is simply untrue.
+     */
+    public function test_material_only_in_a_retired_location_says_where_it_is_standing(): void
+    {
+        $retired = Warehouse::create(['code' => 'DISPATCH-BAY', 'name' => 'Dispatch Bay', 'is_active' => false]);
+        $this->stockIn($retired, '360');
+
+        $response = $this->postJson('/api/v1/inventory/store-issues', [
+            'received_by' => $this->supervisor->id,
+            'lines' => [['item_id' => $this->resin->id, 'quantity' => '100']],
+        ])->assertStatus(422);
+
+        $message = json_encode($response->json('errors'));
+        $this->assertStringContainsString('Dispatch Bay', $message);
+        $this->assertStringContainsString('no longer offers stock for issue', $message);
+        $this->assertStringNotContainsString('Production/WIP location', $message);
+    }
+
+    /** Naming the store explicitly still overrides all of it. */
+    public function test_naming_the_store_is_still_honoured(): void
+    {
+        $second = Warehouse::create(['code' => 'RM-STORE-2', 'name' => 'Second Store', 'is_active' => true]);
+        $this->stockIn($this->store, '500');
+        $this->stockIn($second, '200');
+
+        $this->postJson('/api/v1/inventory/store-issues', [
+            'received_by' => $this->supervisor->id,
+            'lines' => [[
+                'item_id' => $this->resin->id,
+                'quantity' => '100',
+                'from_warehouse_id' => $second->id,
+            ]],
+        ])->assertCreated();
+
+        $this->assertSame('500.0000', $this->balance($this->store));
+        $this->assertSame('100.0000', $this->balance($second));
+    }
+
     private function userWith(array $permissions): User
     {
         $user = User::factory()->create(['is_active' => true]);
