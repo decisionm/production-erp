@@ -12,6 +12,7 @@ import {
 } from '@/features/quality/api';
 import { ListNoMatch } from '@/features/quality/components/ListNoMatch';
 import { returnedTagText } from '@/features/quality/returnedByQuality';
+import { downtimeLines, runSummary, scrapLines, scrapSummary } from '@/features/production/batchQualityDetail';
 import { consumptionSummary } from '@/features/production/consumptionSummary';
 import { grossProducedPieces, readQuantity } from '@/features/production/types';
 import {
@@ -269,6 +270,24 @@ export default function ProductionQcPage() {
                         render: (_, row) => fmtPcs(grossProducedPieces(row)),
                     },
                     {
+                        // NOT SORTABLE, and neither is Rejection below. Both are
+                        // computed per row in `metrics`, not stored columns, so
+                        // the server cannot order the whole queue by them — and
+                        // sorting only the loaded page would state an order for
+                        // rows it has never seen.
+                        title: 'Lumps (kg)',
+                        align: 'right',
+                        render: (_, row) => fmtKg(row.metrics?.lumps_kg),
+                    },
+                    {
+                        // Production's own figure. Quality's is what the check
+                        // drawer is for, and is null on every row in this queue
+                        // by definition — the queue IS the unchecked batches.
+                        title: 'Rejection (kg)',
+                        align: 'right',
+                        render: (_, row) => fmtKg(row.metrics?.rejection_kg_production ?? row.quantity_rejection_kg),
+                    },
+                    {
                         // `shift_production_entries` has no completed_at column,
                         // and created_at is when START Batch opened the row — a
                         // different and misleading instant. So this is the
@@ -336,6 +355,57 @@ export default function ProductionQcPage() {
                     refreshQueues();
                 }}
             />
+        </>
+    );
+}
+
+/**
+ * What the batch made besides good bottles, and who made it — the figures the
+ * desk used to have to leave this screen to find.
+ *
+ * Every one is already on the queue's own payload: paginate() eager-loads the
+ * operator, the shift, the scraps and the downtime events, and `metrics` is
+ * computed on the resource for every row. So this block costs no request and
+ * no query; it renders what the page was already being handed and throwing
+ * away.
+ *
+ * Shown on BOTH drawers on purpose. The two decisions this desk makes — record
+ * the count, or send it back — are made from the same evidence, and a checker
+ * who can see heavy lumps only after choosing "Check" has already chosen.
+ */
+function BatchEvidence({ row }: { row: BatchQualityQueueRow }) {
+    const stoppages = downtimeLines(row);
+    const scraps = scrapLines(row);
+
+    return (
+        <>
+            <Descriptions column={2} size="small" bordered title="Scrap">
+                {scrapSummary(row).map((r) => (
+                    <Descriptions.Item key={r.label} label={r.label}>{r.value}</Descriptions.Item>
+                ))}
+            </Descriptions>
+
+            {scraps.length > 0 && (
+                <Descriptions column={2} size="small" bordered title="Scrap recorded">
+                    {scraps.map((r, i) => (
+                        <Descriptions.Item key={`${r.label}-${i}`} label={r.label}>{r.value}</Descriptions.Item>
+                    ))}
+                </Descriptions>
+            )}
+
+            <Descriptions column={2} size="small" bordered title="Run">
+                {runSummary(row).map((r) => (
+                    <Descriptions.Item key={r.label} label={r.label}>{r.value}</Descriptions.Item>
+                ))}
+            </Descriptions>
+
+            {stoppages.length > 0 && (
+                <Descriptions column={2} size="small" bordered title="Stoppages">
+                    {stoppages.map((r, i) => (
+                        <Descriptions.Item key={`${r.label}-${i}`} label={r.label}>{r.value}</Descriptions.Item>
+                    ))}
+                </Descriptions>
+            )}
         </>
     );
 }
@@ -424,6 +494,8 @@ function ReturnToProductionDrawer({
                             <strong>{fmtPcs(grossProducedPieces(row))}</strong> pcs
                         </Descriptions.Item>
                     </Descriptions>
+
+                    <BatchEvidence row={row} />
 
                     <div>
                         <Typography.Text strong>
@@ -607,6 +679,8 @@ function QualityCheckDrawer({
                             <Descriptions.Item key={r.label} label={r.label}>{r.value}</Descriptions.Item>
                         ))}
                     </Descriptions>
+
+                    <BatchEvidence row={row} />
 
                     <div>
                         <Typography.Text strong>Reviewed (pcs)</Typography.Text>

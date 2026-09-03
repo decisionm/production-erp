@@ -2934,3 +2934,62 @@ said is out of scope (DEC-20260902-052).
 
 **Blocks:** nothing on the floor. It decides whether the Invoices page and the two
 receivable figures built on it stay in the product. *Open since 2026-09-03.*
+
+## Q97 · A batch started against the wrong product, found at the quality check: how is it corrected, if at all?
+
+Raised by the quality desk (03-Sep-2026): "in the sent back from quality they
+need to change the product itself sometimes but those options not available."
+
+**The option is genuinely absent, and not by refusal.** There is no validation
+rule anywhere that rejects an attempt to change a started batch's product. The
+field simply is not accepted after Start Batch:
+
+- `item_id` is set once, at `StartBatchRequest.php:37`.
+- `routes/api.php:1289` registers `shift-production-entries` with `index` and
+  `store` only. There is no `update`, `PUT` or `PATCH` route on a batch.
+- The quality desk's send-back takes ONE field, a reason
+  (`ReturnBatchToProductionRequest.php:30-34`; its own comment says "the reason
+  is required, and it is the whole payload").
+- The floor's own correction adds only `amendment_reason` and
+  `material_kg_confirmed` (`AmendBatchRequest.php`). `item_id` appears in
+  `CompleteBatchRequest` three times — consumption lines, substitutes, closing
+  day bin — and never for the produced product.
+
+So today the only two routes are `cancel`, which is refused once anything has
+been produced, and an edit made directly against the database.
+
+**Why this is not a small field to add.** The completion has already booked
+finished-goods stock against the wrong item, and the amendment path reverses
+stock against the FROZEN `finished_item_id` on purpose
+(`ShiftProductionEntryService.php:1611-1615`): "if the packaging's identity was
+edited between the completion and this amendment, re-resolving would take the
+stock back off the wrong item." A product correction has to travel through that
+reversal, not around it. The batch may also already carry a Tally sync entry.
+
+**This is a DIFFERENT question from re-grading rejects,** which the owner has
+already answered and which nothing here reopens: rejected bottles are scrap and
+are never reworked ("no — go to the rejected scrap only", quoted at
+`ProductionQcPage.tsx:38`), per FC-02, DEC-20260902-006 and DEC-20260902-042.
+
+What only the factory can settle:
+
+A. **No correction path — cancel and restart.** The batch is voided and re-run
+   against the right product. Cleanest books, and it means deciding whether
+   `cancel` may be allowed after production exists (today it is refused), and
+   what happens to the material already consumed.
+B. **A product correction on send-back.** Quality names the correct product
+   when returning the batch; the return reverses the finished goods booked
+   against the wrong item, and the floor re-completes against the corrected
+   one, inside the existing Supervisor → PM → Accounts chain and the existing
+   four-eyes rule (FC-05).
+C. **Leave it to a recorded manual correction** by whoever holds database
+   access, with the reason written down.
+
+Recommendation: B, because it is what the desk is actually asking for and it
+keeps the correction inside the approval chain rather than beside it. But it
+needs the owner to answer two things first: how often this really happens, and
+what must happen when the wrongly-identified batch has already reached Tally.
+
+**Blocks:** the quality desk's stated need. Nothing on the floor today — the
+batch can still be checked or sent back; only its product is uncorrectable.
+*Open since 2026-09-03.*
