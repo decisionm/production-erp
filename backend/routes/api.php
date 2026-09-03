@@ -985,6 +985,7 @@ Route::prefix('v1')->group(function () {
             // shadow it; `summary` asks for hrms.manage inside the
             // controller, since module:hrms lets any GET through on .view.
             Route::get('attendance/person', [AttendanceController::class, 'person']);
+            Route::get('attendance/person/sheet', [AttendanceController::class, 'sheet']);
             Route::get('attendance/summary', [AttendanceController::class, 'summary']);
             Route::post('attendance/mark', [AttendanceController::class, 'mark']);
 
