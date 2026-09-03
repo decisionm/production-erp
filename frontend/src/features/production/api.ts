@@ -2164,24 +2164,32 @@ export async function withdrawPackingMaterialMapping(id: number): Promise<void> 
  */
 
 /**
- * The whole queue, priority order, OPEN requests only — no `statuses` given.
+ * THE LOOK-BACK READ the owner asked for on 03-Sep-2026: any mix of the four
+ * statuses, answered newest first rather than queue order — a produced or
+ * cancelled request has no priority to sort by any more. Read-only: nothing
+ * this function can send starts, cancels or completes a request.
  *
- * DELIBERATELY UNPAGINATED, server-side — reorder renumbers the WHOLE queue,
- * and nobody should be asked to reorder a list they can see one page of. So
- * the payload is a bare `{data}` with no `meta`, and the table it feeds turns
- * pagination off rather than reading a page count that is not there.
+ * PAGINATED, server-side (the 28-Aug standing rule) — `withStatuses()` used
+ * to be a bare `->get()`, so ticking all four statuses returned every
+ * production request the factory had ever raised in one payload. `page` and
+ * `perPage` are optional; the server defaults `per_page` on its own
+ * (ProductionRequestService::PER_PAGE_DEFAULT) when it is omitted.
  *
- * `statuses` is the LOOK-BACK read the owner asked for on 03-Sep-2026: any
- * mix of the four statuses, answered newest first rather than in queue order
- * — a produced or cancelled request has no priority to sort by any more.
- * Read-only, the same as the default call: nothing this function can send
- * starts, cancels or completes a request.
+ * The QUEUE's own read (`readProductionQueue` below) stays UNPAGINATED, on
+ * purpose, server-side — reorder renumbers the WHOLE queue, and nobody
+ * should be asked to reorder a list they can see one page of. This function
+ * is never that read: `statuses` is required, and the caller must always
+ * pass at least one.
  */
-export async function listProductionRequests(statuses?: ProductionRequestStatus[]): Promise<ProductionRequest[]> {
-    const { data } = await api.get<{ data: ProductionRequest[] }>('/production/requests', {
-        params: statuses && statuses.length > 0 ? { status: statuses } : undefined,
+export async function listProductionRequests(
+    statuses: ProductionRequestStatus[],
+    page?: number,
+    perPage?: number,
+): Promise<Paginated<ProductionRequest>> {
+    const { data } = await api.get<Paginated<ProductionRequest>>('/production/requests', {
+        params: { status: statuses, page, per_page: perPage },
     });
-    return data.data;
+    return data;
 }
 
 /**
@@ -2199,7 +2207,10 @@ export async function listProductionRequests(statuses?: ProductionRequestStatus[
  * gated by the module that owns them (the floor-visibility owner question). Absent means "not yours to read";
  * `planning.cannot_estimate` means "nobody knows". See ProductionQueueRow.
  *
- * Unpaginated like its sibling — `{data, basis}`, no `meta`.
+ * UNPAGINATED — `{data, basis}`, no `meta` — because reorder() renumbers the
+ * WHOLE queue in one call. `listProductionRequests` above, the look-back
+ * read, is paginated; this one is not, and for a different reason than
+ * "nobody built it yet".
  */
 export async function readProductionQueue(): Promise<ProductionQueueRead> {
     const { data } = await api.get<ProductionQueueRead>('/production/queue');

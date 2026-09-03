@@ -9,6 +9,7 @@ use App\Modules\Production\Models\ProductionRequest;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\SalesOrder;
 use App\Modules\Sales\Models\SalesOrderLine;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
@@ -50,6 +51,11 @@ class ProductionRequestService
     /** Relations both `queue()` and `withStatuses()` load — one list, one place. */
     private const WITH = ['item:id,sku,name,display_name,uom', 'salesOrderLine.salesOrder.customer:id,name', 'requestedBy:id,name'];
 
+    /** `withStatuses()`'s page size — the 28-Aug standing rule (every list ships a real pager). */
+    public const PER_PAGE_DEFAULT = 25;
+
+    public const PER_PAGE_MAX = 100;
+
     // ---- reads ------------------------------------------------------------
 
     /**
@@ -84,22 +90,28 @@ class ProductionRequestService
      * finished row reads as read-only (start/cancel/reorder all false for a
      * final status), but nothing on this path writes.
      *
+     * PAGINATED (the 28-Aug standing rule: every list ships server-side
+     * search AND a real pager) — this used to be a bare `->get()`, so ticking
+     * all four statuses returned every production request the factory had
+     * ever raised in one unpaginated payload. `queue()` above stays
+     * unpaginated on purpose (reorder() renumbers the WHOLE queue); this read
+     * never reorders, so it inherits none of that justification.
+     *
      * @param  array<int, ProductionRequestStatus>  $statuses
-     * @return Collection<int, ProductionRequest>
      */
-    public function withStatuses(array $statuses): Collection
+    public function withStatuses(array $statuses, int $perPage = self::PER_PAGE_DEFAULT): LengthAwarePaginator
     {
-        $requests = ProductionRequest::query()
+        $page = ProductionRequest::query()
             ->with(self::WITH)
             ->whereIn('status', array_map(fn (ProductionRequestStatus $s) => $s->value, $statuses))
             ->orderByDesc('id')
-            ->get();
+            ->paginate($perPage);
 
-        foreach ($requests as $request) {
+        foreach ($page->items() as $request) {
             $this->decorate($request);
         }
 
-        return $requests;
+        return $page;
     }
 
     /** The open request on a line, if there is one — the queue row's `request`. */

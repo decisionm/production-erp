@@ -51,7 +51,11 @@ class ProductionRequestController extends Controller
      * `status[]=produced&status[]=cancelled` (or any mix of the four) is
      * the LOOK-BACK read instead, newest first, via withStatuses() — a
      * different reader, never the queue's own ordering, and read-only: this
-     * action still has no write in it.
+     * action still has no write in it. PAGINATED (the 28-Aug standing rule:
+     * every list ships server-side search AND a real pager) — `per_page`
+     * defaults to ProductionRequestService::PER_PAGE_DEFAULT and is capped
+     * at PER_PAGE_MAX by the request's own validation; `page` is read by
+     * the paginator off the same request.
      */
     public function index(ListProductionRequestsRequest $request): AnonymousResourceCollection
     {
@@ -62,10 +66,10 @@ class ProductionRequestController extends Controller
         }
 
         return ProductionRequestResource::collection(
-            $this->requests->withStatuses(array_map(
-                fn (string $status) => ProductionRequestStatus::from($status),
-                $statuses,
-            )),
+            $this->requests->withStatuses(
+                array_map(fn (string $status) => ProductionRequestStatus::from($status), $statuses),
+                (int) ($request->validated('per_page') ?? ProductionRequestService::PER_PAGE_DEFAULT),
+            ),
         );
     }
 
