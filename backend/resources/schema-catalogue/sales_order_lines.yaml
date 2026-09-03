@@ -1,0 +1,77 @@
+table: sales_order_lines
+module: sales
+label: 'Sales Order Lines'
+purpose: 'One row is one finished-good item on a sales order: the quantity ordered, its agreed sale rate, how much has been dispatched so far, and the Quality sign-off that must precede dispatch. Like its parent order it moves no stock itself.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Row id'
+  -
+    name: sales_order_id
+    type: integer
+    meaning: 'The sales order this line belongs to'
+    references: sales_orders.id
+  -
+    name: item_id
+    type: integer
+    meaning: 'The finished-good item ordered'
+    references: items.id
+  -
+    name: quantity
+    type: decimal
+    meaning: "Quantity ordered, in the item's unit of measure"
+  -
+    name: unit_price
+    type: decimal
+    meaning: 'Agreed sale rate per unit (INR)'
+    sensitive: rates
+  -
+    name: quantity_delivered
+    type: decimal
+    meaning: 'Quantity dispatched so far across all deliveries of this line; equals quantity when the line is complete'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+  -
+    name: quality_approved_at
+    type: datetime
+    nullable: true
+    meaning: 'When Quality approved the held stock for dispatch; null = not yet approved'
+  -
+    name: quality_approved_by
+    type: integer
+    nullable: true
+    meaning: 'Quality user who approved the line for dispatch'
+    references: users.id
+  -
+    name: quality_approved_quantity
+    type: decimal
+    nullable: true
+    meaning: 'Quantity Quality signed for; dispatch may not exceed it (DEC-20260831-006)'
+  -
+    name: quality_approval_note
+    type: string
+    nullable: true
+    meaning: 'Free-text note recorded with the quality approval'
+joins:
+  - 'sales_order_lines.quality_approved_by = users.id'
+  - 'sales_order_lines.sales_order_id = sales_orders.id'
+  - 'sales_order_lines.item_id = items.id'
+keywords:
+  - 'order line'
+  - 'so line'
+  - 'ordered quantity'
+  - 'pending dispatch'
+  - 'quality approval'
+questions:
+  - 'Which order lines are quality-approved but not yet fully dispatched?'
+  - 'What is the total quantity of each product on open sales orders?'
+  - 'Which order lines are still waiting for quality approval?'

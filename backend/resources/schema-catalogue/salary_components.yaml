@@ -1,0 +1,63 @@
+table: salary_components
+module: payroll
+label: 'Salary Components'
+purpose: 'The building blocks of a salary — Basic, HRA, PF, ESI, allowances — each marked as an earning or a deduction and as a fixed amount or a percentage of basic.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'row id'
+  -
+    name: code
+    type: string
+    meaning: 'short unique code (e.g. BASIC, HRA, PF)'
+  -
+    name: name
+    type: string
+    meaning: 'component name shown on payslips'
+  -
+    name: type
+    type: string
+    meaning: "'earning' or 'deduction'"
+  -
+    name: calculation_type
+    type: string
+    meaning: "'fixed_amount' (amount entered per employee) or 'percentage_of_basic' (computed from the Basic line)"
+  -
+    name: percentage
+    type: decimal
+    nullable: true
+    meaning: 'percent of basic used when calculation_type is percentage_of_basic'
+    sensitive: pay
+  -
+    name: is_active
+    type: integer
+    meaning: '1 = usable in new salary structures; 0 = retired'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'when the row was created in the ERP'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'when the row was last edited'
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+    meaning: 'when the component was soft-deleted (null = still live); deleted rows are hidden from lists'
+joins: {}
+keywords:
+  - 'salary component'
+  - 'pay head'
+  - basic
+  - HRA
+  - PF
+  - ESI
+  - allowance
+  - 'deduction head'
+questions:
+  - 'Which salary components are deductions?'
+  - 'What percentage of basic is used for HRA?'

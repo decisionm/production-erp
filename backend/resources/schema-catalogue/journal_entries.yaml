@@ -1,0 +1,54 @@
+table: journal_entries
+module: finance
+label: 'Journal Entries'
+purpose: "One manual accounting journal entry in the ERP's own ledger (draft until posted). Its debit/credit lines are in journal_entry_lines; a posted entry is queued to Tally as a Journal voucher."
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key; the journal number'
+  -
+    name: entry_date
+    type: date
+    meaning: 'Accounting date of the entry'
+  -
+    name: reference
+    type: string
+    nullable: true
+    meaning: 'Free-text reference (document or voucher number)'
+  -
+    name: memo
+    type: string
+    nullable: true
+    meaning: 'Narration describing the entry'
+  -
+    name: status
+    type: string
+    meaning: 'Lifecycle state: draft (editable) or posted (final, sent to Tally)'
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User who created the entry (users)'
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the entry was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the entry was last changed'
+joins:
+  - 'journal_entries.created_by = users.id'
+keywords:
+  - journal
+  - 'journal entry'
+  - jv
+  - 'manual entry'
+  - 'posted journal'
+questions:
+  - 'Which journal entries are still in draft?'
+  - 'How many journals were posted last month?'

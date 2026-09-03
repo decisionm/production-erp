@@ -1,0 +1,93 @@
+table: store_issues
+module: inventory
+label: 'Store Issues'
+purpose: 'One row is one store issue: the recorded handover of material from the store to production, against a material request or a verbal ask (the header). The items are on store_issue_lines and the scanned bags on store_issue_bag_scans.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: issue_number
+    type: string
+    meaning: 'Issue number, SI-000001 style, unique'
+  -
+    name: material_request_id
+    type: integer
+    nullable: true
+    meaning: 'Material request the issue fulfils (material_requests.id, no FK); null when issued against a verbal ask'
+  -
+    name: status
+    type: string
+    meaning: 'issued | partially_returned | returned | completed | cancelled'
+  -
+    name: issued_by
+    type: integer
+    meaning: 'Store hand who made the issue (users.id)'
+    references: users.id
+  -
+    name: received_by
+    type: integer
+    nullable: true
+    meaning: 'Production hand who received it (users.id)'
+    references: users.id
+  -
+    name: issued_at
+    type: datetime
+    meaning: 'When the handover happened'
+  -
+    name: closed_at
+    type: datetime
+    nullable: true
+    meaning: 'When the issue was closed'
+  -
+    name: closed_by
+    type: integer
+    nullable: true
+    meaning: 'User who closed it (users.id)'
+    references: users.id
+  -
+    name: cancellation_reason
+    type: string
+    nullable: true
+    meaning: 'Why the issue was cancelled'
+  -
+    name: notes
+    type: string
+    nullable: true
+    meaning: 'Free-text note'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last updated'
+  -
+    name: issue_key
+    type: string
+    nullable: true
+    meaning: 'Client idempotency key that stops a double-submit creating two issues; null on issues before Aug-2026'
+  -
+    name: issue_payload_hash
+    type: string
+    nullable: true
+    meaning: 'SHA-256 of the submitted payload; a retry with the same key but different data is refused'
+joins:
+  - 'store_issues.closed_by = users.id'
+  - 'store_issues.received_by = users.id'
+  - 'store_issues.issued_by = users.id'
+  - 'store_issues.material_request_id = material_requests.id'
+keywords:
+  - 'store issue'
+  - issue
+  - handover
+  - 'issued to production'
+  - 'SI number'
+  - 'material issue'
+questions:
+  - 'How many store issues were made today?'
+  - 'Which store issues still have material not returned?'

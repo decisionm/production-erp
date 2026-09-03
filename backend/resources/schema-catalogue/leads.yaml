@@ -1,0 +1,78 @@
+table: leads
+module: crm
+label: Leads
+purpose: 'One row is a prospective customer (a sales enquiry) being worked by the CRM before it becomes a customer. The factory keeps enquiries and CRM out of scope and hidden (DEC-20260902-052), so this table is expected to be empty on the live instance.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Row id'
+  -
+    name: name
+    type: string
+    meaning: "Contact person's name"
+  -
+    name: email
+    type: string
+    nullable: true
+    meaning: 'Contact email'
+    sensitive: personal
+  -
+    name: phone
+    type: string
+    nullable: true
+    meaning: 'Contact phone number'
+    sensitive: personal
+  -
+    name: company
+    type: string
+    nullable: true
+    meaning: 'Company the contact represents'
+  -
+    name: source
+    type: string
+    nullable: true
+    meaning: 'Free text - where the lead came from (referral, website, exhibition, etc.)'
+  -
+    name: status
+    type: string
+    meaning: 'Lead state: new, contacted, qualified, disqualified, converted'
+  -
+    name: notes
+    type: string
+    nullable: true
+    meaning: 'Free-text notes on the lead'
+  -
+    name: assigned_to
+    type: integer
+    nullable: true
+    meaning: 'Salesperson (user) responsible for the lead'
+    references: users.id
+  -
+    name: converted_customer_id
+    type: integer
+    nullable: true
+    meaning: 'The customer created when the lead was converted; null until then'
+    references: customers.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'leads.converted_customer_id = customers.id'
+  - 'leads.assigned_to = users.id'
+keywords:
+  - lead
+  - enquiry
+  - prospect
+  - inquiry
+  - 'potential customer'
+questions:
+  - 'How many leads were converted to customers this quarter?'
+  - 'Which leads are assigned to each salesperson and what is their status?'

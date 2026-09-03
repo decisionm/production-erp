@@ -1,0 +1,166 @@
+table: production_configurations
+module: production
+label: 'Machine Production Configurations'
+purpose: 'One row is the controlling production standard for one machine + product (+ mould + colour): unit weight, cycle time and cavities with their permitted ranges, an optional BOM, and an approval lifecycle. Imported rows start as draft and must be approved by a person before a batch is judged against them.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: work_center_id
+    type: integer
+    meaning: 'The machine this configuration applies to -> work_centers'
+    references: work_centers.id
+  -
+    name: item_id
+    type: integer
+    meaning: 'The product made under this configuration -> items'
+    references: items.id
+  -
+    name: mold_id
+    type: integer
+    nullable: true
+    meaning: 'The mould used -> molds'
+    references: molds.id
+  -
+    name: colour
+    type: string
+    nullable: true
+    meaning: 'Bottle colour this configuration is for (e.g. Amber, Clear)'
+  -
+    name: unit_weight_grams
+    type: decimal
+    nullable: true
+    meaning: 'Weight of one piece in grams'
+  -
+    name: default_cycle_time
+    type: decimal
+    nullable: true
+    meaning: 'Standard cycle time in seconds'
+  -
+    name: cycle_time_min
+    type: decimal
+    nullable: true
+    meaning: 'Lowest permitted cycle time in seconds'
+  -
+    name: cycle_time_max
+    type: decimal
+    nullable: true
+    meaning: 'Highest permitted cycle time in seconds'
+  -
+    name: default_cavities
+    type: integer
+    nullable: true
+    meaning: 'Standard number of mould cavities'
+  -
+    name: cavities_min
+    type: integer
+    nullable: true
+    meaning: 'Lowest permitted cavity count'
+  -
+    name: cavities_max
+    type: integer
+    nullable: true
+    meaning: 'Highest permitted cavity count'
+  -
+    name: permitted_cavities
+    type: string
+    nullable: true
+    meaning: 'JSON list of the exact cavity counts allowed'
+  -
+    name: bom_id
+    type: integer
+    nullable: true
+    meaning: 'Recipe (bill of material) linked to this configuration -> boms; null = no recipe'
+    references: boms.id
+  -
+    name: status
+    type: string
+    meaning: 'Lifecycle: draft (imported/unconfirmed), approved (in force), inactive (retired)'
+  -
+    name: effective_from
+    type: date
+    nullable: true
+    meaning: 'Date the configuration takes effect'
+  -
+    name: effective_to
+    type: date
+    nullable: true
+    meaning: 'Date the configuration stops applying; null = open-ended'
+  -
+    name: approved_by
+    type: integer
+    nullable: true
+    meaning: 'User who approved it -> users'
+    references: users.id
+  -
+    name: approved_at
+    type: datetime
+    nullable: true
+    meaning: 'When it was approved'
+  -
+    name: source
+    type: string
+    nullable: true
+    meaning: 'Where the row came from: the factory workbook import or a manual entry'
+  -
+    name: source_reference
+    type: string
+    nullable: true
+    meaning: 'Workbook row/mapping id the row was imported from'
+  -
+    name: confirmation_status
+    type: string
+    nullable: true
+    meaning: "The factory's own confirmation wording, verbatim (e.g. To Confirm)"
+  -
+    name: notes
+    type: string
+    nullable: true
+    meaning: 'Free-text notes'
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User who created the row -> users; null = import'
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+    meaning: 'Soft-delete (archive) timestamp; null = live'
+  -
+    name: updated_by
+    type: integer
+    nullable: true
+    meaning: 'User who last edited the row -> users'
+    references: users.id
+joins:
+  - 'production_configurations.updated_by = users.id'
+  - 'production_configurations.work_center_id = work_centers.id'
+  - 'production_configurations.item_id = items.id'
+  - 'production_configurations.mold_id = molds.id'
+  - 'production_configurations.bom_id = boms.id'
+  - 'production_configurations.approved_by = users.id'
+  - 'production_configurations.created_by = users.id'
+keywords:
+  - configuration
+  - 'machine standard'
+  - 'cycle time'
+  - cavities
+  - mould
+  - 'machine product mapping'
+questions:
+  - 'Which products are approved to run on machine 4?'
+  - 'What is the standard cycle time and cavity count for each product per machine?'

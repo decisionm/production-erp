@@ -1,0 +1,52 @@
+table: boms
+module: production
+label: 'Bills of Material'
+purpose: 'One row is a bill of material (recipe) for a finished or semi-finished item: the header naming which item it makes and which version it is. The component lines live in bom_lines.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: item_id
+    type: integer
+    meaning: 'The item this BOM produces (finished or semi-finished good) -> items'
+    references: items.id
+  -
+    name: name
+    type: string
+    meaning: 'Human name of the BOM'
+  -
+    name: version
+    type: string
+    meaning: 'Version label of this BOM; an item may have several versions (unique per item + version), default "1"'
+  -
+    name: is_active
+    type: integer
+    meaning: '1 = usable for new work orders, 0 = retired'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+    meaning: 'Soft-delete timestamp; NULL means not deleted'
+joins:
+  - 'boms.item_id = items.id'
+keywords:
+  - bom
+  - 'bill of material'
+  - recipe
+  - components
+  - formula
+questions:
+  - 'Which items have an active BOM?'
+  - 'How many BOM versions does this item have?'

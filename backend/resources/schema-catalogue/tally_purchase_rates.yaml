@@ -1,0 +1,147 @@
+table: tally_purchase_rates
+module: procurement
+label: 'Tally Purchase Rates'
+purpose: 'One line of a Purchase Order or Purchase invoice voucher read out of the factory Tally Day Book: which party, which stock item, at what rate per unit and with what GST on that date. A read-only mirror used for the purchase-rate lookup; nothing is posted from it.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: voucher_guid
+    type: string
+    meaning: 'Tally GUID of the voucher; with line_index it identifies the line on re-pull'
+  -
+    name: line_index
+    type: integer
+    meaning: 'Position of this line within the voucher'
+  -
+    name: voucher_type
+    type: string
+    meaning: 'Kind of Tally voucher: purchase_order or purchase_invoice'
+  -
+    name: voucher_number
+    type: string
+    nullable: true
+    meaning: 'Voucher number as in Tally'
+  -
+    name: voucher_reference
+    type: string
+    nullable: true
+    meaning: 'Reference field of the voucher (e.g. supplier invoice number)'
+  -
+    name: voucher_date
+    type: date
+    meaning: 'Voucher date in Tally'
+  -
+    name: party_ledger_name
+    type: string
+    meaning: 'The supplier as named in Tally (PARTYLEDGERNAME); links to ledgers.name / vendors.tally_ledger_name at read time'
+    sensitive: supplier-identity
+  -
+    name: party_gstin
+    type: string
+    nullable: true
+    meaning: 'GSTIN of the party as on the voucher'
+    sensitive: supplier-identity
+  -
+    name: stock_item_name
+    type: string
+    meaning: 'The stock item as named in Tally'
+  -
+    name: tally_stock_item_guid
+    type: string
+    nullable: true
+    meaning: 'Tally GUID of the stock item when it matched the item mirror (items.tally_stock_item_guid); NULL when no match'
+  -
+    name: rate_value
+    type: decimal
+    meaning: 'Purchase rate on the line (the number part of e.g. 674.000/Kgs)'
+    sensitive: rates
+  -
+    name: rate_unit
+    type: string
+    nullable: true
+    meaning: 'The unit the rate is per (e.g. Kgs); the rate is never used without it'
+  -
+    name: quantity
+    type: decimal
+    nullable: true
+    meaning: 'Quantity on the voucher line'
+  -
+    name: quantity_unit
+    type: string
+    nullable: true
+    meaning: 'Unit of the quantity'
+  -
+    name: amount
+    type: decimal
+    nullable: true
+    meaning: 'Line amount on the voucher'
+    sensitive: rates
+  -
+    name: cgst_rate
+    type: decimal
+    nullable: true
+    meaning: 'CGST percentage the line carried on that date'
+    sensitive: rates
+  -
+    name: sgst_rate
+    type: decimal
+    nullable: true
+    meaning: 'SGST percentage the line carried on that date'
+    sensitive: rates
+  -
+    name: igst_rate
+    type: decimal
+    nullable: true
+    meaning: 'IGST percentage the line carried on that date'
+    sensitive: rates
+  -
+    name: cess_rate
+    type: decimal
+    nullable: true
+    meaning: 'Cess percentage the line carried'
+    sensitive: rates
+  -
+    name: hsn_code
+    type: string
+    nullable: true
+    meaning: 'HSN code on the line'
+  -
+    name: purchase_ledger_name
+    type: string
+    nullable: true
+    meaning: 'The factory purchase ledger the line was booked to in Tally (local vs interstate, per rate)'
+  -
+    name: tally_company
+    type: string
+    nullable: true
+    meaning: 'Tally company the voucher was read from'
+  -
+    name: tally_synced_at
+    type: datetime
+    meaning: 'When the Day Book pull that wrote this row ran'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was first created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last re-pulled'
+joins:
+  - 'tally_purchase_rates.party_ledger_name = ledgers.name'
+  - 'tally_purchase_rates.tally_stock_item_guid = items.tally_stock_item_guid'
+keywords:
+  - 'purchase rate'
+  - 'last purchase price'
+  - 'tally purchase'
+  - 'rate history'
+  - 'what did we pay'
+  - 'day book'
+questions:
+  - 'What was the last purchase rate for each resin grade and from whom?'
+  - 'How has the purchase rate of an item moved over the last six months?'

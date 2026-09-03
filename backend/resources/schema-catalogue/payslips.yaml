@@ -1,0 +1,58 @@
+table: payslips
+module: payroll
+label: Payslips
+purpose: 'One row per employee per payroll run: the gross earnings, total deductions and net pay for that month. The component lines are in payslip_lines.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'row id'
+  -
+    name: payroll_run_id
+    type: integer
+    meaning: 'the monthly payroll run this payslip belongs to (payroll_runs)'
+    references: payroll_runs.id
+  -
+    name: employee_id
+    type: integer
+    meaning: 'the employee paid (employees)'
+    references: employees.id
+  -
+    name: gross_earnings
+    type: decimal
+    meaning: 'sum of all earning lines for the month'
+    sensitive: pay
+  -
+    name: total_deductions
+    type: decimal
+    meaning: 'sum of all deduction lines (PF, ESI, etc.)'
+    sensitive: pay
+  -
+    name: net_pay
+    type: decimal
+    meaning: 'take-home amount: gross earnings minus total deductions'
+    sensitive: pay
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'when the payslip was generated'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'when the row was last edited'
+joins:
+  - 'payslips.employee_id = employees.id'
+  - 'payslips.payroll_run_id = payroll_runs.id'
+keywords:
+  - payslip
+  - 'salary slip'
+  - 'net pay'
+  - 'take home'
+  - 'gross salary'
+  - 'monthly salary'
+  - wages
+questions:
+  - 'What was the total net pay for August?'
+  - 'Who received the highest salary last month?'

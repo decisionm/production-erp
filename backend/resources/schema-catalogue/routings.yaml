@@ -1,0 +1,47 @@
+table: routings
+module: production
+label: Routings
+purpose: 'One row is a routing for an item: the header of the ordered list of operations (work-center steps) needed to make it. The steps live in routing_operations.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: item_id
+    type: integer
+    meaning: 'The item this routing describes how to make -> items'
+    references: items.id
+  -
+    name: name
+    type: string
+    meaning: 'Human name of the routing'
+  -
+    name: is_active
+    type: integer
+    meaning: '1 = usable for new work orders, 0 = retired'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+    meaning: 'Soft-delete timestamp; NULL means not deleted'
+joins:
+  - 'routings.item_id = items.id'
+keywords:
+  - routing
+  - 'process route'
+  - operations
+  - 'work center sequence'
+  - 'process steps'
+questions:
+  - 'Which items have an active routing?'

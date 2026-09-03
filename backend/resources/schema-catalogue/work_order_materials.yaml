@@ -1,0 +1,49 @@
+table: work_order_materials
+module: production
+label: 'Work Order Materials'
+purpose: 'One row is one component required by a work order: how much of the component the BOM says is needed for the planned quantity, and how much has actually been issued from stock.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: work_order_id
+    type: integer
+    meaning: 'The work order this material line belongs to -> work_orders'
+    references: work_orders.id
+  -
+    name: component_item_id
+    type: integer
+    meaning: 'The component item required -> items'
+    references: items.id
+  -
+    name: quantity_required
+    type: decimal
+    meaning: "BOM quantity_per x work order quantity_planned, in the component item's unit of measure"
+  -
+    name: quantity_issued
+    type: decimal
+    meaning: 'Quantity actually issued from the warehouse at release (0 while draft)'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'work_order_materials.component_item_id = items.id'
+  - 'work_order_materials.work_order_id = work_orders.id'
+keywords:
+  - 'material requirement'
+  - 'material issue'
+  - 'work order material'
+  - component
+  - 'issued quantity'
+questions:
+  - 'Which materials were issued for this work order?'
+  - 'How much of each raw material do open work orders require?'

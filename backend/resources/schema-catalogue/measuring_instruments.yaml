@@ -1,0 +1,66 @@
+table: measuring_instruments
+module: quality
+label: 'Measuring Instruments'
+purpose: 'One row is one measuring instrument (weighing scale, vernier, gauge) with where it is kept and its calibration schedule.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: code
+    type: string
+    meaning: 'Instrument code, unique'
+  -
+    name: name
+    type: string
+    meaning: 'Instrument name'
+  -
+    name: location
+    type: string
+    nullable: true
+    meaning: 'Where the instrument is kept'
+  -
+    name: calibration_frequency_days
+    type: integer
+    meaning: 'Days between calibrations'
+  -
+    name: last_calibrated_date
+    type: date
+    nullable: true
+    meaning: 'Date of the last calibration'
+  -
+    name: next_calibration_due
+    type: date
+    meaning: 'Date the next calibration is due'
+  -
+    name: status
+    type: string
+    meaning: 'active | retired'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last updated'
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+    meaning: 'Soft-delete timestamp; null means the row is live'
+joins:
+  - 'calibration_records.measuring_instrument_id = measuring_instruments.id'
+keywords:
+  - instrument
+  - gauge
+  - 'calibration due'
+  - measuring
+  - vernier
+  - 'weighing scale'
+questions:
+  - 'Which instruments are due for calibration this month?'
+  - 'Which instruments are overdue?'

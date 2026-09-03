@@ -1,0 +1,85 @@
+table: store_issue_bag_scans
+module: inventory
+label: 'Store Issue Bag Scans'
+purpose: 'One row is one bag scanned out of the store on a store issue: which bag and lot, how many kg, who handed it over and who received it.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: store_issue_id
+    type: integer
+    meaning: 'Store issue the scan belongs to (store_issues.id)'
+    references: store_issues.id
+  -
+    name: store_issue_line_id
+    type: integer
+    meaning: 'Issue line the bag was scanned against (store_issue_lines.id)'
+    references: store_issue_lines.id
+  -
+    name: material_request_line_id
+    type: integer
+    nullable: true
+    meaning: 'Request line the scan fulfils (material_request_lines.id, no FK); null for a verbal ask'
+  -
+    name: material_bag_id
+    type: integer
+    meaning: 'Bag scanned (material_bags.id)'
+    references: material_bags.id
+  -
+    name: material_lot_id
+    type: integer
+    meaning: 'Lot the bag belongs to (material_lots.id)'
+    references: material_lots.id
+  -
+    name: quantity_kg
+    type: decimal
+    meaning: 'Kilograms handed over from this bag'
+  -
+    name: issued_by
+    type: integer
+    meaning: 'Store hand who scanned the bag out (users.id)'
+    references: users.id
+  -
+    name: received_by
+    type: integer
+    nullable: true
+    meaning: 'Production hand who received it (users.id)'
+    references: users.id
+  -
+    name: scanned_at
+    type: datetime
+    meaning: 'When the bag was scanned'
+  -
+    name: notes
+    type: string
+    nullable: true
+    meaning: 'Free-text note'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last updated'
+joins:
+  - 'store_issue_bag_scans.received_by = users.id'
+  - 'store_issue_bag_scans.issued_by = users.id'
+  - 'store_issue_bag_scans.material_lot_id = material_lots.id'
+  - 'store_issue_bag_scans.material_bag_id = material_bags.id'
+  - 'store_issue_bag_scans.store_issue_line_id = store_issue_lines.id'
+  - 'store_issue_bag_scans.store_issue_id = store_issues.id'
+  - 'store_issue_bag_scans.material_request_line_id = material_request_lines.id'
+keywords:
+  - 'bag scan'
+  - 'barcode scan'
+  - 'issued bag'
+  - 'handover scan'
+  - 'scanned bag'
+questions:
+  - 'Which bags were issued to production today?'
+  - 'How many kg were scanned out on a store issue?'

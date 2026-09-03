@@ -1,0 +1,61 @@
+table: supplier_bill_lines
+module: procurement
+label: 'Supplier Bill Lines'
+purpose: 'One item line on a supplier bill as printed: the item, billed quantity, rate and amount, optionally tied to the goods-receipt line it bills. Its parent is supplier_bills.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: supplier_bill_id
+    type: integer
+    meaning: 'The bill this line belongs to (supplier_bills)'
+    references: supplier_bills.id
+  -
+    name: goods_receipt_note_line_id
+    type: integer
+    nullable: true
+    meaning: 'The receipt line this bill line charges for, if matched (goods_receipt_note_lines)'
+    references: goods_receipt_note_lines.id
+  -
+    name: item_id
+    type: integer
+    meaning: 'The item billed (items)'
+    references: items.id
+  -
+    name: quantity
+    type: decimal
+    meaning: 'Quantity billed, in the item unit'
+  -
+    name: rate
+    type: decimal
+    meaning: 'Rate per unit as printed on the bill'
+    sensitive: rates
+  -
+    name: amount
+    type: decimal
+    meaning: 'Line amount as printed on the bill (may differ from quantity x rate by vendor rounding)'
+    sensitive: rates
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the line was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the line was last changed'
+joins:
+  - 'supplier_bill_lines.item_id = items.id'
+  - 'supplier_bill_lines.goods_receipt_note_line_id = goods_receipt_note_lines.id'
+  - 'supplier_bill_lines.supplier_bill_id = supplier_bills.id'
+keywords:
+  - 'bill line'
+  - 'billed quantity'
+  - 'invoice line'
+  - 'billed rate'
+questions:
+  - 'What rate were we billed for resin on each supplier bill this year?'
+  - 'Which receipt lines have not been billed yet?'

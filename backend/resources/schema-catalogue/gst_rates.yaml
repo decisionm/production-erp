@@ -1,0 +1,52 @@
+table: gst_rates
+module: compliance
+label: 'GST Rates'
+purpose: 'One row per HSN (goods) or SAC (services) code with the GST rate percent that applies to it.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'row id'
+  -
+    name: hsn_sac_code
+    type: string
+    meaning: 'the HSN or SAC code (unique)'
+  -
+    name: description
+    type: string
+    nullable: true
+    meaning: 'what the code covers'
+  -
+    name: rate_percent
+    type: decimal
+    meaning: 'total GST percentage for the code (e.g. 18.00)'
+  -
+    name: is_active
+    type: integer
+    meaning: '1 = in use; 0 = retired'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'when the row was created in the ERP'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'when the row was last edited'
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+    meaning: 'when the rate was soft-deleted (null = still live); deleted rows are hidden from lists'
+joins: {}
+keywords:
+  - 'GST rate'
+  - HSN
+  - SAC
+  - 'tax rate'
+  - 'GST percentage'
+  - 'tax slab'
+questions:
+  - 'What GST rate applies to a given HSN code?'
+  - 'Which HSN codes are at 18 percent?'

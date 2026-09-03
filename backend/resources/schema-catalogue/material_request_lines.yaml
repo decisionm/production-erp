@@ -1,0 +1,70 @@
+table: material_request_lines
+module: inventory
+label: 'Material Request Lines'
+purpose: 'One row is one material asked for on a production material request: the item, the quantity asked of the store, and the running total the store has issued against it.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: material_request_id
+    type: integer
+    meaning: 'Request header this line belongs to (material_requests.id)'
+    references: material_requests.id
+  -
+    name: item_id
+    type: integer
+    meaning: 'Material requested (items.id)'
+    references: items.id
+  -
+    name: quantity
+    type: decimal
+    meaning: 'Quantity asked of the store, in uom'
+  -
+    name: uom
+    type: string
+    nullable: true
+    meaning: "Snapshot of the item's unit at request time; null when the item carries none"
+  -
+    name: issued_quantity
+    type: decimal
+    meaning: 'Running total the store has handed over against this line, in uom; written only by the store-issue flow'
+  -
+    name: notes
+    type: string
+    nullable: true
+    meaning: 'Free-text note from the requester'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last updated'
+  -
+    name: required_quantity
+    type: decimal
+    nullable: true
+    meaning: 'Total the floor needed before netting off what already stood in Production/WIP; null when not recorded (requests before DEC-20260831-001)'
+  -
+    name: available_in_production
+    type: decimal
+    nullable: true
+    meaning: 'Quantity of this material already standing in Production/WIP when the request was raised, netted off; null when not recorded'
+joins:
+  - 'material_request_lines.item_id = items.id'
+  - 'material_request_lines.material_request_id = material_requests.id'
+keywords:
+  - 'request line'
+  - 'material needed'
+  - 'requested quantity'
+  - 'issued quantity'
+  - outstanding
+  - 'indent line'
+questions:
+  - 'Which request lines are still not fully issued?'
+  - 'How much resin was requested this week?'

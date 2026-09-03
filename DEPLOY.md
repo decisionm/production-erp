@@ -63,6 +63,12 @@ Watch it in the repo's **Actions** tab. To redeploy without a code change, use *
 `.env`, `storage/`, `vendor/`, `bootstrap/cache/` — excluded from rsync; `.env` and DB creds live only on the server.
 
 ### Database changes
+
+Any migration that adds, drops or renames a column must be followed by
+`php artisan schema:catalogue:generate` (run locally, commit the changed
+files under `backend/resources/schema-catalogue/`) and a `meaning:` line for
+each new column. `CatalogueCompletenessTest` fails CI until the files match
+the schema again; hand-written annotations survive the regeneration.
 Just add a normal Laravel migration and push — `deploy.sh` runs `migrate --force` automatically. ⚠️ On MySQL, custom composite index/unique names must stay **≤ 64 characters** (dev uses SQLite, which doesn't enforce this — name them explicitly, e.g. `$table->unique([...], 'short_name')`).
 
 ### Live data corrections (never a migration, always dry-run first)
@@ -247,6 +253,19 @@ SESSION_SECURE_COOKIE=true
 SANCTUM_STATEFUL_DOMAINS=erp.actech.co.in
 QUEUE_CONNECTION=database
 CACHE_STORE=database
+
+# Ask ERP (natural-language queries, PR "Ask ERP: schema catalogue…").
+# Without the key the page answers "Ask ERP is not configured on this
+# server" and nothing else breaks. The model id is the one exact string;
+# effort is the cost lever (low | medium | high).
+ANTHROPIC_API_KEY=<from the Anthropic console>
+ASK_ERP_MODEL=claude-opus-5
+ASK_ERP_EFFORT=medium
+# Optional: run the guarded SELECTs as a SELECT-only MySQL user. Create the
+# user in hPanel with SELECT on the ERP database only, then:
+# ASK_ERP_DB_CONNECTION=ask_erp
+# ASK_ERP_DB_USERNAME=<select-only user>
+# ASK_ERP_DB_PASSWORD=<its password>
 ```
 
 ### (Optional) scheduler cron

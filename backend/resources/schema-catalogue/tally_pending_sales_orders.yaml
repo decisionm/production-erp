@@ -1,0 +1,90 @@
+table: tally_pending_sales_orders
+module: sales
+label: 'Tally Pending Sales Orders'
+purpose: "One row is one sales-order line the factory still has to ship, as Tally's Sales Order Outstanding report holds it as at a date. A mirror of Tally written only by the receivables sync; each pull replaces the whole set for a company, so the table is always the latest closing position, not a history."
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Row id'
+  -
+    name: party_ledger_name
+    type: string
+    meaning: 'Customer (sundry debtor) ledger name as it reads in Tally'
+  -
+    name: party_ledger_guid
+    type: string
+    nullable: true
+    meaning: 'Tally GUID of the party ledger; joins to customers.tally_ledger_guid when the customer has been linked'
+  -
+    name: order_reference
+    type: string
+    nullable: true
+    meaning: "The customer's own purchase-order number as Tally holds it (same fact as sales_orders.customer_po_reference)"
+  -
+    name: order_date
+    type: date
+    nullable: true
+    meaning: 'Order date in Tally'
+  -
+    name: due_date
+    type: date
+    nullable: true
+    meaning: 'Delivery due date in Tally'
+  -
+    name: stock_item_name
+    type: string
+    nullable: true
+    meaning: 'Tally stock item name of the product still to ship'
+  -
+    name: pending_quantity
+    type: decimal
+    nullable: true
+    meaning: 'Quantity still to ship, in quantity_unit; null when Tally states only a value'
+  -
+    name: quantity_unit
+    type: string
+    nullable: true
+    meaning: 'Tally unit of the pending quantity (e.g. Nos, Ctn)'
+  -
+    name: pending_amount
+    type: decimal
+    nullable: true
+    meaning: 'Value still to ship (INR) as Tally states it; never derived from quantity'
+    sensitive: rates
+  -
+    name: as_of
+    type: date
+    meaning: 'The date the outstanding position was reported as at'
+  -
+    name: tally_company
+    type: string
+    nullable: true
+    meaning: 'Tally company the report was exported from'
+  -
+    name: tally_synced_at
+    type: datetime
+    meaning: 'When the sync wrote this row'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'tally_pending_sales_orders.party_ledger_guid = customers.tally_ledger_guid'
+keywords:
+  - 'pending order'
+  - 'tally sales order'
+  - 'order outstanding'
+  - 'yet to ship'
+  - backlog
+  - 'open order'
+questions:
+  - 'Which customers have the largest pending order quantity in Tally?'
+  - 'What products are still to be shipped according to Tally?'
+  - 'Which pending orders in Tally are past their due date?'

@@ -1,0 +1,56 @@
+table: shift_scraps
+module: production
+label: 'Batch Scrap Lines'
+purpose: 'One row is one scrap/rejection line recorded against a batch: either rejected finished goods (defective bottles, counted in Nos and/or weighed in kg) or lumps (purge and burnt material, non-recoverable, in kg), with an optional reason.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: shift_production_entry_id
+    type: integer
+    meaning: 'The batch the scrap came from -> shift_production_entries'
+    references: shift_production_entries.id
+  -
+    name: type
+    type: string
+    meaning: 'Kind of scrap: rejected_finished_good (defective bottles off the batch) or lumps (purge/burnt material, not recoverable)'
+  -
+    name: quantity_nos
+    type: decimal
+    nullable: true
+    meaning: 'Scrap count in pieces (Nos); mainly for rejected finished goods'
+  -
+    name: quantity_kg
+    type: decimal
+    nullable: true
+    meaning: 'Scrap weight in kg'
+  -
+    name: scrap_reason_id
+    type: integer
+    nullable: true
+    meaning: 'Why it was scrapped -> scrap_reasons'
+    references: scrap_reasons.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'shift_scraps.scrap_reason_id = scrap_reasons.id'
+  - 'shift_scraps.shift_production_entry_id = shift_production_entries.id'
+keywords:
+  - scrap
+  - rejection
+  - wastage
+  - lumps
+  - 'rejected bottles'
+questions:
+  - 'How many kg of scrap did each machine generate last month?'
+  - 'What are the top scrap reasons this week?'

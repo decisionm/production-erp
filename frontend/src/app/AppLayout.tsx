@@ -5,6 +5,7 @@ import {
     BulbOutlined,
     ContactsOutlined,
     DashboardOutlined,
+    MessageOutlined,
     FileProtectOutlined,
     InboxOutlined,
     KeyOutlined,
@@ -136,6 +137,10 @@ interface NavGroup {
  */
 export const allNavItems: readonly NavGroup[] = [
     { key: '/', icon: <DashboardOutlined />, label: 'Dashboard' },
+    // Ask ERP sits right after Dashboard: it is not a module's screen but a
+    // window onto every module the login may already view. Gated on its own
+    // `assistant` permission so the owner grants it per role.
+    { key: '/ask-erp', icon: <MessageOutlined />, label: 'Ask ERP', module: 'assistant' },
     {
         key: 'procurement',
         icon: <ShopOutlined />,

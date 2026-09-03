@@ -1,0 +1,65 @@
+table: production_requests
+module: production
+label: 'Production Requests'
+purpose: "One row is a production request: the shortfall on one sales order line that the finished-goods store cannot cover, handed to the floor as a prioritised worklist item (PR-{id}). Paperwork only — it creates no batch and holds no link to one; produced is judged on the order line's coverage."
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key; quoted as PR-{id}'
+  -
+    name: sales_order_line_id
+    type: integer
+    meaning: 'The sales order line this request serves -> sales_order_lines'
+    references: sales_order_lines.id
+  -
+    name: item_id
+    type: integer
+    meaning: 'Product to be made (copied from the line) -> items'
+    references: items.id
+  -
+    name: quantity
+    type: decimal
+    meaning: 'Pieces (Nos) the floor is asked to make'
+  -
+    name: priority
+    type: integer
+    meaning: 'Queue position, dense and 1-based (1 = first); rewritten when the queue is reordered'
+  -
+    name: status
+    type: string
+    meaning: 'queued (on the worklist), in_progress (someone picked it up), produced (order line covered), cancelled (withdrawn with a reason)'
+  -
+    name: requested_by
+    type: integer
+    nullable: true
+    meaning: 'User who raised the request -> users'
+    references: users.id
+  -
+    name: cancelled_reason
+    type: string
+    nullable: true
+    meaning: 'Why the request was cancelled'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the request was raised'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'production_requests.requested_by = users.id'
+  - 'production_requests.item_id = items.id'
+  - 'production_requests.sales_order_line_id = sales_order_lines.id'
+keywords:
+  - 'production request'
+  - 'production queue'
+  - worklist
+  - shortfall
+  - 'to be produced'
+questions:
+  - 'What is on the production queue right now, in priority order?'
+  - 'Which sales orders are waiting on production?'

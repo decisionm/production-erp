@@ -1,0 +1,41 @@
+table: vendor_classifications
+module: procurement
+label: 'Vendor Classifications'
+purpose: 'One classification a person has given a vendor — a vendor carries one or more of five (resin, packaging, consumables/spares/tooling, service, other), so this is a child table of vendors, not a column (DEC-20260902-026). The Tally ledger group may only propose a classification; nothing writes a row here automatically.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'primary key'
+  -
+    name: vendor_id
+    type: integer
+    meaning: 'the vendor this classification belongs to'
+    references: vendors.id
+  -
+    name: classification
+    type: string
+    meaning: 'resin | packaging | consumables_spares_tooling | service | other — what the factory buys from this vendor; the Vendors tab and the PO picker show resin and packaging (material) vendors by default'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'when the classification was given'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'last change'
+joins:
+  - 'vendor_classifications.vendor_id = vendors.id'
+keywords:
+  - 'vendor type'
+  - 'supplier category'
+  - 'material vendor'
+  - 'resin supplier'
+  - 'packaging supplier'
+  - 'service vendor'
+  - classification
+questions:
+  - 'How many vendors are classified as resin suppliers?'
+  - 'Which vendors have no classification yet?'

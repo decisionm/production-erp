@@ -1,0 +1,79 @@
+table: shift_material_consumptions
+module: production
+label: 'Batch Material Consumptions'
+purpose: 'One row is one material consumed by one batch, in kg, as weighed and submitted by the supervisor at Complete Batch: resin, masterbatch, cartons, trays, pouch film. These lines are what the stock ledger issues and what the Tally stock journal posts as OUT lines. An added line (a material the run was not planned on) carries its reason, its authoriser and, if it stood in for something, the item it replaced.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: shift_production_entry_id
+    type: integer
+    meaning: 'The batch that consumed the material -> shift_production_entries'
+    references: shift_production_entries.id
+  -
+    name: item_id
+    type: integer
+    meaning: 'The material consumed (resin, masterbatch, carton, tray, film...) -> items'
+    references: items.id
+  -
+    name: warehouse_id
+    type: integer
+    meaning: 'Store the material was issued from (RM store / packing store), not the FG store -> warehouses'
+    references: warehouses.id
+  -
+    name: quantity_issued_kg
+    type: decimal
+    meaning: 'Quantity consumed, in kg for weighed materials (the column name is historical: packing items such as cartons are stored here in their own unit, Nos)'
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User who submitted the completion that wrote this line -> users'
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the line was written (= the batch completion instant)'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+  -
+    name: added_reason
+    type: string
+    nullable: true
+    meaning: 'Why a line the run was not planned on was added (e.g. 100 ml cartons ran out); null on every ordinary/expected line'
+  -
+    name: added_by
+    type: integer
+    nullable: true
+    meaning: 'User who authorised the added line -> users; null on ordinary lines'
+    references: users.id
+  -
+    name: substitutes_item_id
+    type: integer
+    nullable: true
+    meaning: 'For a substitution: the planned material this line stood in for -> items; null when not a substitution'
+    references: items.id
+joins:
+  - 'shift_material_consumptions.substitutes_item_id = items.id'
+  - 'shift_material_consumptions.created_by = users.id'
+  - 'shift_material_consumptions.warehouse_id = warehouses.id'
+  - 'shift_material_consumptions.item_id = items.id'
+  - 'shift_material_consumptions.shift_production_entry_id = shift_production_entries.id'
+  - 'shift_material_consumptions.added_by = users.id'
+keywords:
+  - consumption
+  - 'resin used'
+  - 'material used'
+  - masterbatch
+  - 'tally stock journal'
+  - substitute
+questions:
+  - 'How many kg of resin were consumed per machine last week?'
+  - 'Which batches used a substitute material this month?'
+  - 'How much masterbatch was consumed per product yesterday?'

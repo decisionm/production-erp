@@ -1,0 +1,99 @@
+table: subcontract_orders
+module: production
+label: 'Subcontract Orders'
+purpose: 'One row is a subcontract (job-work) order: materials are sent from our warehouse to an outside vendor who processes them and returns a planned quantity of one item. Sending materials issues them from stock; receiving the output brings it into stock at (materials cost + service cost) per unit received.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: vendor_id
+    type: integer
+    meaning: 'The subcontractor (job-work vendor) doing the processing -> vendors'
+    references: vendors.id
+    sensitive: supplier-identity
+  -
+    name: item_id
+    type: integer
+    meaning: 'The processed item the vendor returns -> items'
+    references: items.id
+  -
+    name: bom_id
+    type: integer
+    nullable: true
+    meaning: 'BOM used to derive which materials to send; NULL if no materials are sent -> boms'
+    references: boms.id
+  -
+    name: warehouse_id
+    type: integer
+    meaning: 'Warehouse the materials are sent from and the processed item is received into -> warehouses'
+    references: warehouses.id
+  -
+    name: quantity_planned
+    type: decimal
+    meaning: "Quantity of the item the vendor is expected to return, in the item's unit of measure"
+  -
+    name: quantity_received
+    type: decimal
+    meaning: 'Quantity actually received back from the vendor (0 until completed)'
+  -
+    name: materials_cost
+    type: decimal
+    meaning: 'Value of materials sent to the vendor (quantity x stock unit cost)'
+    sensitive: rates
+  -
+    name: service_cost
+    type: decimal
+    meaning: "The subcontractor's processing fee (job-work charge), entered at receipt"
+    sensitive: rates
+  -
+    name: total_cost
+    type: decimal
+    meaning: 'materials_cost + service_cost; received unit cost = total_cost / quantity_received'
+    sensitive: rates
+  -
+    name: status
+    type: string
+    meaning: 'Lifecycle: draft (created), materials_sent (materials issued to the vendor), completed (output received)'
+  -
+    name: materials_sent_at
+    type: datetime
+    nullable: true
+    meaning: 'When the materials were sent to the vendor'
+  -
+    name: completed_at
+    type: datetime
+    nullable: true
+    meaning: 'When the processed output was received'
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User who created the order -> users'
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'subcontract_orders.created_by = users.id'
+  - 'subcontract_orders.warehouse_id = warehouses.id'
+  - 'subcontract_orders.bom_id = boms.id'
+  - 'subcontract_orders.item_id = items.id'
+  - 'subcontract_orders.vendor_id = vendors.id'
+keywords:
+  - subcontract
+  - 'job work'
+  - 'outside processing'
+  - subcontractor
+  - 'material sent out'
+questions:
+  - 'Which subcontract orders have materials sent but nothing received yet?'
+  - 'How much material is lying with subcontractors right now?'

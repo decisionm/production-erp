@@ -1,0 +1,56 @@
+table: spc_measurements
+module: quality
+label: 'SPC Measurements'
+purpose: 'One row is one measured value of an SPC characteristic taken at a point in time.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: spc_characteristic_id
+    type: integer
+    meaning: 'Characteristic measured (spc_characteristics.id)'
+    references: spc_characteristics.id
+  -
+    name: value
+    type: decimal
+    meaning: "Measured value, in the characteristic's unit_of_measure"
+  -
+    name: measured_at
+    type: datetime
+    meaning: 'When the measurement was taken'
+  -
+    name: recorded_by
+    type: integer
+    nullable: true
+    meaning: 'User who recorded it (users.id)'
+    references: users.id
+  -
+    name: notes
+    type: string
+    nullable: true
+    meaning: 'Free-text note'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last updated'
+joins:
+  - 'spc_measurements.recorded_by = users.id'
+  - 'spc_measurements.spc_characteristic_id = spc_characteristics.id'
+keywords:
+  - spc
+  - measurement
+  - reading
+  - sample
+  - 'control chart'
+  - 'out of spec'
+questions:
+  - 'Which measurements fell outside spec limits this week?'
+  - 'What was the average piece weight yesterday?'

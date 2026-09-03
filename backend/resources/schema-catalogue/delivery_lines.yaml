@@ -1,0 +1,50 @@
+table: delivery_lines
+module: sales
+label: 'Delivery Lines'
+purpose: "One row is one item quantity shipped on a delivery, tied back to the sales order line it fulfils. The quantity here is what was issued from stock and added to the order line's quantity_delivered."
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Row id'
+  -
+    name: delivery_id
+    type: integer
+    meaning: 'The delivery (dispatch) this line is part of'
+    references: deliveries.id
+  -
+    name: sales_order_line_id
+    type: integer
+    meaning: 'The sales order line this shipment fulfils'
+    references: sales_order_lines.id
+  -
+    name: item_id
+    type: integer
+    meaning: 'The finished-good item shipped'
+    references: items.id
+  -
+    name: quantity
+    type: decimal
+    meaning: "Quantity shipped on this delivery, in the item's unit of measure"
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+joins:
+  - 'delivery_lines.item_id = items.id'
+  - 'delivery_lines.sales_order_line_id = sales_order_lines.id'
+  - 'delivery_lines.delivery_id = deliveries.id'
+keywords:
+  - 'dispatched quantity'
+  - 'shipped quantity'
+  - 'delivery line'
+  - 'challan line'
+questions:
+  - 'How much of each product was dispatched last month?'
+  - 'Which items were shipped on a given delivery?'

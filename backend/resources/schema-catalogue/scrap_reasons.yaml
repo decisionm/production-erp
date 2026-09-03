@@ -1,0 +1,60 @@
+table: scrap_reasons
+module: production
+label: 'Scrap Reasons'
+purpose: 'One row is a reason from the scrap reason master (why scrap arose, e.g. short shot, black spot, startup rejection) that a scrap or rejection quantity is booked against. It records why scrap arose, not what a quality checker saw.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: code
+    type: string
+    meaning: 'Unique short code of the reason'
+  -
+    name: name
+    type: string
+    meaning: 'Reason as shown to the floor'
+  -
+    name: is_active
+    type: integer
+    meaning: '1 = selectable, 0 = retired'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+    meaning: 'Soft-delete timestamp; NULL means not deleted'
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User who created the master row; NULL if seeded or imported -> users'
+    references: users.id
+  -
+    name: updated_by
+    type: integer
+    nullable: true
+    meaning: 'User who last edited the master row -> users'
+    references: users.id
+joins:
+  - 'scrap_reasons.updated_by = users.id'
+  - 'scrap_reasons.created_by = users.id'
+keywords:
+  - scrap
+  - 'rejection reason'
+  - wastage
+  - 'scrap reason'
+  - 'reject code'
+questions:
+  - 'What scrap reasons are active?'
+  - 'Which scrap reason is booked most often?'

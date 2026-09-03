@@ -1,0 +1,65 @@
+table: tally_sync_events
+module: tally-sync
+label: 'Tally Sync Events'
+purpose: 'One append-only event in the Tally sync history: something that happened to a queue entry (enqueued, delivered, synced, failed, retried, dismissed, released) or an inbound pull from Tally (masters, companies, purchase rates, receivables, stock summary). Observations, never edited.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key; sequence within an entry'
+  -
+    name: tally_sync_entry_id
+    type: integer
+    nullable: true
+    meaning: 'The queue entry the event belongs to (tally_sync_entries); NULL for Tally-to-ERP pulls and the queue-wide sync.requested press'
+    references: tally_sync_entries.id
+  -
+    name: event
+    type: string
+    meaning: 'Event kind: voucher.enqueued, voucher.merged, voucher.rebuilt, pending.delivered, voucher.synced, voucher.failed, voucher.failure_refused, voucher.retried, voucher.dismissed, voucher.released, sync.requested, masters.received, company.bound, companies.received, purchase-rates.received, receivables.received, stock-summary.previewed, snapshot.stored'
+  -
+    name: direction
+    type: string
+    meaning: 'Which way the data moved: erp_to_tally, tally_to_erp, none'
+  -
+    name: occurred_at
+    type: datetime
+    meaning: 'When the event happened'
+  -
+    name: actor_type
+    type: string
+    nullable: true
+    meaning: 'Who caused it: user, agent, system'
+  -
+    name: actor_id
+    type: integer
+    nullable: true
+    meaning: 'users.id when actor_type is user; the agent token id when agent'
+  -
+    name: actor_label
+    type: string
+    nullable: true
+    meaning: 'Display name of the actor (user name or the agent token name)'
+  -
+    name: details
+    type: string
+    nullable: true
+    meaning: 'JSON with event-specific facts: attempt numbers, error text, counts and date windows for pulls, snapshot id / sha256 / byte size for snapshot.stored; never a rate, party or item'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was written (no updated_at: rows are never edited)'
+joins:
+  - 'tally_sync_events.tally_sync_entry_id = tally_sync_entries.id'
+keywords:
+  - 'sync history'
+  - 'sync log'
+  - 'tally timeline'
+  - 'who released'
+  - 'masters pull'
+  - 'sync now'
+questions:
+  - 'When did the agent last deliver vouchers, and when did Tally masters last arrive?'
+  - 'Who pressed Sync Now this week?'
+  - 'What happened to queue entry 42, in order?'

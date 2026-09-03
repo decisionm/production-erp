@@ -1,0 +1,39 @@
+table: app_settings
+module: users
+label: 'App Settings'
+purpose: 'One key/value row per application setting kept in the database instead of code — which Tally company to sync, which warehouse is the raw-material / WIP / finished-goods / packing / QC-hold store, the masterbatch colour map.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'row id'
+  -
+    name: key
+    type: string
+    meaning: "setting name, e.g. 'tally_company', 'tally_companies', 'tally_vendor_ledger_groups', 'production_raw_material_warehouse_id', 'production_wip_warehouse_id', 'production_finished_goods_warehouse_id', 'production_packing_material_warehouse_id', 'quality_hold_warehouse_id', 'production_day_bin_warehouse_id', 'masterbatch_colour_map'"
+  -
+    name: value
+    type: string
+    nullable: true
+    meaning: 'the setting value stored as JSON (a string, number, warehouse id or list)'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'when the setting was first saved'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'when the setting was last changed'
+joins: {}
+keywords:
+  - settings
+  - configuration
+  - 'app config'
+  - 'tally company'
+  - 'default warehouse'
+  - 'system settings'
+questions:
+  - 'Which Tally company is the ERP syncing with?'
+  - 'Which warehouse is set as the finished goods store?'

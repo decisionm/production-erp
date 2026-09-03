@@ -31,6 +31,7 @@ const ROUTE_TABLE = [
     '/*',
     '/',
     '/account/change-password',
+    '/ask-erp',
     '/crm/leads',
     '/crm/opportunities',
     '/crm/quotations',

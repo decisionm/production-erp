@@ -1,5 +1,6 @@
 <?php
 
+use App\Modules\Assistant\Http\Controllers\AskErpController;
 use App\Modules\Compliance\Http\Controllers\GstComputationController;
 use App\Modules\Compliance\Http\Controllers\GstRateController;
 use App\Modules\Compliance\Http\Controllers\GstRegistrationController;
@@ -921,6 +922,21 @@ Route::prefix('v1')->group(function () {
             // opening-stock import is a separate, explicitly-approved act, not
             // something a sync loop can reach.
             Route::post('stock-summary/preview', [TallySyncAgentController::class, 'stockSummaryPreview']);
+        });
+
+        // ASK ERP — natural-language questions over the tables this login may
+        // view. `module-read:assistant` gates the page on `.view` for every
+        // verb, because a question is a read: the POSTs here run a guarded
+        // SELECT and write nothing but the asker's own conversation log. What
+        // the page may READ is decided per table inside SchemaRetriever from
+        // the login's other module permissions, and per column by
+        // SensitiveColumns.
+        Route::prefix('ask-erp')->middleware('module-read:assistant')->group(function () {
+            Route::get('catalogue', [AskErpController::class, 'catalogue']);
+            Route::get('conversations', [AskErpController::class, 'index']);
+            Route::post('conversations', [AskErpController::class, 'store']);
+            Route::get('conversations/{id}', [AskErpController::class, 'show']);
+            Route::post('conversations/{id}/ask', [AskErpController::class, 'ask']);
         });
 
         Route::prefix('hrms')->middleware('module:hrms')->group(function () {

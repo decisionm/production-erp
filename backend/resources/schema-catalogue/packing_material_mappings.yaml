@@ -1,0 +1,76 @@
+table: packing_material_mappings
+module: production
+label: 'Packing Material Mappings'
+purpose: 'One row maps one workbook packing spec string (e.g. carton "170ML", pouch film "LD 28.5 X 38") to the Tally packing item it means, with the dose that goes with it: film in grams per piece, tape in metres per box, cartons and trays one-for-one. Master data with provenance; it only prefills packing lines at Complete Batch.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: spec_kind
+    type: string
+    meaning: "Kind of packing material: carton (outer box), tray (inner tray), pouch_film (film wrapping a carton's contents), tape (sealing tape, keyed by the carton spec)"
+  -
+    name: spec_value
+    type: string
+    meaning: 'The workbook spec string verbatim ("170ML", "200ML BRUTE", "HM 30.5*49"); for tape it is the CARTON spec the tape seals'
+  -
+    name: item_id
+    type: integer
+    meaning: 'The Tally packing item the spec means (e.g. 170 Ml Master Box) -> items'
+    references: items.id
+  -
+    name: grams_per_piece
+    type: decimal
+    nullable: true
+    meaning: 'Pouch film only: grams of one piece of film (consumed per carton; kg = cartons x grams / 1000)'
+  -
+    name: metres_per_box
+    type: decimal
+    nullable: true
+    meaning: 'Tape only: metres of tape per carton sealed'
+  -
+    name: note
+    type: string
+    nullable: true
+    meaning: 'Provenance note — how the item was matched or who said so'
+  -
+    name: set_by
+    type: integer
+    nullable: true
+    meaning: 'User who set/edited the mapping -> users; null = seeded by evidence'
+    references: users.id
+  -
+    name: set_at
+    type: datetime
+    nullable: true
+    meaning: 'When the mapping was set'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+    meaning: 'Soft-delete timestamp (mapping withdrawn); null = in force'
+joins:
+  - 'packing_material_mappings.set_by = users.id'
+  - 'packing_material_mappings.item_id = items.id'
+keywords:
+  - 'packing material'
+  - 'carton mapping'
+  - tape
+  - 'pouch film'
+  - tray
+  - 'master box'
+questions:
+  - 'Which Tally item is the 170ML carton mapped to?'
+  - 'Which carton specs have no packing material mapping yet?'

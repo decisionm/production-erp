@@ -1,0 +1,39 @@
+table: tally_ledger_mappings
+module: tally-sync
+label: 'Tally Ledger Mappings'
+purpose: 'One posting role (sales, purchase, CGST, SGST, IGST, round-off, resin consumption, regrind credit) mapped to the Tally ledger name this company actually uses, set in Settings so voucher builders never hardcode a ledger.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key'
+  -
+    name: role
+    type: string
+    meaning: 'The posting role, unique: sales, sales_local, sales_interstate, purchase (testing-only), cgst, sgst, igst, round_off, resin_consumption, regrind_credit'
+  -
+    name: tally_ledger_name
+    type: string
+    nullable: true
+    meaning: 'The Tally ledger name chosen for this role (picked from ledgers.name); NULL when not yet mapped'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the mapping was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the mapping was last changed'
+joins:
+  - 'tally_ledger_mappings.tally_ledger_name = ledgers.name'
+keywords:
+  - 'ledger mapping'
+  - 'tally settings'
+  - 'sales ledger'
+  - 'gst ledger'
+  - 'posting role'
+questions:
+  - 'Which Tally ledger is mapped for interstate sales?'
+  - 'Which posting roles are still unmapped?'

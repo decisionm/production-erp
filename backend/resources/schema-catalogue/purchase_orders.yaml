@@ -1,0 +1,122 @@
+table: purchase_orders
+module: procurement
+label: 'Purchase Orders'
+purpose: 'One purchase order raised on a vendor, either created in the ERP or mirrored read-only from Tally. Its item lines are in purchase_order_lines; receipts against it are in goods_receipt_notes.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'Primary key; the PO number'
+  -
+    name: vendor_id
+    type: integer
+    meaning: 'The supplier the order is placed on (vendors)'
+    references: vendors.id
+  -
+    name: purchase_requisition_id
+    type: integer
+    nullable: true
+    meaning: 'The approved requisition this order covers, if raised from one (purchase_requisitions)'
+    references: purchase_requisitions.id
+  -
+    name: status
+    type: string
+    meaning: 'Lifecycle state: draft, sent, partially_received, closed, cancelled'
+  -
+    name: order_date
+    type: date
+    meaning: 'Date the order was raised'
+  -
+    name: expected_date
+    type: date
+    nullable: true
+    meaning: 'Overall expected delivery date typed on the order'
+  -
+    name: notes
+    type: string
+    nullable: true
+    meaning: 'Free-text remarks on the order'
+  -
+    name: created_by
+    type: integer
+    nullable: true
+    meaning: 'User who created the order (users)'
+    references: users.id
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was created'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'When the row was last changed'
+  -
+    name: source
+    type: string
+    meaning: 'Where the order lives: erp (created here) or tally (read-only mirror of an order in Tally, corrected only in Tally)'
+  -
+    name: tally_order_no
+    type: string
+    nullable: true
+    meaning: 'The order number in Tally for a mirrored order'
+  -
+    name: closed_reason
+    type: string
+    nullable: true
+    meaning: 'Reason given when the order was short-closed'
+  -
+    name: closed_by
+    type: integer
+    nullable: true
+    meaning: 'User who closed the order (users)'
+    references: users.id
+  -
+    name: closed_at
+    type: datetime
+    nullable: true
+    meaning: 'When the order was closed'
+  -
+    name: cancelled_reason
+    type: string
+    nullable: true
+    meaning: 'Reason given when the order was cancelled'
+  -
+    name: cancelled_by
+    type: integer
+    nullable: true
+    meaning: 'User who cancelled the order (users)'
+    references: users.id
+  -
+    name: cancelled_at
+    type: datetime
+    nullable: true
+    meaning: 'When the order was cancelled'
+  -
+    name: tally_staging
+    type: string
+    nullable: true
+    meaning: 'JSON: what the Tally side made of the order when sent — {state: disabled|refused|enqueued, reasons: [{code, detail}], entry_id?, at}; NULL before the order was sent or on older rows'
+  -
+    name: sent_at
+    type: datetime
+    nullable: true
+    meaning: 'When the order was sent to the vendor; NULL means never sent (a draft, or cancelled from draft)'
+joins:
+  - 'purchase_orders.cancelled_by = users.id'
+  - 'purchase_orders.closed_by = users.id'
+  - 'purchase_orders.vendor_id = vendors.id'
+  - 'purchase_orders.purchase_requisition_id = purchase_requisitions.id'
+  - 'purchase_orders.created_by = users.id'
+keywords:
+  - po
+  - 'purchase order'
+  - 'order on supplier'
+  - 'open orders'
+  - 'pending po'
+  - 'tally purchase order'
+questions:
+  - 'How many purchase orders are open (sent or partially received) right now?'
+  - 'Which purchase orders were raised this month and on which vendors?'
+  - 'Which POs were cancelled and why?'

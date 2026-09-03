@@ -281,6 +281,9 @@ class ApiSurfaceSmokeTest extends TestCase
         $entry = $fx['entry']->id;
 
         return [
+            // Ask ERP's conversation read is scoped to its owner; the fixture
+            // belongs to the acting administrator.
+            'api/v1/ask-erp/conversations/{id}' => "/api/v1/ask-erp/conversations/{$fx['conversation']->id}",
             'api/v1/compliance/invoices/{invoice}/gst-breakdown' => "/api/v1/compliance/invoices/{$fx['invoice']->id}/gst-breakdown",
             'api/v1/crm/leads/{lead}/activities' => "/api/v1/crm/leads/{$fx['lead']->id}/activities",
             'api/v1/crm/quotations/{quotation}/pdf' => "/api/v1/crm/quotations/{$fx['quotation']->id}/pdf",

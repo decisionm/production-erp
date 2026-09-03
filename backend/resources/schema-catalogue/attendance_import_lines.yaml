@@ -1,0 +1,127 @@
+table: attendance_import_lines
+module: hrms
+label: 'Attendance Import Lines'
+purpose: "One employee-day exactly as the punch report carried it, with the reviewer's correction beside it. The payroll month sheet is produced from these lines, so the file matches what was reviewed; attendances is written from here through AttendanceService."
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'primary key'
+  -
+    name: attendance_import_id
+    type: integer
+    meaning: 'the upload this day belongs to'
+    references: attendance_imports.id
+  -
+    name: employee_id
+    type: integer
+    nullable: true
+    meaning: "the matched employee; null when the report's code is not in the employee master (the unknown_employee issue), re-linked once the person exists"
+    references: employees.id
+  -
+    name: employee_code
+    type: string
+    meaning: 'the employee code the report printed (the Pooja SPP-nn id)'
+  -
+    name: employee_name
+    type: string
+    meaning: 'the name the report printed, kept even when no employee matched'
+  -
+    name: date
+    type: date
+    meaning: 'the calendar day'
+  -
+    name: raw_status
+    type: string
+    meaning: 'what the report said for the day — FD (full day), HD (half day), Absent, Week Off, or -'
+  -
+    name: first_in
+    type: time
+    nullable: true
+    meaning: 'first punch in, wall-clock IST as printed; null when there was none'
+  -
+    name: last_out
+    type: time
+    nullable: true
+    meaning: 'last punch out, wall-clock IST as printed; null when there was none'
+  -
+    name: ot_minutes
+    type: integer
+    meaning: 'overtime minutes the report calculated'
+  -
+    name: late_minutes
+    type: integer
+    meaning: 'late-in minutes the report calculated'
+  -
+    name: early_minutes
+    type: integer
+    meaning: 'early-out minutes the report calculated'
+  -
+    name: worked_minutes
+    type: integer
+    meaning: 'total worked minutes the report calculated'
+  -
+    name: issue
+    type: string
+    nullable: true
+    meaning: 'in_no_out | out_no_in | no_punch | unknown_employee — null when the day needs no correction'
+  -
+    name: resolution
+    type: string
+    nullable: true
+    meaning: 'present | half_day | absent | on_leave | week_off — what the day counts as; week_off is stored here only, since attendances has no week-off status'
+  -
+    name: resolved_check_in
+    type: time
+    nullable: true
+    meaning: 'the in time a reviewer supplied or confirmed'
+  -
+    name: resolved_check_out
+    type: time
+    nullable: true
+    meaning: 'the out time a reviewer supplied or confirmed'
+  -
+    name: resolved_by
+    type: integer
+    nullable: true
+    meaning: 'the user who corrected the day; null when no human correction was needed'
+    references: users.id
+  -
+    name: resolved_at
+    type: datetime
+    nullable: true
+    meaning: 'when the correction was made'
+  -
+    name: notes
+    type: string
+    nullable: true
+    meaning: "the reviewer's note on the correction"
+  -
+    name: applied_at
+    type: datetime
+    nullable: true
+    meaning: 'when this day was written into attendances; null until the run is applied'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'when the line was imported'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'last change'
+joins:
+  - 'attendance_import_lines.resolved_by = users.id'
+  - 'attendance_import_lines.employee_id = employees.id'
+  - 'attendance_import_lines.attendance_import_id = attendance_imports.id'
+keywords:
+  - punch
+  - 'in out'
+  - 'missing punch'
+  - 'attendance correction'
+  - mismatch
+  - 'muster line'
+questions:
+  - 'How many days had an in-punch but no out-punch last month?'
+  - 'Which employees have the most unresolved attendance issues?'
