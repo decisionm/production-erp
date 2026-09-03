@@ -1308,6 +1308,10 @@ class ShiftProductionEntryService
             // and left the material kg exactly as they were.
             $this->refuseStaleMaterialLines($entry, $row, $data);
 
+            // BEFORE ANY MUTATION: refuse a correction that would restate the
+            // opening weight a following shift is already standing on.
+            $this->refuseRestatingHandoverOpening($entry, $data);
+
             $this->reverseCompletionEffects($entry, $row, $amendedBy);
 
             // The amendment trail, and the shortfall record the wrong
@@ -2602,6 +2606,76 @@ class ShiftProductionEntryService
      * inside each route's transaction, the lock serialises them: the second
      * waits, then reads the state the first actually left.
      */
+    /**
+     * THE ONE THING A FOLLOWING SHIFT STANDS ON — DEC-20260903-007.
+     *
+     * A handed-over batch may be returned by quality and corrected by the
+     * supervisor: the counts, the rejects, the reason, the downtime are this
+     * segment's own and reach nobody else. Exactly one figure does reach the
+     * next shift, and it is the counted closing bin weight —
+     * DayBinLedgerService::openingFor() reads closingFor(), which is the
+     * latest `count` movement on this segment. Change that while a following
+     * segment is standing on it and the next shift's opening is restated
+     * underneath a shift somebody has already signed.
+     *
+     * COMPARED AGAINST closingFor() ITSELF, never against the entry's stored
+     * completion figure. Reading the same function openingFor() reads is what
+     * keeps this guard exactly as wide as its reason — including a closing
+     * that was DERIVED at handover rather than weighed (completeAndHandover()
+     * writes that derivation as a count row, so it is the baseline too).
+     *
+     * A correction that sends no closing weight cannot move it: the drawer
+     * prefills those boxes null and drops blank rows, so the ordinary
+     * pieces-only fix never reaches this guard. Absent lines leave the
+     * recorded count standing, which is the same answer.
+     *
+     * CORRECTING THE CHAIN — reopening the following segment and restating
+     * its opening with it — is expressly NOT built: it rewrites a shift
+     * somebody has already signed, and the factory decides whether that
+     * should ever exist.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function refuseRestatingHandoverOpening(ShiftProductionEntry $entry, array $data): void
+    {
+        $lines = array_filter((array) ($data['closing_day_bin'] ?? []), 'is_array');
+
+        // Nothing to restate, or nobody standing on it. The existence check
+        // is second on purpose: the common correction sends no closing line
+        // at all and never asks the database.
+        if ($lines === [] || ! $entry->childSegments()->exists()) {
+            return;
+        }
+
+        foreach ($lines as $line) {
+            $itemId = (int) ($line['item_id'] ?? 0);
+
+            if ($itemId === 0) {
+                continue;
+            }
+
+            // Normalised on both sides before comparing: a closing arrives as
+            // a JSON number and the ledger stores a decimal string, and "80"
+            // against "80.0000" is the same weight.
+            $incoming = bcadd((string) ($line['quantity_kg'] ?? '0'), '0', 4);
+            // No count recorded is an opening of zero for the child
+            // (openingFor falls back to '0.0000'), so typing a weight where
+            // none stood is a change like any other.
+            $recorded = $this->dayBin->closingFor($entry, $itemId) ?? '0.0000';
+
+            if (bccomp($incoming, $recorded, 4) !== 0) {
+                throw new InvalidStatusTransitionException(
+                    // Names the figure being protected: the supervisor can see
+                    // at once which box to put back.
+                    sprintf(
+                        'the next shift opened from this batch\'s closing weight of %s kg, so that weight cannot be changed here — correct the other figures and leave it as it stands',
+                        rtrim(rtrim($recorded, '0'), '.') ?: '0',
+                    ),
+                );
+            }
+        }
+    }
+
     private function rowOpenForCorrection(ShiftProductionEntry $entry): ShiftProductionEntry
     {
         $row = ShiftProductionEntry::query()
@@ -2649,15 +2723,21 @@ class ShiftProductionEntryService
             );
         }
 
-        // A handover child opens from THIS segment's closing counts
-        // (DayBinLedgerService::openingFor), so correcting a segment that has
-        // already handed over would restate the next shift's opening
-        // underneath it.
-        if ($entry->childSegments()->exists()) {
-            throw new InvalidStatusTransitionException(
-                'this batch was handed over to the next shift, and that shift opened from its closing weights — it can no longer be corrected on its own',
-            );
-        }
+        // NO HANDOVER REFUSAL HERE — DEC-20260903-007. This used to refuse
+        // every correction to a segment that had handed over, on the ground
+        // that the next shift opened from its closing counts. That was WIDER
+        // THAN ITS OWN REASON: what a following segment inherits is exactly
+        // ONE number, the counted closing bin weight (openingFor reads
+        // closingFor, one `count` movement); the pieces, the rejects, the
+        // reason and the downtime reach it not at all, and all of them were
+        // refused. It left a factory with a wrong count and no route to fix
+        // it — the machine has moved on, only the paperwork is wrong, and
+        // nothing goes back to a machine.
+        //
+        // So the narrow guard lives where the closing weight is actually
+        // known: refuseRestatingHandoverOpening(), on the amendment path
+        // only. This path is also returnToProduction's, and a return writes
+        // no count row at all — it never had business behind that refusal.
 
         return $row;
     }
