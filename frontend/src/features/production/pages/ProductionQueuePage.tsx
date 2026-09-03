@@ -14,7 +14,7 @@ import {
     reorderProductionRequests,
     startProductionRequest,
 } from '@/features/production/api';
-import { queueRowActionsAllowed } from '@/features/production/productionQueue';
+import { DEFAULT_QUEUE_STATUSES, isDefaultQueueView, queueRowActionsAllowed } from '@/features/production/productionQueue';
 import { productionRequestHistoryEmptyText, queueEmptyText } from '@/features/production/queueEmptyText';
 import { type ProductionQueueGroup, groupQueueByProduct, sumQuantities } from '@/features/production/queueGroups';
 import type { ProductionQueueRow, ProductionRequest, ProductionRequestStatus } from '@/features/production/types';
@@ -22,7 +22,7 @@ import { formatDate } from '@/lib/datetime';
 import { itemDisplayName } from '@/features/inventory/itemIdentity';
 import { itemLabel } from '@/lib/itemLabel';
 import { ListReadAlert } from '@/lib/ListEmpty';
-import { TABLE_STICKY } from '@/lib/tableProps';
+import { TABLE_STICKY, serverPagination } from '@/lib/tableProps';
 
 /**
  * THE FLOOR'S WORKLIST — what the store has asked the factory to make, in the
@@ -66,8 +66,11 @@ import { TABLE_STICKY } from '@/lib/tableProps';
  * refusal. Conflating the two would show the factory refusing to estimate at
  * somebody who is merely not allowed to see the answer.
  *
- * UNPAGINATED, deliberately, server-side: reorder renumbers the WHOLE queue,
- * and nobody should be asked to reorder a list they can see one page of.
+ * THE QUEUE ITSELF IS UNPAGINATED, deliberately, server-side: reorder
+ * renumbers the WHOLE queue, and nobody should be asked to reorder a list
+ * they can see one page of. The LOOK-BACK READ below it is a different
+ * document with no reorder to protect, and is paginated server-side (the
+ * 28-Aug standing rule) with Ant's own pager driven off the server's meta.
  */
 
 const statusColor: Record<ProductionRequestStatus, string> = {
@@ -94,9 +97,6 @@ const STATUS_FILTER_OPTIONS: { value: ProductionRequestStatus; label: string }[]
     { value: 'produced', label: 'Produced' },
     { value: 'cancelled', label: 'Cancelled' },
 ];
-
-/** What the queue reads when nobody has touched the filter — the open worklist, exactly as before 03-Sep-2026. */
-const DEFAULT_STATUSES: ProductionRequestStatus[] = ['queued', 'in_progress'];
 
 const numeric = { fontVariantNumeric: 'tabular-nums' } as const;
 const caption = { fontSize: 12, display: 'block' } as const;
@@ -193,13 +193,22 @@ export default function ProductionQueuePage() {
     /**
      * The look-back filter (03-Sep-2026), local to this screen. The default
      * is the open worklist — the only two statuses the priority queue can
-     * ever hold — and selecting exactly those two is what keeps this page
-     * behaving as it always has; anything else switches to the read-only
-     * history read below.
+     * ever hold — and selecting exactly those two, OR clearing the filter to
+     * nothing, is what keeps this page behaving as it always has; any other
+     * combination switches to the read-only history read below.
+     * `isDefaultQueueView` is the pure predicate, pinned by its own test.
      */
-    const [statuses, setStatuses] = useState<ProductionRequestStatus[]>(DEFAULT_STATUSES);
-    const isDefaultView = statuses.length === DEFAULT_STATUSES.length
-        && DEFAULT_STATUSES.every((status) => statuses.includes(status));
+    const [statuses, setStatuses] = useState<ProductionRequestStatus[]>(DEFAULT_QUEUE_STATUSES);
+    const isDefaultView = isDefaultQueueView(statuses);
+
+    /** The look-back's own page, server-driven. Reset to 1 whenever the filter itself changes. */
+    const [historyPage, setHistoryPage] = useState(1);
+    const [historyPerPage, setHistoryPerPage] = useState<number | undefined>(undefined);
+
+    const onStatusesChange = (next: ProductionRequestStatus[]) => {
+        setStatuses(next);
+        setHistoryPage(1);
+    };
 
     /*
      * Keyed UNDER ['production', 'requests'] on purpose: four other screens
@@ -215,14 +224,19 @@ export default function ProductionQueuePage() {
 
     /**
      * THE LOOK-BACK READ — any mix of the four statuses other than the
-     * default two. Read-only (S9/DEC-20260902-032): a produced or cancelled
+     * default. Read-only (S9/DEC-20260902-032): a produced or cancelled
      * request retired on its own and nothing on this screen puts it back.
      * Off when the default view is showing, so switching the filter back to
-     * queued+in_progress does not keep firing a second request nobody reads.
+     * queued+in_progress (or clearing it) does not keep firing a second
+     * request nobody reads.
+     *
+     * PAGINATED, server-side (the 28-Aug standing rule) — `historyData.meta`
+     * drives the table's own pager below; ticking every status no longer
+     * pulls the factory's whole production-request history in one payload.
      */
-    const { data: historyRequests, isLoading: historyLoading, isPending: historyPending, isError: historyIsError, error: historyError, refetch: historyRefetch } = useQuery({
-        queryKey: ['production', 'requests', 'history', statuses],
-        queryFn: () => listProductionRequests(statuses),
+    const { data: historyData, isLoading: historyLoading, isPending: historyPending, isError: historyIsError, error: historyError, refetch: historyRefetch } = useQuery({
+        queryKey: ['production', 'requests', 'history', statuses, historyPage, historyPerPage],
+        queryFn: () => listProductionRequests(statuses, historyPage, historyPerPage),
         enabled: canView && !isDefaultView,
     });
 
@@ -275,7 +289,8 @@ export default function ProductionQueuePage() {
 
     // The look-back read's own rows — no grouping, no planning, no reorder:
     // a filtered read of the same document, never the priority queue itself.
-    const historyRows = historyRequests ?? [];
+    const historyRows = historyData?.data ?? [];
+    const historyMeta = historyData?.meta;
 
     // The floor-visibility owner question: what this login may read, decided ONCE from the payload's shape.
     const showsPlanning = rows.some((row) => row.planning !== undefined);
@@ -382,9 +397,9 @@ export default function ProductionQueuePage() {
                         {formatQuantity(sumQuantities(rows.map((row) => row.quantity)))} to make
                     </Typography.Text>
                 )}
-                {!isDefaultView && historyRows.length > 0 && (
+                {!isDefaultView && historyMeta !== undefined && historyMeta.total > 0 && (
                     <Typography.Text type="secondary" className="queue-count" style={numeric}>
-                        {historyRows.length} request{historyRows.length === 1 ? '' : 's'}
+                        {historyMeta.total} request{historyMeta.total === 1 ? '' : 's'}
                     </Typography.Text>
                 )}
             </div>
@@ -393,8 +408,9 @@ export default function ProductionQueuePage() {
              * THE LOOK-BACK FILTER (03-Sep-2026). Local state, not the URL:
              * this is one screen's own reading of one feed, not a list
              * somebody bookmarks a filtered view of. Selecting exactly
-             * queued+in_progress — the default — is what keeps the grouped
-             * grid below; anything else drops to the flat, read-only table.
+             * queued+in_progress — the default — or clearing the filter to
+             * nothing, is what keeps the grouped grid below; any other
+             * combination drops to the flat, read-only, paginated table.
              */}
             <Space style={{ marginBottom: 12 }}>
                 <Select<ProductionRequestStatus[]>
@@ -403,7 +419,7 @@ export default function ProductionQueuePage() {
                     style={{ minWidth: 280 }}
                     options={STATUS_FILTER_OPTIONS}
                     value={statuses}
-                    onChange={setStatuses}
+                    onChange={onStatusesChange}
                     maxTagCount="responsive"
                 />
             </Space>
@@ -563,7 +579,16 @@ export default function ProductionQueuePage() {
                         // Newest first (the server's own order for this read), not a
                         // priority — a produced or cancelled request has none left to
                         // sort by. No sorter, no reorder: nothing here rewrites a queue.
-                        pagination={false}
+                        // PAGED, server-side, off the server's own meta — this read has
+                        // no reorder to protect, unlike the queue table above it.
+                        pagination={serverPagination(
+                            historyMeta,
+                            (page, perPage) => {
+                                setHistoryPage(page);
+                                setHistoryPerPage(perPage);
+                            },
+                            'requests',
+                        )}
                         locale={{ emptyText: productionRequestHistoryEmptyText(historyIsError, historyError) }}
                         columns={[
                             {

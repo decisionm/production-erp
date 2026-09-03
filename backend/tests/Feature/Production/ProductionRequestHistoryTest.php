@@ -97,6 +97,82 @@ class ProductionRequestHistoryTest extends TestCase
             ->assertJsonValidationErrors('status.0');
     }
 
+    /**
+     * The 28-Aug standing rule: every list ships with server-side search AND
+     * a real pager. `withStatuses()` used to be a bare `->get()` — ticking
+     * all four statuses returned every production request the factory had
+     * ever raised, unpaginated. Search is not part of this fix.
+     */
+    public function test_the_look_back_read_is_paginated(): void
+    {
+        $first = $this->request($this->bottle, '10');
+        $first->update(['status' => ProductionRequestStatus::Produced]);
+        $second = $this->request($this->bottle, '20');
+        $second->update(['status' => ProductionRequestStatus::Produced]);
+        $third = $this->request($this->bottle, '30');
+        $third->update(['status' => ProductionRequestStatus::Produced]);
+
+        $this->actingWith(['production.view']);
+
+        $response = $this->getJson('/api/v1/production/requests?status[]=produced&per_page=2')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonPath('meta.total', 3)
+            ->assertJsonPath('meta.per_page', 2)
+            ->assertJsonPath('meta.current_page', 1)
+            ->assertJsonPath('meta.last_page', 2);
+
+        // Newest first — the third and second requests are page one, not the first.
+        $ids = collect($response->json('data'))->pluck('id')->all();
+        $this->assertEqualsCanonicalizing([$third->id, $second->id], $ids);
+
+        $this->getJson('/api/v1/production/requests?status[]=produced&per_page=2&page=2')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.id', $first->id);
+    }
+
+    public function test_the_look_back_read_defaults_to_a_page_of_twenty_five(): void
+    {
+        $produced = $this->request($this->bottle, '10');
+        $produced->update(['status' => ProductionRequestStatus::Produced]);
+
+        $this->actingWith(['production.view']);
+
+        $this->getJson('/api/v1/production/requests?status[]=produced')
+            ->assertOk()
+            ->assertJsonPath('meta.per_page', 25)
+            ->assertJsonPath('meta.total', 1)
+            ->assertJsonPath('meta.current_page', 1);
+    }
+
+    public function test_a_per_page_above_the_ceiling_is_refused(): void
+    {
+        $this->actingWith(['production.view']);
+
+        $this->getJson('/api/v1/production/requests?status[]=produced&per_page=101')
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['per_page']);
+    }
+
+    /**
+     * The DEFAULT view (no `status` given) is untouched: still the open
+     * queue, still unpaginated — reorder() renumbers the WHOLE queue, and a
+     * page of it would let somebody reorder a queue they cannot see all of.
+     */
+    public function test_the_default_queue_stays_unpaginated(): void
+    {
+        $this->request($this->bottle, '500');
+        $this->request($this->jar, '200');
+
+        $this->actingWith(['production.view']);
+
+        $this->getJson('/api/v1/production/requests')
+            ->assertOk()
+            ->assertJsonCount(2, 'data')
+            ->assertJsonMissingPath('meta');
+    }
+
     // ---- fixtures ----------------------------------------------------------
 
     private function request(Item $item, string $quantity): ProductionRequest
