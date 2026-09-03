@@ -3,10 +3,13 @@
 namespace App\Modules\HRMS\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\HRMS\Http\Requests\BulkResolveAttendanceImportLinesRequest;
+use App\Modules\HRMS\Http\Requests\ListAttendanceImportEmployeesRequest;
 use App\Modules\HRMS\Http\Requests\ListAttendanceImportLinesRequest;
 use App\Modules\HRMS\Http\Requests\ListAttendanceImportsRequest;
 use App\Modules\HRMS\Http\Requests\ResolveAttendanceImportLineRequest;
 use App\Modules\HRMS\Http\Requests\StoreAttendanceImportRequest;
+use App\Modules\HRMS\Http\Resources\AttendanceImportEmployeeResource;
 use App\Modules\HRMS\Http\Resources\AttendanceImportLineResource;
 use App\Modules\HRMS\Http\Resources\AttendanceImportResource;
 use App\Modules\HRMS\Models\AttendanceImport;
@@ -52,6 +55,35 @@ class AttendanceImportController extends Controller
         return AttendanceImportLineResource::collection(
             $this->imports->paginateLines($attendance_import, $query->perPage($filters), $filters),
         );
+    }
+
+    public function employees(
+        ListAttendanceImportEmployeesRequest $request,
+        HrmsListQuery $query,
+        AttendanceImport $attendance_import,
+    ): AnonymousResourceCollection {
+        $filters = $request->validated();
+
+        return AttendanceImportEmployeeResource::collection(
+            $this->imports->paginateEmployees($attendance_import, $query->perPage($filters), $filters),
+        );
+    }
+
+    /**
+     * One answer for one kind of problem. Returns what it did — answered,
+     * skipped, and whose codes were skipped — plus the run's fresh counts,
+     * so the screen states the outcome instead of re-reading and guessing.
+     */
+    public function bulkResolve(
+        BulkResolveAttendanceImportLinesRequest $request,
+        AttendanceImport $attendance_import,
+    ): JsonResponse {
+        $result = $this->imports->resolveMany($attendance_import, $request->validated(), $request->user());
+
+        return response()->json([
+            ...$result,
+            'import' => AttendanceImportResource::make($this->imports->fresh($attendance_import))->resolve(),
+        ]);
     }
 
     public function resolveLine(

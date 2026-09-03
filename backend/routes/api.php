@@ -955,7 +955,12 @@ Route::prefix('v1')->group(function () {
             Route::get('attendance-imports', [AttendanceImportController::class, 'index']);
             Route::post('attendance-imports', [AttendanceImportController::class, 'store']);
             Route::get('attendance-imports/{attendance_import}', [AttendanceImportController::class, 'show']);
+            // The review's PERSON grain, and one answer for one kind of
+            // problem. Both sit beside the line list rather than replacing
+            // it: the same lines, at the grain the reviewer is working at.
+            Route::get('attendance-imports/{attendance_import}/employees', [AttendanceImportController::class, 'employees']);
             Route::get('attendance-imports/{attendance_import}/lines', [AttendanceImportController::class, 'lines']);
+            Route::post('attendance-imports/{attendance_import}/lines/bulk-resolve', [AttendanceImportController::class, 'bulkResolve']);
             Route::patch('attendance-imports/{attendance_import}/lines/{line}', [AttendanceImportController::class, 'resolveLine']);
             Route::post('attendance-imports/{attendance_import}/apply', [AttendanceImportController::class, 'apply']);
         });

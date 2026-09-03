@@ -12,6 +12,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Pagination\LengthAwarePaginator as Paginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\LazyCollection;
 use Illuminate\Validation\ValidationException;
@@ -39,6 +40,9 @@ use Illuminate\Validation\ValidationException;
 class AttendanceImportService
 {
     private const INSERT_CHUNK = 500;
+
+    /** Lines answered per pass in a bulk sweep — a month is ~600 of them. */
+    private const RESOLVE_CHUNK = 200;
 
     public function __construct(
         private readonly HrmsListQuery $query,
@@ -233,6 +237,119 @@ class AttendanceImportService
             ->withQueryString();
     }
 
+    /**
+     * THE REVIEW'S PERSON GRAIN: one row per employee in the run, with the
+     * month beside them.
+     *
+     * Why this exists at all: the line list is 1,829 rows for a 59-person
+     * July, the same person repeated thirty-one times, and it can never
+     * answer "how is one person's month". HR reads a muster per person, so
+     * the screen offers that shape and this builds it.
+     *
+     * TWO queries, not one per employee and not one big load: an aggregate
+     * grouped by code (counted in SQL), then the day states for the CURRENT
+     * PAGE's codes only. Search and paging are applied to the aggregate
+     * before the days are fetched, so a thousand-person month costs about
+     * what a fifty-person one costs.
+     *
+     * @param  array<string, mixed>  $filters
+     * @return LengthAwarePaginator<int, array<string, mixed>>
+     */
+    public function paginateEmployees(AttendanceImport $import, int $perPage, array $filters = []): LengthAwarePaginator
+    {
+        $aggregates = AttendanceImportLine::query()
+            ->where('attendance_import_id', $import->id)
+            ->groupBy('employee_code')
+            ->select('employee_code')
+            ->selectRaw('MAX(employee_name) as employee_name')
+            ->selectRaw('MAX(employee_id) as employee_id')
+            ->selectRaw('COUNT(*) as day_count')
+            ->selectRaw('SUM(CASE WHEN issue IS NOT NULL AND resolution IS NULL THEN 1 ELSE 0 END) as open_count')
+            ->selectRaw('SUM(CASE WHEN issue IS NOT NULL AND resolution IS NOT NULL THEN 1 ELSE 0 END) as resolved_count')
+            ->selectRaw('SUM(CASE WHEN issue IS NULL THEN 1 ELSE 0 END) as clean_count')
+            ->get();
+
+        if (($term = $this->query->term($filters)) !== null) {
+            $needle = mb_strtolower($term);
+            $aggregates = $aggregates->filter(
+                fn ($row) => str_contains(mb_strtolower((string) $row->employee_code), $needle)
+                    || str_contains(mb_strtolower((string) $row->employee_name), $needle)
+            );
+        }
+
+        // The people with something to answer first — that is the work —
+        // then in code order, so two loads never disagree.
+        $aggregates = $aggregates->sortBy([['open_count', 'desc'], ['employee_code', 'asc']])->values();
+
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $rows = $aggregates->forPage($page, $perPage)->values();
+
+        $employees = Employee::query()
+            ->whereIn('id', $rows->pluck('employee_id')->filter()->all())
+            ->get(['id', 'department', 'designation'])
+            ->keyBy('id');
+
+        $days = $this->dayStates($import, $rows->pluck('employee_code')->all());
+
+        $data = $rows->map(function ($row) use ($employees, $days): array {
+            $employee = $row->employee_id === null ? null : $employees->get($row->employee_id);
+
+            return [
+                'employee_code' => (string) $row->employee_code,
+                'employee_name' => (string) $row->employee_name,
+                'employee_id' => $row->employee_id === null ? null : (int) $row->employee_id,
+                'known' => $row->employee_id !== null,
+                'department' => $employee?->department,
+                'designation' => $employee?->designation,
+                'day_count' => (int) $row->day_count,
+                'open_count' => (int) $row->open_count,
+                'resolved_count' => (int) $row->resolved_count,
+                'clean_count' => (int) $row->clean_count,
+                'days' => $days[(string) $row->employee_code] ?? [],
+            ];
+        })->all();
+
+        return new Paginator(
+            $data,
+            $aggregates->count(),
+            $perPage,
+            $page,
+            ['path' => Paginator::resolveCurrentPath(), 'pageName' => 'page'],
+        );
+    }
+
+    /**
+     * The month strip for the given people: one entry per day the report
+     * carried, in date order. A day with no answer yet IS the thing to fix,
+     * so it says so rather than borrowing the raw status and looking
+     * decided.
+     *
+     * @param  list<string>  $codes
+     * @return array<string, list<array{date: string, state: string}>>
+     */
+    private function dayStates(AttendanceImport $import, array $codes): array
+    {
+        if ($codes === []) {
+            return [];
+        }
+
+        $states = [];
+        AttendanceImportLine::query()
+            ->where('attendance_import_id', $import->id)
+            ->whereIn('employee_code', $codes)
+            ->orderBy('date')
+            ->orderBy('id')
+            ->get(['employee_code', 'date', 'resolution'])
+            ->each(function (AttendanceImportLine $line) use (&$states): void {
+                $states[$line->employee_code][] = [
+                    'date' => $line->date->toDateString(),
+                    'state' => $line->resolution?->value ?? 'needs_fix',
+                ];
+            });
+
+        return $states;
+    }
+
     /** @param  array<string, mixed>  $filters */
     private function linesQuery(AttendanceImport $import, array $filters): Builder
     {
@@ -242,6 +359,10 @@ class AttendanceImportService
 
         if (($term = $this->query->term($filters)) !== null) {
             $this->query->whereImportLineMatches($query, $term);
+        }
+
+        if (! empty($filters['employee_code'])) {
+            $query->where('employee_code', $filters['employee_code']);
         }
 
         $this->applyIssueFilter($query, $filters['issue'] ?? null);
@@ -281,24 +402,93 @@ class AttendanceImportService
             ]);
         }
 
+        return DB::transaction(fn () => $this->answer($line, $data, $user)->load(['employee', 'resolver']));
+    }
+
+    /**
+     * ONE answer for ONE KIND of problem, across every day of the run that
+     * still carries it. The same write as resolve() — the same fill, the
+     * same AttendanceService::mark — applied in one transaction over the
+     * lines a filter selects, never over a list of ids the client chose.
+     *
+     * TWO REFUSALS AND ONE SKIP, all of them deliberate:
+     *   · An APPLIED run takes no further answer. The month has been written
+     *     and closed; reopening it silently through a bulk button would put
+     *     payroll figures behind a screen nobody was looking at.
+     *   · A day ALREADY ANSWERED is never touched (`whereNull('resolution')`).
+     *     Somebody decided that day; a bulk confirm is not a decision about
+     *     it. This is what lets the reviewer answer the exceptions first and
+     *     sweep the rest afterwards.
+     *   · A line whose employee code is NOT IN THE MASTER is skipped and
+     *     COUNTED, never guessed. Its codes come back so the screen can name
+     *     them: the fix is to add the person, not to pick one.
+     *
+     * @param  array{issue: string, resolution: string, check_in?: ?string, check_out?: ?string, notes?: ?string}  $data
+     * @return array{resolved: int, skipped: int, skipped_codes: list<string>}
+     */
+    public function resolveMany(AttendanceImport $import, array $data, Authenticatable $user): array
+    {
+        if ($import->status === AttendanceImportStatus::Applied) {
+            throw ValidationException::withMessages([
+                'issue' => 'This run has been applied. Corrections to an applied month are made on the Attendance screen.',
+            ]);
+        }
+
+        $resolved = 0;
+        $skipped = [];
+
+        DB::transaction(function () use ($import, $data, $user, &$resolved, &$skipped) {
+            $import->lines()
+                ->where('issue', $data['issue'])
+                ->whereNull('resolution')
+                ->orderBy('id')
+                ->chunkById(self::RESOLVE_CHUNK, function ($lines) use ($data, $user, &$resolved, &$skipped) {
+                    foreach ($lines as $line) {
+                        $this->relink($line);
+                        if ($line->employee_id === null) {
+                            $skipped[$line->employee_code] = true;
+                            $line->save();
+
+                            continue;
+                        }
+
+                        $this->answer($line, $data, $user);
+                        $resolved++;
+                    }
+                });
+        });
+
+        $codes = array_keys($skipped);
+        sort($codes);
+
+        return ['resolved' => $resolved, 'skipped' => count($codes), 'skipped_codes' => $codes];
+    }
+
+    /**
+     * The write behind both resolve() and resolveMany(), without the
+     * transaction so the bulk path can hold one for the whole sweep. A
+     * time the caller did not give falls back to what the report printed.
+     *
+     * @param  array{resolution: string, check_in?: ?string, check_out?: ?string, notes?: ?string}  $data
+     */
+    private function answer(AttendanceImportLine $line, array $data, Authenticatable $user): AttendanceImportLine
+    {
         $resolution = Resolution::from($data['resolution']);
         $timed = in_array($resolution, [Resolution::Present, Resolution::HalfDay], true);
 
-        return DB::transaction(function () use ($line, $data, $user, $resolution, $timed) {
-            $line->fill([
-                'resolution' => $resolution,
-                'resolved_check_in' => $timed ? ($this->time($data['check_in'] ?? null) ?? $line->first_in) : null,
-                'resolved_check_out' => $timed ? ($this->time($data['check_out'] ?? null) ?? $line->last_out) : null,
-                'notes' => $data['notes'] ?? $line->notes,
-                'resolved_by' => $user->getAuthIdentifier(),
-                'resolved_at' => now(),
-            ]);
+        $line->fill([
+            'resolution' => $resolution,
+            'resolved_check_in' => $timed ? ($this->time($data['check_in'] ?? null) ?? $line->first_in) : null,
+            'resolved_check_out' => $timed ? ($this->time($data['check_out'] ?? null) ?? $line->last_out) : null,
+            'notes' => $data['notes'] ?? $line->notes,
+            'resolved_by' => $user->getAuthIdentifier(),
+            'resolved_at' => now(),
+        ]);
 
-            $this->writeAttendance($line);
-            $line->save();
+        $this->writeAttendance($line);
+        $line->save();
 
-            return $line->load(['employee', 'resolver']);
-        });
+        return $line;
     }
 
     /**

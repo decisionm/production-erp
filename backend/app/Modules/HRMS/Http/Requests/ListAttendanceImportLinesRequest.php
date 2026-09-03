@@ -28,6 +28,10 @@ class ListAttendanceImportLinesRequest extends FormRequest
 
         return [
             'q' => ['sometimes', 'nullable', 'string', 'max:100'],
+            // The person panel asks for ONE employee's days. `q` is a LIKE
+            // and would also match a longer code that starts the same way;
+            // this is the exact match that panel needs.
+            'employee_code' => ['sometimes', 'nullable', 'string', 'max:32'],
             'issue' => ['sometimes', 'nullable', Rule::in([...self::ISSUE_FILTERS, ...$kinds])],
             'per_page' => ['sometimes', 'nullable', 'integer', 'between:1,'.HrmsListQuery::PER_PAGE_MAX],
             'page' => ['sometimes', 'nullable', 'integer', 'min:1'],
