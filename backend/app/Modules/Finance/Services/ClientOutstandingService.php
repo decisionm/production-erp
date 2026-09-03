@@ -232,6 +232,16 @@ class ClientOutstandingService
             'customer_id' => $customer?->id,
             'customer_code' => $customer?->code,
             'customer_name' => $customer?->name,
+            // THE ADDRESS A FOLLOW-UP DRAFT FILLS ITSELF IN WITH, once a
+            // ledger has been matched to a customer. It is null on every row
+            // on this instance today — nobody has linked a Tally party yet —
+            // and that is exactly why it is here: the follow-up control
+            // composes the same draft with or without it, and this half stops
+            // being empty by itself as Accounts match the ledgers up.
+            // IT GRANTS NOBODY THE POWER TO MAIL A CLIENT. Nothing on this
+            // page sends: the draft opens in the operator's own mail client
+            // and a person decides whether to send it.
+            'customer_email' => $this->contactEmail($customer),
             'party_ledger_name' => $ledgerName,
             'party_ledger_guid' => $guid,
             'is_linked' => $customer !== null,
@@ -249,6 +259,19 @@ class ClientOutstandingService
             'bills' => [],
             'pending_orders' => [],
         ];
+    }
+
+    /**
+     * The linked customer's address, or null. A blank or whitespace-only
+     * column is NOT an address — it would compose a recipient that is not
+     * one — so it is reported exactly as no linked customer is: null. The
+     * reader has one thing to test, not three.
+     */
+    private function contactEmail(?Customer $customer): ?string
+    {
+        $email = trim((string) $customer?->email);
+
+        return $email === '' ? null : $email;
     }
 
     /**
