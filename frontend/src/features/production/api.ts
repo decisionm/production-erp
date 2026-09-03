@@ -1,6 +1,7 @@
 import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type { BomListFilters } from './bomsList';
+import { type CorrectableFilters, correctableQuery } from './correctableFilters';
 import { CORRECTION_READ_PER_PAGE, type EntryWalk, walkEntryPages } from './correctionReads';
 import type { MoldListFilters } from './moldsList';
 import type { ReworkOrderListFilters } from './reworkOrdersList';
@@ -432,6 +433,18 @@ export interface ShiftProductionEntryFilters {
      */
     awaiting_correction?: 1;
     correctable?: 1;
+    /**
+     * The "Earlier batches — still correctable" control row (03-Sep-2026,
+     * Task 1/2): additive to every filter above. `item_id` is the product,
+     * exact match; `q` is the batch number only — trimmed, blank omitted;
+     * `returned` reuses the same boolean-flag shape as `correctable` /
+     * `awaiting_correction` (1 asks, absent is no filter); `sort` is
+     * `newest` (the server's own default) or `oldest`.
+     */
+    item_id?: number;
+    q?: string;
+    returned?: 1;
+    sort?: 'newest' | 'oldest';
     per_page?: number;
     page?: number;
 }
@@ -505,9 +518,22 @@ export async function listAwaitingCorrectionEntries(): Promise<EntryWalk> {
         }));
 }
 
-export async function listCorrectableEntries(): Promise<EntryWalk> {
-    return walkEntryPages((page) =>
-        listShiftProductionEntries({ status: 'pending', correctable: 1, per_page: CORRECTION_READ_PER_PAGE, page }));
+/**
+ * One page of "Earlier batches — still correctable" (03-Sep-2026, Task 2),
+ * replacing the walk-every-page read: the control row narrows and sorts,
+ * the pager below the cards turns the page, and the server's own `meta`
+ * drives both. `filters` defaults to `{}` — no filters, page 1, sort
+ * newest — which is exactly the request the old `listCorrectableEntries()`
+ * always sent (`status=pending&correctable=1`), so the DEFAULT view is
+ * unchanged: every correctable batch, newest first, nothing hidden by a
+ * filter nobody set. `correctableQuery` (correctableFilters.ts) builds the
+ * params; this function's only job is the one request.
+ */
+export async function listCorrectableEntries(
+    filters: CorrectableFilters = {},
+    page: number = 1,
+): Promise<Paginated<ShiftProductionEntry>> {
+    return listShiftProductionEntries(correctableQuery(filters, page));
 }
 
 /**

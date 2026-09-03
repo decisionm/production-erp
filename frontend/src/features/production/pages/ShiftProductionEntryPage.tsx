@@ -8,7 +8,7 @@ import {
 } from '@ant-design/icons';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Checkbox, Col, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, type InputRef, message, Modal, Radio, Row, Segmented, Select, Space, Table, Tag, TimePicker, Tooltip, Typography } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, type InputRef, message, Modal, Pagination, Radio, Row, Segmented, Select, Space, Switch, Table, Tag, TimePicker, Tooltip, Typography } from 'antd';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -89,6 +89,7 @@ import {
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
 import { correctionLists } from '@/features/production/correctionReads';
+import { correctableFiltersActive, type CorrectableFilters } from '@/features/production/correctableFilters';
 // The SAME label the Quality queue's row tag shows, off the SAME
 // `quality_return` key — see returnedByQuality.ts for why this is not a
 // duplicate of `readReturnReason`/`correction` above.
@@ -117,6 +118,7 @@ import { roundPer, useProductionSettings } from '@/features/production/packing';
 import { itemLabel, uomOf } from '@/lib/itemLabel';
 import { apiErrorParts } from '@/lib/apiError';
 import { showApiError } from '@/lib/showApiError';
+import { pageRangeLine } from '@/lib/tableProps';
 import {
     buildStartBatchStandardUrl,
     hasStartBatchResume,
@@ -1528,6 +1530,16 @@ export default function ShiftProductionEntryPage() {
     const stateStyles = useMemo(() => stateStyle(themeMode), [themeMode]);
     const [selectedShiftId, setSelectedShiftId] = useState<number | undefined>(undefined);
     const [graceBannerDismissed, setGraceBannerDismissed] = useState(false);
+    // "Earlier batches — still correctable" control row (03-Sep-2026, Task
+    // 2): the committed filters and the current page. Not URL-synced —
+    // this is one card list embedded in a much larger operational page, not
+    // a dedicated list route, and the default (empty filters, page 1) is
+    // exactly today's unfiltered view.
+    const [correctableFilters, setCorrectableFilters] = useState<CorrectableFilters>({});
+    const [correctablePage, setCorrectablePage] = useState(1);
+    // The search box's own draft, separate from the committed `q`, so
+    // typing does not requery on every keystroke — only Enter/search does.
+    const [correctableSearchDraft, setCorrectableSearchDraft] = useState('');
     const [startingMachine, setStartingMachine] = useState<WorkCenter | null>(null);
     const [pendingStartBatchResume, setPendingStartBatchResume] = useState<StartBatchResumeDraft | null>(null);
     const pendingStartBatchResumeRef = useRef<StartBatchResumeDraft | null>(null);
@@ -1746,10 +1758,14 @@ export default function ShiftProductionEntryPage() {
         retry: false,
     });
     const { data: correctableRead } = useQuery({
-        queryKey: ['production', 'shift-production-entries', 'correctable'],
-        queryFn: listCorrectableEntries,
+        queryKey: ['production', 'shift-production-entries', 'correctable', correctableFilters, correctablePage],
+        queryFn: () => listCorrectableEntries(correctableFilters, correctablePage),
         refetchInterval: 60000,
         retry: false,
+        // Keeps the current page's cards on screen while a filter change or
+        // the 60s poll fetches the next answer, instead of the list
+        // flashing empty between requests.
+        placeholderData: (previous) => previous,
     });
     // Authoritative machine-running state — every in-progress batch across
     // all shifts/dates, unpaginated. Distinct from `completedToday` (the
@@ -2153,9 +2169,24 @@ export default function ShiftProductionEntryPage() {
      */
     const { awaitingCorrection, correctableEarlier } = correctionLists({
         awaiting: awaitingCorrectionRead?.entries,
-        correctable: correctableRead?.entries,
+        correctable: correctableRead?.data,
         completedToday,
     });
+    // The control row's Clear button, and whether the (now server-paged,
+    // server-filtered) section has anything to show for the current
+    // filters — distinct from `correctableEarlier.length`, which is the
+    // PARITY-GUARDED count for just this page.
+    const correctableFiltersOn = correctableFiltersActive(correctableFilters);
+    const correctableSectionVisible = correctableEarlier.length > 0 || correctableFiltersOn;
+    const updateCorrectableFilters = (patch: Partial<CorrectableFilters>) => {
+        setCorrectableFilters((prev) => ({ ...prev, ...patch }));
+        setCorrectablePage(1);
+    };
+    const clearCorrectableFilters = () => {
+        setCorrectableFilters({});
+        setCorrectableSearchDraft('');
+        setCorrectablePage(1);
+    };
 
     // A grid outage can happen more than once in a shift — this is a list,
     // not a single per-shift value, so every "Log Power Interruption" adds
@@ -6166,16 +6197,100 @@ export default function ShiftProductionEntryPage() {
                 nobody reads on the day it matters. They sit under the day's work
                 instead, with the same eligibility gate (canAmendCompletion) and
                 the same drawer — only the framing changed. */}
-            {correctableEarlier.length > 0 && (
+            {correctableSectionVisible && (
                 <div style={{ marginTop: 32 }}>
+                    {/* THE CONTROL ROW (03-Sep-2026, Task 2) — batch number, Machine,
+                        Shift and Product narrow the same server read Task 1 taught these
+                        filters to; the date range reuses date_from/date_to; Returned and
+                        the sort switch are the two remaining server params. Every control
+                        writes into `correctableFilters` and resets to page 1 — the pager
+                        below is the only thing that moves the page on its own. Machine,
+                        Shift and Product options are the SAME lists the rest of this page
+                        already reads (activeWorkCenters, shiftOptions, itemOptions) — no
+                        new master read for this row. */}
+                    <Space wrap size={8} style={{ marginBottom: 16 }}>
+                        <Input.Search
+                            allowClear
+                            placeholder="Batch number"
+                            style={{ width: 180 }}
+                            value={correctableSearchDraft}
+                            onChange={(event) => setCorrectableSearchDraft(event.target.value)}
+                            onSearch={(value) => updateCorrectableFilters({ q: value.trim() || undefined })}
+                        />
+                        <Select<number>
+                            allowClear
+                            showSearch
+                            optionFilterProp="label"
+                            placeholder="Machine"
+                            style={{ width: 160 }}
+                            options={activeWorkCenters.map((wc) => ({ value: wc.id, label: wc.name }))}
+                            value={correctableFilters.work_center_id}
+                            onChange={(value) => updateCorrectableFilters({ work_center_id: value ?? undefined })}
+                        />
+                        <Select<number>
+                            allowClear
+                            placeholder="Shift"
+                            style={{ width: 140 }}
+                            options={shiftOptions}
+                            value={correctableFilters.shift_id}
+                            onChange={(value) => updateCorrectableFilters({ shift_id: value ?? undefined })}
+                        />
+                        <Select<number>
+                            allowClear
+                            showSearch
+                            optionFilterProp="label"
+                            placeholder="Product"
+                            style={{ width: 220 }}
+                            options={itemOptions}
+                            value={correctableFilters.item_id}
+                            onChange={(value) => updateCorrectableFilters({ item_id: value ?? undefined })}
+                        />
+                        <DatePicker.RangePicker
+                            allowEmpty={[true, true]}
+                            placeholder={['Date from', 'to']}
+                            value={[
+                                correctableFilters.date_from ? dayjs(correctableFilters.date_from) : null,
+                                correctableFilters.date_to ? dayjs(correctableFilters.date_to) : null,
+                            ]}
+                            onChange={(range) =>
+                                updateCorrectableFilters({
+                                    date_from: range?.[0]?.format('YYYY-MM-DD'),
+                                    date_to: range?.[1]?.format('YYYY-MM-DD'),
+                                })
+                            }
+                        />
+                        <Space size={4}>
+                            <Typography.Text>Returned</Typography.Text>
+                            <Switch
+                                checked={!!correctableFilters.returned}
+                                onChange={(checked) => updateCorrectableFilters({ returned: checked || undefined })}
+                            />
+                        </Space>
+                        <Segmented
+                            value={correctableFilters.sort ?? 'newest'}
+                            onChange={(value) => updateCorrectableFilters({ sort: value as 'newest' | 'oldest' })}
+                            options={[
+                                { label: 'Newest first', value: 'newest' },
+                                { label: 'Oldest first', value: 'oldest' },
+                            ]}
+                        />
+                        {correctableFiltersOn && (
+                            <Button size="small" onClick={clearCorrectableFilters}>
+                                Clear
+                            </Button>
+                        )}
+                    </Space>
                     <SectionHeading
                         title="Earlier batches — still correctable"
                         extra={
                             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                {correctableEarlier.length} batch{correctableEarlier.length === 1 ? '' : 'es'} · quality has not checked these yet
+                                {pageRangeLine(correctableRead?.meta, 'batches')} · quality has not checked these yet
                             </Typography.Text>
                         }
                     />
+                    {correctableEarlier.length === 0 && (
+                        <Typography.Text type="secondary">No batches match these filters.</Typography.Text>
+                    )}
                     <Space direction="vertical" size={6} style={{ width: '100%' }}>
                         {correctableEarlier.map((entry) => {
                             const returnedTag = returnedTagText(entry.quality_return);
@@ -6225,6 +6340,18 @@ export default function ShiftProductionEntryPage() {
                             );
                         })}
                     </Space>
+                    {correctableRead && correctableRead.meta.last_page > 1 && (
+                        <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+                            <Pagination
+                                size="small"
+                                current={correctableRead.meta.current_page}
+                                pageSize={correctableRead.meta.per_page}
+                                total={correctableRead.meta.total}
+                                showSizeChanger={false}
+                                onChange={(nextPage) => setCorrectablePage(nextPage)}
+                            />
+                        </div>
+                    )}
                 </div>
             )}
 
