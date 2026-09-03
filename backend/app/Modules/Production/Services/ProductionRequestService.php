@@ -47,6 +47,9 @@ class ProductionRequestService
         private readonly StockReservationService $reservations,
     ) {}
 
+    /** Relations both `queue()` and `withStatuses()` load — one list, one place. */
+    private const WITH = ['item:id,sku,name,display_name,uom', 'salesOrderLine.salesOrder.customer:id,name', 'requestedBy:id,name'];
+
     // ---- reads ------------------------------------------------------------
 
     /**
@@ -58,9 +61,38 @@ class ProductionRequestService
     {
         $requests = ProductionRequest::query()
             ->open()
-            ->with(['item:id,sku,name,display_name,uom', 'salesOrderLine.salesOrder.customer:id,name', 'requestedBy:id,name'])
+            ->with(self::WITH)
             ->orderBy('priority')
             ->orderBy('id')
+            ->get();
+
+        foreach ($requests as $request) {
+            $this->decorate($request);
+        }
+
+        return $requests;
+    }
+
+    /**
+     * Requests in the named statuses, newest first — the LOOK-BACK reader
+     * the owner asked for on 03-Sep-2026 (DEC-20260902-032 leaves a produced
+     * request out of the queue with no other way to see it again).
+     *
+     * `queue()` stays the floor's open worklist, ordered by priority and
+     * never touched here; this one never reorders, and is never the source
+     * for Start or Cancel — decorate() still stamps `can` on every row so a
+     * finished row reads as read-only (start/cancel/reorder all false for a
+     * final status), but nothing on this path writes.
+     *
+     * @param  array<int, ProductionRequestStatus>  $statuses
+     * @return Collection<int, ProductionRequest>
+     */
+    public function withStatuses(array $statuses): Collection
+    {
+        $requests = ProductionRequest::query()
+            ->with(self::WITH)
+            ->whereIn('status', array_map(fn (ProductionRequestStatus $s) => $s->value, $statuses))
+            ->orderByDesc('id')
             ->get();
 
         foreach ($requests as $request) {

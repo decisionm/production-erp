@@ -4,8 +4,10 @@ namespace App\Modules\Production\Http\Controllers;
 
 use App\Http\Controllers\Controller;
 use App\Modules\Production\Http\Requests\CancelProductionRequestRequest;
+use App\Modules\Production\Http\Requests\ListProductionRequestsRequest;
 use App\Modules\Production\Http\Requests\ReorderProductionRequestsRequest;
 use App\Modules\Production\Http\Resources\ProductionRequestResource;
+use App\Modules\Production\Models\Enums\ProductionRequestStatus;
 use App\Modules\Production\Models\ProductionRequest;
 use App\Modules\Production\Services\ProductionRequestService;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -36,16 +38,35 @@ class ProductionRequestController extends Controller
     public function __construct(private readonly ProductionRequestService $requests) {}
 
     /**
-     * The queue in priority order — everything still owed.
+     * No `status` — the queue in priority order, everything still owed,
+     * exactly as before this endpoint could also look back (S9/DEC-
+     * 20260902-032 retire a request out of the queue on their own, and
+     * until 03-Sep-2026 nothing could see it again).
      *
      * Deliberately NOT paginated: it is a worklist a person reorders by
      * dragging rows against each other, and reorder() renumbers the WHOLE
      * queue in one call. A page of it would let somebody reorder a queue
      * they cannot see all of.
+     *
+     * `status[]=produced&status[]=cancelled` (or any mix of the four) is
+     * the LOOK-BACK read instead, newest first, via withStatuses() — a
+     * different reader, never the queue's own ordering, and read-only: this
+     * action still has no write in it.
      */
-    public function index(): AnonymousResourceCollection
+    public function index(ListProductionRequestsRequest $request): AnonymousResourceCollection
     {
-        return ProductionRequestResource::collection($this->requests->queue());
+        $statuses = $request->validated('status');
+
+        if ($statuses === null || $statuses === []) {
+            return ProductionRequestResource::collection($this->requests->queue());
+        }
+
+        return ProductionRequestResource::collection(
+            $this->requests->withStatuses(array_map(
+                fn (string $status) => ProductionRequestStatus::from($status),
+                $statuses,
+            )),
+        );
     }
 
     /** The whole queue's new order — the floor's call (production.manage). */
