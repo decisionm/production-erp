@@ -86,6 +86,24 @@ class PermissionSeeder extends Seeder
             $permissions->firstWhere('name', 'procurement.manage'),
         ];
 
-        Role::findOrCreate('Accounts', 'web')->givePermissionTo($procurementPerms);
+        // AND THE SAME GRANT FOR STORE (DEC-20260903-008). Store already held
+        // procurement.view on the live instance — it could see procurement
+        // but not act in it, so the storekeeper was refused at approval.
+        // The whole delta is procurement.manage, ADDED to whatever the Roles
+        // screen has given this role.
+        //
+        // FC-06 IS INTACT, WITH ONE PRACTICAL CONSEQUENCE. The purchase rate
+        // is Owner/Accounts only and the gate ships: PurchaseOrderLineResource
+        // and GoodsReceiptNoteLineResource OMIT unit_price for a reader
+        // without finance.*, and supplier bills sit behind module:finance
+        // entirely — so this grant hands Store no rate. But creating and
+        // amending a purchase order both REQUIRE unit_price, so a Store user
+        // cannot amend an order without typing a rate they cannot read, which
+        // would overwrite the real one. Purchase orders stay with Accounts and
+        // the owner in practice; what this grant is for is requisition
+        // approval and goods receipts.
+        foreach (['Accounts', 'Store'] as $roleName) {
+            Role::findOrCreate($roleName, 'web')->givePermissionTo($procurementPerms);
+        }
     }
 }
