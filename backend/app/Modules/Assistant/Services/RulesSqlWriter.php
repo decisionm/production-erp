@@ -72,9 +72,17 @@ class RulesSqlWriter implements SqlWriter
      */
     private static function refusal(): string
     {
-        $labels = array_map(static fn (QuestionRule $r) => $r->label, RuleBook::all());
+        // THE EXAMPLES, NOT THE LABELS. A label is the rule's internal name
+        // ("Output by machine, last 30 days"); the example is the question a
+        // person types ("Output by machine"). Printing labels gave the page
+        // two vocabularies for one thing — the chips offered one wording and
+        // the refusal answered in another.
+        $examples = array_values(array_filter(array_map(
+            static fn (QuestionRule $rule) => $rule->example,
+            RuleBook::all(),
+        )));
 
-        return 'I can only answer set questions on this server. Try one of: '
-            .implode('; ', array_slice($labels, 0, 8)).'.';
+        // Four, as on the empty state. Eight was a menu to read, not a hint.
+        return 'I cannot answer that one yet. Try: '.implode('; ', array_slice($examples, 0, 4)).'.';
     }
 }
