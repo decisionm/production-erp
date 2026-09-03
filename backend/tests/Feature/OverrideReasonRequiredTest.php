@@ -20,8 +20,9 @@ use Tests\TestCase;
  * DEC-20260902-021, pinned: with an approved machine configuration, a Start
  * Batch that overrides its cycle time or cavities needs a reason; the
  * snapshot keeps the original, the selected value, the reason and the person.
- * A cycle-time override outside the configuration's own cycle_time_min/max
- * is refused whatever the reason — see
+ * A cycle-time override outside the EFFECTIVE bound — the INTERSECTION of
+ * the configuration's own cycle_time_min/max and the machine's, never the
+ * configuration's alone — is refused whatever the reason — see
  * ProductionConfigurationService::assertCycleTimeAllowed().
  */
 class OverrideReasonRequiredTest extends TestCase
@@ -193,16 +194,17 @@ class OverrideReasonRequiredTest extends TestCase
             ->assertStatus(422)->assertJsonValidationErrors(['cycle_time_override']);
     }
 
-    public function test_a_configurations_own_bound_wins_over_the_machines(): void
+    public function test_the_effective_maximum_is_the_lesser_of_configuration_and_machine(): void
     {
         $machine = WorkCenter::create([
             'code' => 'MC-03', 'name' => 'Machine 3', 'is_active' => true,
             'cycle_time_min' => 8, 'cycle_time_max' => 14,
         ]);
-        // The configuration's own range is WIDER than the machine's — 20 is
-        // refused by the machine's max of 14 but allowed by the
-        // configuration's own max of 20, and the configuration must win,
-        // the same precedent assertCavitiesAllowed() sets for cavities.
+        // DEC-20260902-021 reads "within the machine AND the
+        // product-configuration limits" — a CONJUNCTION. The configuration's
+        // own range (4..20) is WIDER than the machine's (8..14); the
+        // effective maximum is the LESSER of the two (14), so 20 is refused
+        // even though the configuration alone would have allowed it.
         $item = $this->readyItemWithConfiguration($machine, 'BTL-502', [
             'default_cycle_time' => 10, 'cycle_time_min' => 4, 'cycle_time_max' => 20,
         ]);
@@ -212,6 +214,63 @@ class OverrideReasonRequiredTest extends TestCase
             'item_id' => $item->id,
             'cycle_time_override' => 20,
             'override_reason' => 'Trying it',
+        ]);
+
+        $this->postJson('/api/v1/production/shift-production-entries', $payload)
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['cycle_time_override'])
+            ->assertJsonPath('errors.cycle_time_override.0', 'Machine 3 has a maximum cycle time of 14.00s.');
+    }
+
+    public function test_disagreeing_machine_and_configuration_limits_are_refused_by_name(): void
+    {
+        $machine = WorkCenter::create([
+            'code' => 'MC-05', 'name' => 'Machine 5', 'is_active' => true,
+            'cycle_time_max' => 14,
+        ]);
+        // The configuration sets only a MINIMUM (15); the machine sets only
+        // a MAXIMUM (14). Resolving each bound independently — even taking
+        // the tighter side of each — inverts into a range that refuses
+        // every value: the effective minimum (15) sits above the effective
+        // maximum (14). That is master data to fix, not a value to test.
+        $item = $this->readyItemWithConfiguration($machine, 'BTL-504', [
+            'default_cycle_time' => 9, 'cycle_time_min' => 15,
+        ]);
+
+        $payload = $this->startPayload([
+            'work_center_id' => $machine->id,
+            'item_id' => $item->id,
+            'cycle_time_override' => 10,
+            'override_reason' => 'Trying it',
+        ]);
+
+        $this->postJson('/api/v1/production/shift-production-entries', $payload)
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['cycle_time_override'])
+            ->assertJsonPath(
+                'errors.cycle_time_override.0',
+                'Machine and configuration cycle-time limits disagree; fix the limits before starting.',
+            );
+    }
+
+    public function test_echoing_the_configurations_own_default_outside_its_bounds_still_starts(): void
+    {
+        $machine = WorkCenter::create(['code' => 'MC-04', 'name' => 'Machine 4', 'is_active' => true]);
+        // default_cycle_time sits OUTSIDE the configuration's own bounds —
+        // legal today: StoreProductionConfigurationRequest validates
+        // cycle_time_max >= cycle_time_min but never checks default_cycle_time
+        // against either.
+        $item = $this->readyItemWithConfiguration($machine, 'BTL-503', [
+            'default_cycle_time' => 20, 'cycle_time_min' => 8, 'cycle_time_max' => 14,
+        ]);
+
+        // The client echoes the prefill back verbatim — not an override, so
+        // DEC-20260902-021's bounds refusal must not fire even though 20
+        // sits outside 8..14. No override_reason: nothing was overridden.
+        $payload = $this->startPayload([
+            'work_center_id' => $machine->id,
+            'item_id' => $item->id,
+            'cycle_time_override' => 20,
         ]);
 
         $this->postJson('/api/v1/production/shift-production-entries', $payload)->assertOk();
