@@ -163,6 +163,16 @@ class ShiftProductionEntryService
      * `-quantity_produced`), replacing the date/id order above with that
      * column and `id desc` as the tie-break. Null — every existing caller —
      * keeps the order exactly as it was; the membership is never touched.
+     *
+     * `$returned` (03-Sep-2026, Task 2 of "Returned by Quality"): a FURTHER
+     * narrowing, applied on top of whatever else the call already asks for
+     * — keeps only rows with at least one entry in
+     * config_snapshot['quality_returns']. On the quality queue
+     * ($awaitingQualityCheck) that predicate can only ever match a batch
+     * that was sent back AND already re-submitted, because the queue itself
+     * already excludes one still awaiting the floor's fix
+     * (whereAwaitingQualityCheck) — this flag narrows the queue, it never
+     * widens it. False — every existing caller — is no filter.
      */
     public function paginate(
         int $perPage = 20,
@@ -181,6 +191,7 @@ class ShiftProductionEntryService
         ?string $q = null,
         bool $oldestFirst = false,
         ?string $sort = null,
+        bool $returned = false,
     ): LengthAwarePaginator {
         $includeCancelled = $includeCancelled || $batchStatus === BatchStatus::Cancelled;
 
@@ -259,6 +270,11 @@ class ShiftProductionEntryService
             ->when($correctable, fn ($query) => $this->whereCorrectable($query))
             ->when($awaitingCorrection, fn ($query) => $this->whereAwaitingCorrection($query))
             ->when($awaitingQualityCheck, fn ($query) => $this->whereAwaitingQualityCheck($query))
+            // whereJsonLength is Laravel's own portable JSON predicate — the
+            // SAME call whereAwaitingCorrection() above already runs on both
+            // drivers this ERP ships on (sqlite in the test suite, mysql
+            // live), so this needs no per-driver whereRaw of its own.
+            ->when($returned, fn ($query) => $query->whereJsonLength('config_snapshot->quality_returns', '>', 0))
             ->when(trim((string) $q) !== '', fn ($query) => $this->whereMatchesTerm($query, trim((string) $q)))
             // The id is the tie-breaker either way: a day's batches share a
             // production_date, and the id is monotonic in creation order.
