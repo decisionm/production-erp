@@ -8,7 +8,7 @@ use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
 use Tests\TestCase;
 
-/** DEC-20260903-005: Accounts holds full procurement write; the seeder only ever adds it. */
+/** DEC-20260903-006: Accounts holds full procurement write; the seeder only ever adds it. */
 class PermissionSeederAccountsProcurementTest extends TestCase
 {
     use RefreshDatabase;
