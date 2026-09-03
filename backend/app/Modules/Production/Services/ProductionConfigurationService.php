@@ -778,11 +778,21 @@ class ProductionConfigurationService
         $cav = $baseCav;
 
         if (($override['cycle_time'] ?? null) !== null) {
-            if ($configuration !== null) {
-                $this->assertCycleTimeAllowed((string) $override['cycle_time'], $configuration);
-            }
             $ct = (string) $override['cycle_time'];
+            // Sending the default back is not an override — it is the form
+            // echoing the prefill, and the bounds check below must not run
+            // on it: a configuration whose OWN default_cycle_time sits
+            // outside its OWN cycle_time_min/max (legal today —
+            // StoreProductionConfigurationRequest never checks the default
+            // against either bound) must still be able to start un-touched.
+            // DEC-20260902-021 scopes the refusal to "whenever the
+            // supervisor overrides", so $ctSource has to be settled BEFORE
+            // assertCycleTimeAllowed() runs, not after.
             $ctSource = ($baseCt !== null && bccomp($baseCt, (string) $override['cycle_time'], 2) === 0) ? $ctSource : 'override';
+
+            if ($configuration !== null && $ctSource === 'override') {
+                $this->assertCycleTimeAllowed($ct, $configuration);
+            }
         }
 
         if (($override['cavities'] ?? null) !== null) {
@@ -846,13 +856,18 @@ class ProductionConfigurationService
     /**
      * DEC-20260902-021: an override outside the effective cycle-time bounds
      * is refused, whatever the reason given — the "future factory decision"
-     * this method was kept empty for. The effective bound is the
-     * CONFIGURATION's own cycle_time_min/cycle_time_max, falling back to the
-     * MACHINE's when the configuration leaves it unset — the same
-     * precedence assertCavitiesAllowed() below uses for
-     * cavities_min/cavities_max, so the configuration's own figure wins
-     * where both exist. cycleTimeWarning() above is left untouched: the
-     * GLOBAL workbook range (the GLOBAL_CYCLE_TIME_MIN/MAX factory-rules
+     * this method was kept empty for. "Within the machine AND the
+     * product-configuration limits" is a CONJUNCTION, not a precedence: the
+     * effective bound is the INTERSECTION of the CONFIGURATION's own
+     * cycle_time_min/cycle_time_max and the MACHINE's — the GREATER of the
+     * two minimums where both exist, the LESSER of the two maximums, and
+     * whichever single source has a bound where the other does not. A
+     * configuration can never widen a run past what its own machine allows.
+     * `assertCavitiesAllowed()` below is deliberately NOT this shape:
+     * `permitted_cavities` is an enumerated allow-list, where a per-pair
+     * configuration overriding the machine's list is coherent, and it is
+     * left untouched. `cycleTimeWarning()` above is also left untouched:
+     * the GLOBAL workbook range (the GLOBAL_CYCLE_TIME_MIN/MAX factory-rules
      * rows, which nothing else reads either — see
      * FactorySetting::READ_BY_SOFTWARE) stays advisory, because the
      * factory's own product master carries 48 approved standards above that
@@ -860,22 +875,57 @@ class ProductionConfigurationService
      */
     private function assertCycleTimeAllowed(string $value, ?ProductionConfiguration $configuration): void
     {
-        $min = $configuration?->cycle_time_min ?? $configuration?->workCenter?->cycle_time_min;
-        $max = $configuration?->cycle_time_max ?? $configuration?->workCenter?->cycle_time_max;
+        $min = $this->tighterCycleTimeMin($configuration?->cycle_time_min, $configuration?->workCenter?->cycle_time_min);
+        $max = $this->tighterCycleTimeMax($configuration?->cycle_time_max, $configuration?->workCenter?->cycle_time_max);
 
         if ($min === null && $max === null) {
             return;
         }
 
-        $machine = $configuration?->workCenter ?? WorkCenter::find($configuration?->work_center_id);
-        $name = $machine->name ?? 'This machine';
+        // A disagreement between the two sources — an intersection that
+        // inverts — is master-data to fix, not a value to compare against.
+        // Said before either bound is tested, so a person is never told
+        // their value fails a minimum that is itself above the maximum.
+        if ($min !== null && $max !== null && bccomp($min, $max, 2) === 1) {
+            throw ValidationException::withMessages([
+                'cycle_time_override' => 'Machine and configuration cycle-time limits disagree; fix the limits before starting.',
+            ]);
+        }
 
-        if ($min !== null && (float) $value < (float) $min) {
+        $name = $configuration?->workCenter?->name ?? 'This machine';
+
+        if ($min !== null && bccomp($value, $min, 2) === -1) {
             throw ValidationException::withMessages(['cycle_time_override' => "{$name} has a minimum cycle time of {$min}s."]);
         }
-        if ($max !== null && (float) $value > (float) $max) {
+        if ($max !== null && bccomp($value, $max, 2) === 1) {
             throw ValidationException::withMessages(['cycle_time_override' => "{$name} has a maximum cycle time of {$max}s."]);
         }
+    }
+
+    /** The GREATER of two optional decimal-string bounds — the intersection's effective minimum. Either side may be absent; both absent is null. */
+    private function tighterCycleTimeMin(?string $configurationBound, ?string $machineBound): ?string
+    {
+        if ($configurationBound === null) {
+            return $machineBound;
+        }
+        if ($machineBound === null) {
+            return $configurationBound;
+        }
+
+        return bccomp($configurationBound, $machineBound, 2) >= 0 ? $configurationBound : $machineBound;
+    }
+
+    /** The LESSER of two optional decimal-string bounds — the intersection's effective maximum. */
+    private function tighterCycleTimeMax(?string $configurationBound, ?string $machineBound): ?string
+    {
+        if ($configurationBound === null) {
+            return $machineBound;
+        }
+        if ($machineBound === null) {
+            return $configurationBound;
+        }
+
+        return bccomp($configurationBound, $machineBound, 2) <= 0 ? $configurationBound : $machineBound;
     }
 
     private function assertCavitiesAllowed(int $value, ?ProductionConfiguration $configuration): void
