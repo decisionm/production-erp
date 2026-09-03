@@ -298,7 +298,7 @@ export default function ItemsPage() {
                 // table.
                 locale={{ emptyText: catalogueEmptyText(facet, warning, warning === null ? search : '') }}
                 pagination={warning === null
-                    ? { pageSize: 20, showSizeChanger: true, pageSizeOptions: [20, 50, 100], showTotal: (t) => `${t} items` }
+                    ? { defaultPageSize: 20, showSizeChanger: true, pageSizeOptions: [20, 50, 100], showTotal: (t) => `${t} items` }
                     : {
                         current: warningPage,
                         pageSize: flagged?.meta.per_page ?? 20,

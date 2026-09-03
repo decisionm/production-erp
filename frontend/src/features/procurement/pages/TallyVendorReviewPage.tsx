@@ -325,7 +325,7 @@ export default function TallyVendorReviewPage({ embedded = false }: { embedded?:
                 loading={isLoading}
                 dataSource={rows}
                 columns={columns}
-                pagination={{ pageSize: 25, showSizeChanger: true }}
+                pagination={{ defaultPageSize: 25, showSizeChanger: true }}
                 locale={{
                     emptyText: (
                         <Empty
