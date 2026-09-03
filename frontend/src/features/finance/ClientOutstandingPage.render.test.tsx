@@ -133,19 +133,21 @@ describe('ClientOutstandingPage', () => {
     });
 
     /**
-     * The reminder control is a PLACEHOLDER, and the thing that makes it safe
-     * is that it cannot be pressed. A live-looking button that silently does
-     * nothing lets an accounts clerk believe a client was chased when nobody
-     * was — so "disabled" is the assertion, not a detail. When reminders are
-     * really wired up, this test is what says so out loud.
+     * The reminder control is the REAL button in its real place, pressable,
+     * before anything can actually send a reminder. What keeps that honest is
+     * not how it looks but what pressing it says: an unchased client whose
+     * screen implies otherwise is money going quiet.
+     *
+     * The assertion is therefore on the SENTENCE, not the label. Wiring
+     * reminders up turns this red and asks whoever does it to say what
+     * pressing the button now means.
      */
-    it('offers a send-reminder seat that cannot yet be pressed', () => {
+    it('offers a send-reminder button that says plainly nothing was sent', () => {
         const html = renderPage();
 
         expect(html).toContain('Send reminder');
-        // The button element itself carries the attribute — matched together
-        // so an unrelated disabled control elsewhere cannot satisfy this.
-        expect(html).toMatch(/<button[^>]*\bdisabled\b[^>]*>(?:(?!<\/button>).)*Send reminder/s);
+        // It is the finished-looking control, not a stub: antd's primary type.
+        expect(html).toMatch(/<button[^>]*ant-btn-primary[^>]*>(?:(?!<\/button>).)*Send reminder/s);
     });
 
     it('keeps the footer aligned once the reminder column is present', () => {
