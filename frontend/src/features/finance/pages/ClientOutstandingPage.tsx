@@ -1,10 +1,11 @@
 import { BellOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Col, Empty, Input, Row, Segmented, Space, Statistic, Table, Tag, Tooltip, Typography, Upload } from 'antd';
+import { Alert, Button, Card, Col, Empty, Input, message, Row, Segmented, Space, Statistic, Table, Tag, Tooltip, Typography, Upload } from 'antd';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '@/features/auth/store';
 import { getClientOutstanding, importClientOutstanding } from '@/features/finance/api';
+import { reminderNotConnectedMessage } from '@/features/finance/clientReminder';
 import {
     OUTSTANDING_IMPORT_ACCEPT,
     type OutstandingImportOutcome,
@@ -342,34 +343,35 @@ export default function ClientOutstandingPage() {
         },
         {
             /*
-             * THE REMINDER PLACEHOLDER — a seat kept for chasing a client,
-             * before anything can chase one.
+             * THE REMINDER SEAT — the real control, in its real place, before
+             * anything can actually send a reminder.
              *
-             * IT IS DISABLED ON PURPOSE, and that is the whole design. A
-             * live-looking button that silently does nothing is worse than no
-             * button at all: an accounts clerk presses it, believes the client
-             * has been chased, and the client is never chased — the money goes
-             * quiet and the screen looks like it worked. A control that cannot
-             * be pressed cannot tell that lie.
+             * IT LOOKS AND PRESSES LIKE THE FINISHED BUTTON, deliberately: the
+             * owner wants to see and use the real thing while the sending side
+             * is built. The one thing it must never do is let somebody believe
+             * a client was chased when nobody was — an unchased client whose
+             * screen says otherwise is money going quiet. So pressing it says,
+             * immediately and by name, that nothing was sent.
              *
-             * The tooltip carries the "why" instead of a sentence on the page
-             * (floor and desk users do not read page blurbs), and the button
-             * keeps its real label so the column that arrives later is the
-             * column that is here now.
+             * WHEN IT IS WIRED UP: replace the handler, and the render test
+             * that asserts this exact wording goes red and asks whoever does it
+             * to say what pressing the button now means. That is the point of
+             * asserting the sentence rather than the label.
              */
             title: 'Reminder',
             key: 'reminder',
-            width: 150,
-            render: () => (
-                <Tooltip title="Not connected yet — reminders cannot be sent from here so far.">
-                    {/* antd fires no mouse event on a disabled control, so the
-                        tooltip needs a wrapper that can receive one. */}
-                    <span>
-                        <Button size="small" icon={<BellOutlined />} disabled>
-                            Send reminder
-                        </Button>
-                    </span>
-                </Tooltip>
+            width: 160,
+            render: (_: unknown, row: ClientOutstanding) => (
+                <Button
+                    size="small"
+                    type="primary"
+                    icon={<BellOutlined />}
+                    onClick={() => {
+                        void message.info(reminderNotConnectedMessage(clientLabel(row)));
+                    }}
+                >
+                    Send reminder
+                </Button>
             ),
         },
     ];
