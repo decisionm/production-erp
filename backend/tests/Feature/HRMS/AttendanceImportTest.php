@@ -142,7 +142,8 @@ class AttendanceImportTest extends TestCase
             ->assertJsonPath('data.issue_count', 3)
             ->assertJsonPath('data.open_count', 3)
             ->assertJsonPath('data.counts', [
-                'open' => 3, 'in_no_out' => 1, 'out_no_in' => 0, 'no_punch' => 1, 'unknown_employee' => 1, 'resolved' => 0, 'clean' => 4,
+                'open' => 3, 'in_no_out' => 1, 'out_no_in' => 0, 'no_punch' => 1, 'unknown_employee' => 1,
+                'hours_unclear' => 0, 'worked_on_week_off' => 0, 'resolved' => 0, 'clean' => 4,
             ])
             ->assertJsonPath('data.file_name', 'july.xlsx');
 

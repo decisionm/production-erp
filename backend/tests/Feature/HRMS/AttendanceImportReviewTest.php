@@ -7,6 +7,7 @@ use App\Modules\HRMS\Models\Attendance;
 use App\Modules\HRMS\Models\AttendanceImport;
 use App\Modules\HRMS\Models\AttendanceImportLine;
 use App\Modules\HRMS\Models\Employee;
+use App\Modules\HRMS\Models\Enums\AttendanceImportIssue;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
@@ -111,6 +112,23 @@ class AttendanceImportReviewTest extends TestCase
         ])->assertCreated();
 
         return AttendanceImport::query()->latest('id')->firstOrFail();
+    }
+
+    public function test_the_counts_carry_every_issue_kind_the_code_knows(): void
+    {
+        $this->actAs();
+        $import = $this->upload();
+
+        $counts = $this->getJson("/api/v1/hrms/attendance-imports/{$import->id}")->assertOk()->json('data.counts');
+
+        // Built from the enum, so a kind added later cannot be left out and
+        // silently show as nothing on the screen.
+        foreach (AttendanceImportIssue::cases() as $issue) {
+            $this->assertArrayHasKey($issue->value, $counts, "counts is missing {$issue->value}");
+        }
+        $this->assertArrayHasKey('open', $counts);
+        $this->assertArrayHasKey('resolved', $counts);
+        $this->assertArrayHasKey('clean', $counts);
     }
 
     // ---- one row per employee ------------------------------------------
