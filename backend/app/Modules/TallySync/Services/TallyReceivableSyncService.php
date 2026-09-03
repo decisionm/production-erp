@@ -94,6 +94,60 @@ class TallyReceivableSyncService
         ];
     }
 
+    /**
+     * BILLS ONLY — replace what is owed, and say nothing about what is still
+     * to ship.
+     *
+     * For an import that came from a report which only ever contained bills:
+     * Tally's Group Outstandings, taken by hand when the agent cannot deliver
+     * a position. Calling sync() with an empty order list would DELETE the
+     * pending sales orders the agent last delivered, silently, as a side
+     * effect of importing something that never claimed to know about them.
+     *
+     * Every other guarantee is sync()'s, unchanged: the same rows, the same
+     * company scoping, the same all-or-nothing transaction, and the same
+     * refusal to wipe a standing position on an export that yielded nothing.
+     *
+     * @param  array<int, array<string, mixed>>  $bills
+     * @return array{bills: int, orders: int, parties: int, as_of: string, skipped_empty: bool}
+     */
+    public function syncBills(array $bills, string $asOf, ?string $company = null): array
+    {
+        $syncedAt = Carbon::now();
+
+        $billRows = $this->billRows($bills, $asOf, $company, $syncedAt);
+
+        // See the class docblock: nothing at all is treated as "we did not
+        // understand the answer", never as "the factory is owed nothing".
+        if ($billRows === []) {
+            return [
+                'bills' => 0,
+                'orders' => 0,
+                'parties' => 0,
+                'as_of' => $asOf,
+                'skipped_empty' => true,
+            ];
+        }
+
+        DB::transaction(function () use ($billRows, $company): void {
+            TallyReceivableBill::query()->where('tally_company', $company)->delete();
+
+            foreach (array_chunk($billRows, 500) as $chunk) {
+                TallyReceivableBill::query()->insert($chunk);
+            }
+        });
+
+        return [
+            'bills' => count($billRows),
+            // The orders this import did not touch are still there; it reports
+            // what it changed, not what happens to be in the table.
+            'orders' => 0,
+            'parties' => collect($billRows)->pluck('party_ledger_name')->unique()->count(),
+            'as_of' => $asOf,
+            'skipped_empty' => false,
+        ];
+    }
+
     /** @return array<int, array<string, mixed>> */
     private function billRows(array $bills, string $asOf, ?string $company, Carbon $syncedAt): array
     {

@@ -89,6 +89,10 @@ import {
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
 import { correctionLists } from '@/features/production/correctionReads';
+// The SAME label the Quality queue's row tag shows, off the SAME
+// `quality_return` key — see returnedByQuality.ts for why this is not a
+// duplicate of `readReturnReason`/`correction` above.
+import { returnedTagText } from '@/features/quality/returnedByQuality';
 import { addedLineWarning } from '@/features/production/addedLine';
 import {
     completedTodaySummary,
@@ -5822,7 +5826,7 @@ export default function ShiftProductionEntryPage() {
                                             style={{
                                                 padding: '6px 8px',
                                                 borderRadius: 6,
-                                                background: '#fafafa',
+                                                background: 'var(--app-inset)',
                                             }}
                                         >
                                             <Typography.Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
@@ -6023,7 +6027,7 @@ export default function ShiftProductionEntryPage() {
                 buttons in a bare <Space>, floating between the grid and the
                 table with nothing to say they belonged together or what they
                 applied to. */}
-            <Card size="small" style={{ marginBottom: 32, background: '#fafafa' }} styles={{ body: { padding: 12 } }}>
+            <Card size="small" style={{ marginBottom: 32, background: 'var(--app-inset)' }} styles={{ body: { padding: 12 } }}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
                     <Typography.Text type="secondary" style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.6, marginInlineEnd: 4 }}>
                         Floor actions
@@ -6173,7 +6177,9 @@ export default function ShiftProductionEntryPage() {
                         }
                     />
                     <Space direction="vertical" size={6} style={{ width: '100%' }}>
-                        {correctableEarlier.map((entry) => (
+                        {correctableEarlier.map((entry) => {
+                            const returnedTag = returnedTagText(entry.quality_return);
+                            return (
                             <Card key={entry.id} size="small">
                                 <div
                                     style={{
@@ -6187,7 +6193,17 @@ export default function ShiftProductionEntryPage() {
                                     <div style={{ minWidth: 0 }}>
                                         <Typography.Text strong>
                                             {entry.batch_number ?? `Batch #${entry.id}`}
-                                        </Typography.Text>
+                                        </Typography.Text>{' '}
+                                        {/* HISTORY, NOT AN INSTRUCTION: this batch may already be
+                                            corrected and re-submitted — the amber "sent back" panel
+                                            below only holds one still awaiting a fix. The reason sits
+                                            in the tooltip because the supervisor already acted on it
+                                            once; this is a record that it happened, not a new ask. */}
+                                        {returnedTag && (
+                                            <Tooltip title={entry.quality_return?.reason ?? undefined}>
+                                                <Tag color="warning">{returnedTag}</Tag>
+                                            </Tooltip>
+                                        )}
                                         <Typography.Text
                                             type="secondary"
                                             style={{ display: 'block', fontSize: 12, wordBreak: 'break-word' }}
@@ -6206,7 +6222,8 @@ export default function ShiftProductionEntryPage() {
                                     </Space>
                                 </div>
                             </Card>
-                        ))}
+                            );
+                        })}
                     </Space>
                 </div>
             )}

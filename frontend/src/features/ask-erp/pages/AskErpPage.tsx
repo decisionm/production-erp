@@ -144,7 +144,7 @@ export default function AskErpPage() {
                                             </Typography.Text>
                                         </div>
                                     ) : (
-                                        <div style={{ background: '#fafafa', padding: 12, borderRadius: 8 }}>
+                                        <div style={{ background: 'var(--app-inset)', padding: 12, borderRadius: 8 }}>
                                             <AnswerCard message={message} result={results[message.id] ?? null} />
                                         </div>
                                     )}

@@ -166,7 +166,7 @@ function OrderRefLine({ order, onOpen }: { order: TraceSalesOrder | null | undef
 
 function DeliveryBlock({ delivery, onOpen }: { delivery: TraceDelivery; onOpen: (target: SalesDocumentTarget) => void }) {
     return (
-        <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 12, marginBottom: 12 }}>
+        <div style={{ border: '1px solid var(--app-rule)', borderRadius: 8, padding: 12, marginBottom: 12 }}>
             <Space size={8} wrap style={{ justifyContent: 'space-between', width: '100%' }}>
                 <Space size={8} wrap>
                     <Button type="link" size="small" style={{ padding: 0 }} onClick={() => onOpen({ kind: 'delivery', id: delivery.id })}>
@@ -192,7 +192,7 @@ function DeliveryBlock({ delivery, onOpen }: { delivery: TraceDelivery; onOpen: 
 
 function InvoiceBlock({ invoice, onOpen }: { invoice: TraceInvoice; onOpen: (target: SalesDocumentTarget) => void }) {
     return (
-        <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 12, marginBottom: 12 }}>
+        <div style={{ border: '1px solid var(--app-rule)', borderRadius: 8, padding: 12, marginBottom: 12 }}>
             <Space size={8} wrap style={{ justifyContent: 'space-between', width: '100%' }}>
                 <Space size={8} wrap>
                     <Button type="link" size="small" style={{ padding: 0 }} onClick={() => onOpen({ kind: 'invoice', id: invoice.id })}>

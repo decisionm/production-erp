@@ -54,6 +54,22 @@ class ShiftProductionEntryResource extends JsonResource
     private ?array $pageAllocationRows = null;
 
     /**
+     * The names behind every quality_return.returned_by id on the page,
+     * keyed by user id — not by entry id like the pageX arrays above,
+     * because a name only depends on which user it is, and one small map
+     * shared by every row is simpler than repeating it per entry. Resolved
+     * ONCE for the whole collection (see collection() below) through
+     * ShiftProductionEntryService::returnedByNames() — a Resource talks to
+     * models through a Service only (module pattern), so the User lookup
+     * lives there, not here — null on a resource made on its own (store/
+     * complete/the return endpoint's own response), which asks the same
+     * service method for its one id. Not a wire field.
+     *
+     * @var array<int, string>|null
+     */
+    private ?array $pageReturnedByNames = null;
+
+    /**
      * A page of entries resolves its Tally links AND its two cost reads in
      * a constant number of queries — TallySyncLinkService::forMany /
      * forEntryIds, ShiftProductionEntryService::materialCosts and
@@ -76,10 +92,12 @@ class ShiftProductionEntryResource extends JsonResource
             $allocationRows = $entries->isEmpty() ? [] : app(BagCostAllocationService::class)->forEntries(
                 $entries->filter(fn (ShiftProductionEntry $entry) => $entry->batch_status === BatchStatus::Completed)->pluck('id')->all(),
             );
-            $rows->each(function (self $row) use ($links, $materialCosts, $allocationRows): void {
+            $returnedByNames = $entries->isEmpty() ? [] : app(ShiftProductionEntryService::class)->returnedByNames($entries);
+            $rows->each(function (self $row) use ($links, $materialCosts, $allocationRows, $returnedByNames): void {
                 $row->pageTallyLinks = $links;
                 $row->pageMaterialCosts = $materialCosts;
                 $row->pageAllocationRows = $allocationRows;
+                $row->pageReturnedByNames = $returnedByNames;
             });
         });
     }
@@ -106,6 +124,12 @@ class ShiftProductionEntryResource extends JsonResource
         // cost blocks below from a single evaluation so they can never
         // disagree about who a rate is for.
         $showsRates = (bool) $request->user()?->canAny(['finance.view', 'finance.manage']);
+
+        // Read ONCE and shared by the two keys below it needs: `correction`
+        // emits it whole, `quality_return` derives the latest row's name
+        // from its `returns` list — so the two can never disagree about
+        // which rows survived the defensive is_array filter.
+        $correctionHistory = app(ShiftProductionEntryService::class)->correctionHistory($this->resource);
 
         return [
             'id' => $this->id,
@@ -304,7 +328,19 @@ class ShiftProductionEntryResource extends JsonResource
             // on figures that were amended, which they are entitled to see.
             // Always present (empty lists before anything happens), same rule
             // as `quality` above.
-            'correction' => app(ShiftProductionEntryService::class)->correctionHistory($this->resource),
+            'correction' => $correctionHistory,
+            // WAS THIS BATCH SENT BACK BY QUALITY, and what did the LAST
+            // return say — the one-line answer `correction` above does not
+            // give: that block is the full audit trail with a raw
+            // `returned_by` id (Production's own screen, which already knows
+            // who its users are); this key is the queue-row answer, the
+            // name resolved rather than an id a badge would have to look up
+            // itself, and only the latest return, because that is the
+            // instruction currently outstanding. `times` counts every
+            // return this batch has ever had. Null when it has never been
+            // returned — never an empty object, so a client can tell "not
+            // returned" from "returned with a blank reason".
+            'quality_return' => $this->qualityReturn($correctionHistory['returns']),
             // What the consumed material actually cost — each line at the
             // unit cost its own issue movement recorded, plus a total that
             // is null (never a partial figure) when any line is unpriced.
@@ -391,6 +427,46 @@ class ShiftProductionEntryResource extends JsonResource
             'helper_name' => $this->helper_name,
             'notes' => $this->notes,
             'created_at' => $this->created_at?->toIso8601String(),
+        ];
+    }
+
+    /**
+     * `quality_return` as toArray() emits it: null when `$returns` (the
+     * SAME defensively-filtered list `correction.returns` carries — see the
+     * shared read in toArray() above) is empty, else its LAST row with
+     * `returned_by` resolved to a name and `times` set to how many returns
+     * there have ever been.
+     *
+     * The name never queries the User model here — Http/Resources talks to
+     * models through a Service only (module pattern). It comes from the
+     * page's precomputed map when this resource was made as part of a
+     * collection (see collection() above); a resource made on its own
+     * (store/complete/the return endpoint's own response) asks the same
+     * service method, ShiftProductionEntryService::returnedByNames(), for
+     * its one id — the same fallback shape tallyLink() below uses, and for
+     * the same reason: a single-entry response is never the busy path a
+     * page is.
+     *
+     * @param  list<array<string, mixed>>  $returns
+     * @return array{returned_by_name: ?string, returned_at: ?string, reason: ?string, times: int}|null
+     */
+    private function qualityReturn(array $returns): ?array
+    {
+        if ($returns === []) {
+            return null;
+        }
+
+        $last = $returns[count($returns) - 1];
+        $returnedById = isset($last['returned_by']) ? (int) $last['returned_by'] : null;
+
+        $names = $this->pageReturnedByNames
+            ?? app(ShiftProductionEntryService::class)->returnedByNames([$this->resource]);
+
+        return [
+            'returned_by_name' => $returnedById === null ? null : ($names[$returnedById] ?? null),
+            'returned_at' => $last['returned_at'] ?? null,
+            'reason' => $last['reason'] ?? null,
+            'times' => count($returns),
         ];
     }
 

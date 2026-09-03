@@ -1,7 +1,7 @@
 {
   "name": "tally-sync-agent",
   "productName": "Tally Sync Agent",
-  "version": "0.4.6",
+  "version": "0.4.8",
   "description": "Local Windows tray agent — bridges the ERP's cloud Tally sync queue to a local Tally installation's XML-HTTP gateway. See ../docs/archive/TALLY-SYNC-MASTER-PLAN.md §11 (archived).",
   "private": true,
   "main": "dist/main.js",

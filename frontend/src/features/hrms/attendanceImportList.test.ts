@@ -15,7 +15,7 @@ describe('the review list on the URL', () => {
 
 describe('lineFilterChips', () => {
     it('puts the server count beside every chip, and none before the server has answered', () => {
-        const chips = lineFilterChips({ open: 3, in_no_out: 1, out_no_in: 0, no_punch: 1, unknown_employee: 1, hours_unclear: 0, worked_on_week_off: 0, resolved: 2, clean: 40 });
+        const chips = lineFilterChips({ open: 3, in_no_out: 1, out_no_in: 0, no_punch: 1, unknown_employee: 1, hours_unclear: 0, worked_on_week_off: 0, report_changed: 0, resolved: 2, clean: 40 });
         expect(chips.map((chip) => chip.label)).toEqual([
             'All',
             'All issues (3)',
@@ -25,6 +25,7 @@ describe('lineFilterChips', () => {
             'Unknown employee (1)',
             'Hours do not add up (0)',
             'Worked on a week off (0)',
+            'Report changed (0)',
             'Resolved (2)',
             'Clean (40)',
         ]);
@@ -37,6 +38,7 @@ describe('lineFilterChips', () => {
             'Unknown employee',
             'Hours do not add up',
             'Worked on a week off',
+            'Report changed',
             'Resolved',
             'Clean',
         ]);

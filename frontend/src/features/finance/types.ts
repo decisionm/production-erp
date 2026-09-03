@@ -151,3 +151,26 @@ export interface ClientOutstandingReport {
     clients: ClientOutstanding[];
     totals: ClientOutstandingTotals;
 }
+
+/**
+ * WHAT ONE UPLOAD OF A TALLY XML EXPORT ACTUALLY DID.
+ *
+ * The counts are of ROWS THE SERVER READ OUT OF THE FILE, not of anything the
+ * ERP computed, and they are the only honest thing to print after an import:
+ * somebody who exported the wrong Tally report needs to see a 0, not a tick.
+ *
+ * `skipped_empty` IS A 200 THAT IS NOT A WIN. It means Tally's export carried
+ * nothing usable and the ERP deliberately KEPT the position it already had —
+ * the opposite of an import that writes an empty debtor book over a real one.
+ * It is neither a failure nor a success and must never render as either;
+ * `outstandingImport.ts` gives it its own sentence and its own tone.
+ */
+export interface ClientOutstandingImportResult {
+    bills: number;
+    orders: number;
+    parties: number;
+    /** The date the position now on file is AS AT — the same fact as the report's `as_of`. */
+    as_of: string;
+    /** True when nothing usable was in the file and the previous position stands. */
+    skipped_empty: boolean;
+}

@@ -111,6 +111,11 @@ columns:
     type: datetime
     nullable: true
     meaning: 'last change'
+  -
+    name: report_changed_at
+    type: datetime
+    nullable: true
+    meaning: 'set when the punch app changed its own figures for a day somebody had already answered; the answer stands and the day is offered for a second look. Null otherwise'
 joins:
   - 'attendance_import_lines.resolved_by = users.id'
   - 'attendance_import_lines.employee_id = employees.id'

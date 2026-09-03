@@ -276,7 +276,7 @@ function LineCostBlock({ line }: { line: SalesCostLine }) {
     const hasActual = actual.actual_unit_cost !== null;
 
     return (
-        <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: 12, marginBottom: 12 }}>
+        <div style={{ border: '1px solid var(--app-rule)', borderRadius: 8, padding: 12, marginBottom: 12 }}>
             <Typography.Text strong>{itemLabel(line.item)}</Typography.Text>
             <Typography.Text type="secondary" style={{ ...caption, ...numeric }}>
                 {line.quantity} × {fmtMoney(line.unit_price)}

@@ -185,6 +185,7 @@ class AttendanceImportService
             'lines as open_count' => fn (Builder $lines) => $lines->whereNotNull('issue')->whereNull('resolution'),
             'lines as resolved_count' => fn (Builder $lines) => $lines->whereNotNull('issue')->whereNotNull('resolution'),
             'lines as clean_count' => fn (Builder $lines) => $lines->whereNull('issue'),
+            'lines as report_changed_count' => fn (Builder $lines) => $lines->whereNotNull('report_changed_at'),
         ];
         foreach (Issue::cases() as $issue) {
             $counts["lines as {$issue->value}_count"] = fn (Builder $lines) => $lines->where('issue', $issue->value)->whereNull('resolution');
@@ -251,7 +252,13 @@ class AttendanceImportService
             }
         }
 
-        return DB::transaction(function () use ($data, $user, $codes, $rows) {
+        $existing = $this->monthUnderReview($data['period_from'], $data['period_to']);
+
+        return DB::transaction(function () use ($data, $user, $codes, $rows, $existing) {
+            if ($existing !== null) {
+                return $this->joinMonth($existing, $data, $rows);
+            }
+
             $import = AttendanceImport::create([
                 'source' => $data['source'],
                 'period_from' => $data['period_from'],
@@ -293,6 +300,147 @@ class AttendanceImportService
         return $this->linesQuery($import, $filters)
             ->paginate($perPage)
             ->withQueryString();
+    }
+
+    /**
+     * The month this upload belongs to, if there is one still under
+     * review — any run whose period touches the uploaded range.
+     *
+     * An APPLIED month is refused rather than joined: its days are already
+     * in `attendances`, and letting an upload reopen them would put the
+     * punch app's original figures back over what the factory decided.
+     */
+    private function monthUnderReview(string $from, string $to): ?AttendanceImport
+    {
+        $overlapping = AttendanceImport::query()
+            ->where('period_from', '<=', $to)
+            ->where('period_to', '>=', $from)
+            ->orderByDesc('id')
+            ->get();
+
+        $applied = $overlapping->firstWhere('status', AttendanceImportStatus::Applied);
+        if ($applied !== null) {
+            throw ValidationException::withMessages([
+                'period_from' => "These days are already applied (the {$applied->period_from->toDateString()} to {$applied->period_to->toDateString()} month). Change an applied day on the Attendance screen.",
+            ]);
+        }
+
+        return $overlapping->first();
+    }
+
+    /**
+     * FOLD AN UPLOAD INTO THE MONTH IT BELONGS TO.
+     *
+     * Every upload carries the punch app's ORIGINAL figures, because a
+     * correction made here never travels back to the app. So the one rule
+     * that matters is that a person's answer outranks the report:
+     *
+     *   · a day nobody has answered takes the newer figures and is judged
+     *     again — the app may since have paired the missing out-punch;
+     *   · a day a PERSON answered keeps the answer. Its raw figures are
+     *     still updated, so the screen can show what the app now says, and
+     *     if those figures actually moved the day is stamped
+     *     `report_changed_at` for a second look;
+     *   · a day the upload does not mention is left exactly as it is, so a
+     *     short range never erases the rest of the month.
+     *
+     * @param  array<string, mixed>  $data
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function joinMonth(AttendanceImport $import, array $data, array $rows): AttendanceImport
+    {
+        $existing = AttendanceImportLine::query()
+            ->where('attendance_import_id', $import->id)
+            ->get()
+            ->keyBy(fn (AttendanceImportLine $line) => $line->employee_code.'|'.$line->date->toDateString());
+
+        $now = now();
+        $fresh = [];
+
+        foreach ($rows as $row) {
+            $key = $row['employee_code'].'|'.$row['date'];
+            $line = $existing->get($key);
+
+            if ($line === null) {
+                $fresh[] = ['attendance_import_id' => $import->id, ...$row];
+
+                continue;
+            }
+
+            $moved = $this->reportMoved($line, $row);
+            $raw = [
+                'employee_id' => $row['employee_id'],
+                'employee_name' => $row['employee_name'],
+                'raw_status' => $row['raw_status'],
+                'first_in' => $row['first_in'],
+                'last_out' => $row['last_out'],
+                'ot_minutes' => $row['ot_minutes'],
+                'late_minutes' => $row['late_minutes'],
+                'early_minutes' => $row['early_minutes'],
+                'worked_minutes' => $row['worked_minutes'],
+            ];
+
+            if ($line->resolved_by !== null) {
+                // Somebody decided this day. The report does not get to
+                // undecide it; it only gets to ask for another look.
+                $line->fill($raw);
+                if ($moved) {
+                    $line->report_changed_at = $now;
+                }
+                $line->save();
+
+                continue;
+            }
+
+            $line->fill([
+                ...$raw,
+                'issue' => $row['issue'],
+                'resolution' => $row['resolution'],
+                'resolved_check_in' => $row['resolved_check_in'],
+                'resolved_check_out' => $row['resolved_check_out'],
+            ])->save();
+        }
+
+        foreach (array_chunk($fresh, self::INSERT_CHUNK) as $chunk) {
+            AttendanceImportLine::insert($chunk);
+        }
+
+        $import->update([
+            'file_name' => $data['file_name'] ?? $import->file_name,
+            'period_from' => min($import->period_from->toDateString(), $data['period_from']),
+            'period_to' => max($import->period_to->toDateString(), $data['period_to']),
+        ]);
+
+        return $this->recount($import);
+    }
+
+    /** Has the punch app changed its own figures for this day? */
+    private function reportMoved(AttendanceImportLine $line, array $row): bool
+    {
+        return $line->raw_status !== $row['raw_status']
+            || $this->clock($line->first_in) !== $this->clock($row['first_in'])
+            || $this->clock($line->last_out) !== $this->clock($row['last_out'])
+            || (int) $line->worked_minutes !== (int) $row['worked_minutes'];
+    }
+
+    /** A stored TIME and a parsed one compared on the minute they name. */
+    private function clock(?string $value): ?string
+    {
+        return $value === null ? null : substr($value, 0, 5);
+    }
+
+    /** The run's own totals, after the lines beneath it have moved. */
+    private function recount(AttendanceImport $import): AttendanceImport
+    {
+        $lines = AttendanceImportLine::query()->where('attendance_import_id', $import->id);
+
+        $import->update([
+            'employee_count' => (clone $lines)->distinct()->count('employee_code'),
+            'day_count' => (clone $lines)->count(),
+            'issue_count' => (clone $lines)->whereNotNull('issue')->count(),
+        ]);
+
+        return $this->fresh($import);
     }
 
     /**
@@ -441,6 +589,7 @@ class AttendanceImportService
             'open' => $query->whereNotNull('issue')->whereNull('resolution'),
             'resolved' => $query->whereNotNull('issue')->whereNotNull('resolution'),
             'clean' => $query->whereNull('issue'),
+            'report_changed' => $query->whereNotNull('report_changed_at'),
             default => $query->where('issue', $issue)->whereNull('resolution'),
         };
     }

@@ -764,6 +764,11 @@ Route::prefix('v1')->group(function () {
             // reads Tally, where this factory raises its sales; that one reads
             // the ERP's own invoices. They are not blended.
             Route::get('client-outstanding', [ClientOutstandingController::class, 'index']);
+            // The same position, from a Tally export taken by hand — the door
+            // that stays open when the factory PC or its Tally does not. Write
+            // access is checked in the FormRequest (finance.manage), because
+            // replacing the debtor book is a different act from reading it.
+            Route::post('client-outstanding/import', [ClientOutstandingController::class, 'import']);
         });
 
         Route::prefix('crm')->middleware('module:crm')->group(function () {

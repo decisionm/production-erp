@@ -3,6 +3,7 @@
 namespace App\Modules\Production\Services;
 
 use App\Exceptions\InvalidStatusTransitionException;
+use App\Models\User;
 use App\Modules\Inventory\Models\Enums\StockMovementPurpose;
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\StockMovement;
@@ -163,6 +164,16 @@ class ShiftProductionEntryService
      * `-quantity_produced`), replacing the date/id order above with that
      * column and `id desc` as the tie-break. Null — every existing caller —
      * keeps the order exactly as it was; the membership is never touched.
+     *
+     * `$returned` (03-Sep-2026, Task 2 of "Returned by Quality"): a FURTHER
+     * narrowing, applied on top of whatever else the call already asks for
+     * — keeps only rows with at least one entry in
+     * config_snapshot['quality_returns']. On the quality queue
+     * ($awaitingQualityCheck) that predicate can only ever match a batch
+     * that was sent back AND already re-submitted, because the queue itself
+     * already excludes one still awaiting the floor's fix
+     * (whereAwaitingQualityCheck) — this flag narrows the queue, it never
+     * widens it. False — every existing caller — is no filter.
      */
     public function paginate(
         int $perPage = 20,
@@ -181,6 +192,7 @@ class ShiftProductionEntryService
         ?string $q = null,
         bool $oldestFirst = false,
         ?string $sort = null,
+        bool $returned = false,
     ): LengthAwarePaginator {
         $includeCancelled = $includeCancelled || $batchStatus === BatchStatus::Cancelled;
 
@@ -259,6 +271,11 @@ class ShiftProductionEntryService
             ->when($correctable, fn ($query) => $this->whereCorrectable($query))
             ->when($awaitingCorrection, fn ($query) => $this->whereAwaitingCorrection($query))
             ->when($awaitingQualityCheck, fn ($query) => $this->whereAwaitingQualityCheck($query))
+            // whereJsonLength is Laravel's own portable JSON predicate — the
+            // SAME call whereAwaitingCorrection() above already runs on both
+            // drivers this ERP ships on (sqlite in the test suite, mysql
+            // live), so this needs no per-driver whereRaw of its own.
+            ->when($returned, fn ($query) => $query->whereJsonLength('config_snapshot->quality_returns', '>', 0))
             ->when(trim((string) $q) !== '', fn ($query) => $this->whereMatchesTerm($query, trim((string) $q)))
             // The id is the tie-breaker either way: a day's batches share a
             // production_date, and the id is monotonic in creation order.
@@ -2658,6 +2675,41 @@ class ShiftProductionEntryService
             'returns' => $returns,
             'amendments' => $amendments,
         ];
+    }
+
+    /**
+     * The names behind every entry's LAST quality_return.returned_by id,
+     * keyed by user id — one `whereIn` for the whole set, never a query per
+     * row. Reads off correctionHistory()'s own `returns` list for each
+     * entry, so this and `correction.returns` on the resource always agree
+     * about which rows survive the defensive is_array filter; only the id
+     * lookup is new here.
+     *
+     * ShiftProductionEntryResource is the only caller — Http/Resources
+     * talks to models through a Service only (module pattern), so the User
+     * lookup for `quality_return.returned_by_name` lives here rather than
+     * in the Resource, exactly as materialCosts() below already keeps
+     * StockMovement out of it. collection() resolves this ONCE per page and
+     * hands every row the map; a resource made on its own still calls this
+     * with its one entry.
+     *
+     * @param  iterable<ShiftProductionEntry>  $entries
+     * @return array<int, string>
+     */
+    public function returnedByNames(iterable $entries): array
+    {
+        $ids = Collection::make($entries)
+            ->map(function (ShiftProductionEntry $entry): ?int {
+                $returns = $this->correctionHistory($entry)['returns'];
+                $last = $returns === [] ? null : $returns[count($returns) - 1];
+
+                return isset($last['returned_by']) ? (int) $last['returned_by'] : null;
+            })
+            ->filter(fn (?int $id): bool => $id !== null)
+            ->unique()
+            ->values();
+
+        return $ids->isEmpty() ? [] : User::query()->whereIn('id', $ids->all())->pluck('name', 'id')->all();
     }
 
     /**

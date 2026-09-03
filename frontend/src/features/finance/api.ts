@@ -2,7 +2,7 @@ import { api } from '@/lib/api';
 import type { Paginated } from '@/lib/types';
 import type { GLAccountListFilters } from './glAccountList';
 import type { JournalEntryListFilters } from './journalEntryList';
-import type { BalanceSheet, ClientOutstandingReport, GLAccount, JournalEntry, ProfitAndLoss, Receivable, TrialBalanceRow } from './types';
+import type { BalanceSheet, ClientOutstandingImportResult, ClientOutstandingReport, GLAccount, JournalEntry, ProfitAndLoss, Receivable, TrialBalanceRow } from './types';
 
 /** ONE page of the chart, sorted and paged on the SERVER (ListGlAccountsRequest). No argument is the code-ordered first page. */
 export async function listGLAccounts(filters: GLAccountListFilters = {}): Promise<Paginated<GLAccount>> {
@@ -90,5 +90,27 @@ export async function getReceivables(): Promise<Receivable[]> {
  */
 export async function getClientOutstanding(): Promise<ClientOutstandingReport> {
     const { data } = await api.get<{ data: ClientOutstandingReport }>('/finance/client-outstanding');
+    return data.data;
+}
+
+/**
+ * FILL THE POSITION FROM A TALLY XML EXPORT, when the agent cannot deliver one.
+ *
+ * The factory PC's Tally Sync Agent is the normal road and stays the normal
+ * road; this is the hand path for the days it is not answering — the owner
+ * exports Group Outstandings › Sundry Debtors › Pending Bills from Tally and
+ * uploads the file here.
+ *
+ * The XML IS NOT PARSED IN THE BROWSER. The whole file goes to the server as
+ * `file`, multipart, exactly as `attachSupplierBillFile` does, and the server
+ * is the only thing that reads Tally's shape — the ERP has one reader for that
+ * export and this must not become a second one that drifts from it.
+ */
+export async function importClientOutstanding(file: File): Promise<ClientOutstandingImportResult> {
+    const form = new FormData();
+    form.append('file', file);
+    const { data } = await api.post<{ data: ClientOutstandingImportResult }>('/finance/client-outstanding/import', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
     return data.data;
 }

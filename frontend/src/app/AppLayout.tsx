@@ -33,6 +33,7 @@ import type { User } from '@/features/auth/types';
 // decision, shared with the dashboard's Office band. Full rationale lives
 // on the constant itself.
 import { ADOPTED_MODULES } from '@/lib/adoptedModules';
+import { attachDragToPan } from '@/lib/dragToPan';
 import { SIDER_WIDTH_MAX, SIDER_WIDTH_MIN } from '@/theme/mode';
 import { useDisplayStore } from '@/theme/store';
 
@@ -623,6 +624,14 @@ export default function AppLayout({ children }: PropsWithChildren) {
     const setSiderWidth = useDisplayStore((state) => state.setSiderWidth);
     const resetSiderWidth = useDisplayStore((state) => state.resetSiderWidth);
     const dragging = useRef(false);
+
+    /*
+     * WIDE TABLES PAN BY HAND, everywhere in the app. Attached once, here,
+     * and delegated from the document: tables mount and unmount constantly
+     * (every drawer, every tab), so a listener per table would be a leak per
+     * table. See lib/dragToPan.ts for why the floor needed this.
+     */
+    useEffect(() => attachDragToPan(document), []);
 
     /*
      * The sidebar is dragged by its right edge. Pointer events (not mouse)
