@@ -20,3 +20,16 @@ export function queueEmptyText(isError: boolean, error: unknown): string {
 
     return apiRefusalMessage(error, 'The queue could not be read.');
 }
+
+/**
+ * WHAT AN EMPTY LOOK-BACK READ SAYS — deliberately NOT `queueEmptyText`'s
+ * "Nothing is queued for the floor.": that sentence is false here. A
+ * produced-only or cancelled-only filter with no rows is not an idle
+ * factory, it is a filter that matched nothing, and the two must not be
+ * said the same way.
+ */
+export function productionRequestHistoryEmptyText(isError: boolean, error: unknown): string {
+    if (! isError) return 'No requests in the chosen statuses.';
+
+    return apiRefusalMessage(error, 'The requests could not be read.');
+}

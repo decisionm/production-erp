@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { queueEmptyText } from '@/features/production/queueEmptyText';
+import { productionRequestHistoryEmptyText, queueEmptyText } from '@/features/production/queueEmptyText';
 
 const refusal = (message: string, errors?: Record<string, string[]>) => ({
     response: { data: { message, ...(errors ? { errors } : {}) } },
@@ -28,5 +28,21 @@ describe('queueEmptyText', () => {
     it('falls back only when the failure said nothing', () => {
         expect(queueEmptyText(true, new Error('Network Error'))).toBe('The queue could not be read.');
         expect(queueEmptyText(true, undefined)).toBe('The queue could not be read.');
+    });
+});
+
+describe('productionRequestHistoryEmptyText', () => {
+    it('does NOT say the queue is empty — a filtered look-back with no rows is not an idle factory', () => {
+        expect(productionRequestHistoryEmptyText(false, null)).toBe('No requests in the chosen statuses.');
+        expect(productionRequestHistoryEmptyText(false, null)).not.toBe(queueEmptyText(false, null));
+    });
+
+    it('prints the refusal the server gave, same as the queue read does', () => {
+        expect(productionRequestHistoryEmptyText(true, refusal('field error', { status: ['field error'] })))
+            .toBe('field error');
+    });
+
+    it('falls back to its own sentence, not the queue read\'s, when the failure said nothing', () => {
+        expect(productionRequestHistoryEmptyText(true, undefined)).toBe('The requests could not be read.');
     });
 });
