@@ -44,3 +44,29 @@ export async function askQuestion(id: number, question: string): Promise<{ messa
     });
     return data;
 }
+
+/**
+ * Run a stored answer's query again.
+ *
+ * History keeps the SQL and not the rows, so a reopened conversation shows a
+ * sentence over an empty space until this fills it back in. The server
+ * re-guards the stored SQL against the CURRENT reader's permissions rather
+ * than replaying it, so this can legitimately be refused.
+ */
+export async function rerunMessage(conversationId: number, messageId: number): Promise<AskResult> {
+    const { data } = await api.post<{ result: AskResult }>(
+        `/ask-erp/conversations/${conversationId}/messages/${messageId}/rerun`,
+    );
+    return data.result;
+}
+
+/** Rename a conversation. Titles start as the first question, which is often not what it became. */
+export async function renameConversation(id: number, title: string): Promise<AskErpConversation> {
+    const { data } = await api.patch<{ data: AskErpConversation }>(`/ask-erp/conversations/${id}`, { title });
+    return data.data;
+}
+
+/** Delete a conversation and its turns. A reader's own scratch space, not a record anything points at. */
+export async function deleteConversation(id: number): Promise<void> {
+    await api.delete(`/ask-erp/conversations/${id}`);
+}
