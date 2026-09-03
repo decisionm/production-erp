@@ -3,6 +3,7 @@ import { Alert, Card, Empty, Progress, Space, Table, Tag, Typography } from 'ant
 import { getAttendanceSummary } from '@/features/hrms/api';
 import type { DateRange } from '@/features/hrms/attendanceRange';
 import type { AttendanceDepartmentRow, AttendanceSummary } from '@/features/hrms/types';
+import AttendanceChart from './AttendanceChart';
 
 /**
  * Says which uploads these numbers are partly read from, and that nobody
@@ -31,6 +32,8 @@ function FactoryLine({ totals }: { totals: AttendanceSummary['totals'] }) {
         { label: 'On Leave', value: totals.on_leave },
         { label: 'Week Off', value: totals.week_off },
         { label: 'Needs review', value: totals.needs_review },
+        // Crosses the statuses rather than being one of them — see Tally.
+        { label: 'Punch mismatches', value: totals.mismatches },
     ];
 
     return (
@@ -73,6 +76,7 @@ export default function DepartmentAttendanceCard({ range }: { range: DateRange }
                 ) : null}
 
                 {data ? <FactoryLine totals={data.totals} /> : null}
+                {data ? <AttendanceChart summary={data.totals} title="The factory: the period in days" /> : null}
 
                 <Table<AttendanceDepartmentRow>
                     size="small"
@@ -102,6 +106,12 @@ export default function DepartmentAttendanceCard({ range }: { range: DateRange }
                             dataIndex: 'needs_review',
                             width: 120,
                             render: (days: number) => (days > 0 ? <Tag color="gold">{days}</Tag> : '—'),
+                        },
+                        {
+                            title: 'Punch mismatches',
+                            dataIndex: 'mismatches',
+                            width: 150,
+                            render: (days: number) => (days > 0 ? <Tag color="volcano">{days}</Tag> : '—'),
                         },
                         { title: 'Days', dataIndex: 'recorded', width: 80 },
                         {

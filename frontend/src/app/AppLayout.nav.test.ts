@@ -27,6 +27,9 @@ import { allNavItems, buildNavItems, navTrailForPath } from './AppLayout';
  */
 const CONFIGURED_ORDER = [
     'Dashboard',
+    // No module of its own: a person's own attendance is theirs whether or
+    // not they may open HRMS.
+    'My Attendance',
     'Ask ERP',
     'Procurement',
     'Inventory',
@@ -99,10 +102,10 @@ describe('the sidebar', () => {
     });
 
     it('shows nothing at all to a login with no permissions', () => {
-        // Dashboard and Settings carry no `module`, so they survive —
+        // Dashboard, My Attendance and Settings carry no `module`, so they survive —
         // that is deliberate (see the comments on those entries) and is
         // pinned here so a stray gate on one of them is a red test.
-        expect(buildNavItems(null).map((item) => item.label)).toEqual(['Dashboard', 'Settings']);
+        expect(buildNavItems(null).map((item) => item.label)).toEqual(['Dashboard', 'My Attendance', 'Settings']);
     });
 });
 

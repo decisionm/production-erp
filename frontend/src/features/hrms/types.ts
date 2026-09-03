@@ -84,6 +84,14 @@ export interface Attendance {
 }
 
 /** One person's range on the Attendance page: the days, and what they came to. */
+/**
+ * The caller's OWN range. Same shape as one person's, except that a login
+ * with no employee row behind it has no person to name.
+ */
+export interface AttendanceMine extends Omit<AttendancePersonRange, 'employee'> {
+    employee: AttendancePersonRange['employee'] | null;
+}
+
 export interface AttendancePersonRange {
     employee: {
         id: number;
@@ -126,6 +134,13 @@ export interface AttendanceTally {
     week_off: number;
     needs_review: number;
     from_import: number;
+    /**
+     * Days the punch report could not make sense of — a punch in with no
+     * punch out, no punch at all, hours that do not add up. Counted whether
+     * or not anybody has since answered them, which is what makes it
+     * different from `needs_review`.
+     */
+    mismatches: number;
 }
 
 export interface AttendanceDepartmentRow extends AttendanceTally {

@@ -77,6 +77,9 @@ const HelpPage = lazyPage(() => import('@/features/help/pages/HelpPage'));
 const SettingsPage = lazyPage(() => import('@/features/settings/pages/SettingsPage'));
 const AskErpPage = lazyPage(() => import('@/features/ask-erp/pages/AskErpPage'));
 const AttendancePage = lazyPage(() => import('@/features/hrms/pages/AttendancePage'));
+// Needs no HRMS permission: the read behind it answers only for whoever is
+// logged in. See MyAttendanceCard.
+const MyAttendancePage = lazyPage(() => import('@/features/hrms/pages/MyAttendancePage'));
 const AttendanceImportsPage = lazyPage(() => import('@/features/hrms/pages/AttendanceImportsPage'));
 const AttendanceImportPage = lazyPage(() => import('@/features/hrms/pages/AttendanceImportPage'));
 const EmployeesPage = lazyPage(() => import('@/features/hrms/pages/EmployeesPage'));
@@ -342,6 +345,7 @@ export default function App() {
                                     <Route path="/hrms/leave-types" element={<LeaveTypesPage />} />
                                     <Route path="/hrms/leave-balances" element={<LeaveBalancesPage />} />
                                     <Route path="/hrms/leave-requests" element={<LeaveRequestsPage />} />
+                                    <Route path="/my-attendance" element={<MyAttendancePage />} />
                                     <Route path="/hrms/attendance" element={<AttendancePage />} />
                                     <Route path="/hrms/attendance-imports" element={<AttendanceImportsPage />} />
                                     <Route path="/hrms/attendance-imports/:id" element={<AttendanceImportPage />} />

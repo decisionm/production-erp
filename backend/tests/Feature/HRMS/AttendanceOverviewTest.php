@@ -129,6 +129,7 @@ class AttendanceOverviewTest extends TestCase
             'week_off' => 0,
             'needs_review' => 0,
             'from_import' => 0,
+            'mismatches' => 0,
         ], $response->json('data.summary'));
 
         // The days come back in date order, oldest first, as a month reads.

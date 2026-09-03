@@ -962,6 +962,13 @@ Route::prefix('v1')->group(function () {
             Route::delete('conversations/{id}', [AskErpController::class, 'destroy']);
         });
 
+        // YOUR OWN ATTENDANCE, WITHOUT HRMS RIGHTS. Registered outside the
+        // gate below because a person's own days are theirs: a packer who
+        // may not open Employees may still see what the factory recorded
+        // against their name. It takes no employee parameter, so it can
+        // only ever answer for whoever is logged in.
+        Route::get('hrms/attendance/me', [AttendanceController::class, 'me']);
+
         Route::prefix('hrms')->middleware('module:hrms')->group(function () {
             Route::apiResource('employees', EmployeeController::class)->only(['index', 'store', 'update']);
             // The Configuration Lifecycle Contract (DEC-20260817-002) on the

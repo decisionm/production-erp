@@ -3,6 +3,7 @@
 namespace App\Modules\HRMS\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\HRMS\Http\Requests\AttendanceMineRequest;
 use App\Modules\HRMS\Http\Requests\AttendancePersonRequest;
 use App\Modules\HRMS\Http\Requests\AttendanceSummaryRequest;
 use App\Modules\HRMS\Http\Requests\ListAttendanceRequest;
@@ -31,6 +32,28 @@ class AttendanceController extends Controller
     public function mark(MarkAttendanceRequest $request): AttendanceResource
     {
         return AttendanceResource::make($this->attendance->mark($request->validated()));
+    }
+
+    /**
+     * MY OWN ATTENDANCE — the top of the page, for whoever is logged in.
+     *
+     * Outside the HRMS permission gate on purpose: a person's own
+     * attendance is theirs, and a packer who may not open Employees still
+     * has a right to see what the factory has recorded against their name.
+     * The read is bounded by WHO IS ASKING — there is no employee
+     * parameter, so no login can reach anybody else's days through it.
+     *
+     * A login with no employee row behind it gets an empty month rather
+     * than an error: not every user is a member of the factory's staff.
+     */
+    public function me(AttendanceMineRequest $request): JsonResponse
+    {
+        $filters = $request->validated();
+        $employee = Employee::query()->where('user_id', $request->user()?->id)->first();
+
+        return response()->json([
+            'data' => $this->attendance->mine($employee, $filters['from'], $filters['to']),
+        ]);
     }
 
     /** One person's days over one range — the top half of the page. */

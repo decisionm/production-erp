@@ -4,6 +4,7 @@ import type { Paginated } from '@/lib/types';
 import type { PunchEmployee } from './punchReport';
 import type {
     Attendance,
+    AttendanceMine,
     AttendanceImport,
     AttendanceImportEmployee,
     AttendanceImportEmployeeListParams,
@@ -163,6 +164,16 @@ export interface MarkAttendancePayload {
 
 export async function markAttendance(payload: MarkAttendancePayload): Promise<Attendance> {
     const { data } = await api.post<{ data: Attendance }>('/hrms/attendance/mark', payload);
+    return data.data;
+}
+
+/**
+ * MY OWN days over one range. It takes no employee: the server answers for
+ * whoever is logged in, which is the whole of its authorisation and the
+ * reason it needs no HRMS permission.
+ */
+export async function getMyAttendance(from: string, to: string): Promise<AttendanceMine> {
+    const { data } = await api.get<{ data: AttendanceMine }>('/hrms/attendance/me', { params: { from, to } });
     return data.data;
 }
 
