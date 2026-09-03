@@ -26,6 +26,14 @@ final class QuestionRule
         public readonly string $answerTemplate,
         public readonly string $chartHint = 'none',
         public readonly array $hints = [],
+        /**
+         * The question as a person would type it. This is what the page
+         * offers — a question you can click and send, not a table name. The
+         * screen used to list all 122 tables as chips, which told a
+         * supervisor nothing: "GRN Schedule Allocations" is not a question,
+         * and an Administrator saw every one of them.
+         */
+        public readonly string $example = '',
     ) {}
 
     /**

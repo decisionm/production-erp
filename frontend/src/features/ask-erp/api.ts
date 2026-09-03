@@ -10,9 +10,14 @@ import type {
     ConversationListParams,
 } from './types';
 
-export async function getCatalogue(): Promise<{ data: CatalogueEntry[]; configured: boolean }> {
-    const { data } = await api.get<{ data: CatalogueEntry[]; configured: boolean }>('/ask-erp/catalogue');
-    return data;
+export async function getCatalogue(): Promise<{ data: CatalogueEntry[]; examples: string[]; configured: boolean }> {
+    const { data } = await api.get<{ data: CatalogueEntry[]; examples?: string[]; configured: boolean }>(
+        '/ask-erp/catalogue',
+    );
+
+    // `examples` is optional on the wire so a page served against an older
+    // backend degrades to the table list rather than crashing on undefined.
+    return { ...data, examples: data.examples ?? [] };
 }
 
 /** ONE PAGE of this login's conversations, searched and paged by the SERVER. */

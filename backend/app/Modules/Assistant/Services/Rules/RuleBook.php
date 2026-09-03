@@ -39,12 +39,47 @@ final class RuleBook
         ];
     }
 
+    /**
+     * The questions THIS reader can actually get an answer to — a rule counts
+     * only when every table it touches is one they may see.
+     *
+     * This is what the page offers instead of the table list. Chips reading
+     * "GRN Schedule Allocations" and "Store Issue Bag Scans" told a
+     * supervisor nothing about what to type, and an Administrator holding
+     * every permission saw all 122 of them at once. A question you can click
+     * and send is the useful version of the same information, and hiding the
+     * ones that would only be refused is the honest version.
+     *
+     * @param  list<string>  $allowedTables
+     * @return list<string>
+     */
+    public static function examplesFor(array $allowedTables): array
+    {
+        $allowed = array_flip($allowedTables);
+        $examples = [];
+
+        foreach (self::all() as $rule) {
+            if ($rule->example === '') {
+                continue;
+            }
+            foreach ($rule->tables as $table) {
+                if (! isset($allowed[$table])) {
+                    continue 2;
+                }
+            }
+            $examples[] = $rule->example;
+        }
+
+        return $examples;
+    }
+
     /** @return list<QuestionRule> */
     private static function inventory(): array
     {
         return [
             new QuestionRule(
                 key: 'stock_on_hand',
+                example: 'How much stock do we have?',
                 label: 'Stock on hand by item',
                 keywords: ['stock on hand', 'stock in hand', 'how much stock', 'stock level', 'current stock', 'stock'],
                 tables: ['stock_balances', 'items', 'warehouses'],
@@ -61,6 +96,7 @@ LIMIT 200',
             ),
             new QuestionRule(
                 key: 'low_stock',
+                example: 'Which items are below reorder level?',
                 label: 'Items at or below reorder level',
                 keywords: ['low stock', 'below reorder', 'reorder level', 'running out', 'need to order', 'shortage'],
                 tables: ['stock_balances', 'items'],
@@ -77,6 +113,7 @@ LIMIT 200',
             ),
             new QuestionRule(
                 key: 'stock_by_warehouse',
+                example: 'Stock by store',
                 label: 'Stock by store',
                 keywords: ['stock by warehouse', 'stock by store', 'warehouse stock', 'store stock', 'godown'],
                 tables: ['stock_balances', 'warehouses'],
@@ -99,6 +136,7 @@ LIMIT 100',
         return [
             new QuestionRule(
                 key: 'open_purchase_orders',
+                example: 'Show open purchase orders',
                 label: 'Open purchase orders',
                 keywords: ['open purchase order', 'open po', 'pending purchase order', 'pending po', 'purchase order', 'open orders'],
                 tables: ['purchase_orders', 'vendors'],
@@ -113,6 +151,7 @@ LIMIT 200",
             ),
             new QuestionRule(
                 key: 'purchase_orders_by_vendor',
+                example: 'Open purchase orders per vendor',
                 label: 'Open purchase orders per vendor',
                 keywords: ['by vendor', 'per vendor', 'vendor wise', 'which vendor', 'supplier wise', 'per supplier'],
                 tables: ['purchase_orders', 'vendors'],
@@ -128,6 +167,7 @@ LIMIT 100",
             ),
             new QuestionRule(
                 key: 'pending_receipts',
+                example: 'Which purchase orders are awaiting material?',
                 label: 'Purchase orders not yet fully received',
                 keywords: ['pending receipt', 'not received', 'awaiting receipt', 'awaiting material', 'grn pending', 'yet to receive'],
                 tables: ['purchase_orders', 'vendors', 'goods_receipt_notes'],
@@ -144,6 +184,7 @@ LIMIT 200",
             ),
             new QuestionRule(
                 key: 'supplier_bills_pending',
+                example: 'Supplier bills still in draft',
                 label: 'Supplier bills still in draft',
                 keywords: ['supplier bill', 'pending bill', 'unpaid bill', 'bills pending', 'draft bill', 'bill'],
                 tables: ['supplier_bills', 'vendors'],
@@ -165,6 +206,7 @@ LIMIT 200",
         return [
             new QuestionRule(
                 key: 'production_by_machine',
+                example: 'Output by machine',
                 label: 'Output by machine, last 30 days',
                 keywords: ['machine output', 'output by machine', 'production by machine', 'which machine'],
                 hints: ['by machine', 'per machine', 'machine wise'],
@@ -181,6 +223,7 @@ LIMIT 100",
             ),
             new QuestionRule(
                 key: 'production_today',
+                example: 'What was produced today?',
                 label: "Today's production",
                 keywords: ['produced today', 'production today', 'output today', 'today production', 'made today'],
                 tables: ['shift_production_entries', 'work_centers', 'items'],
@@ -196,6 +239,7 @@ LIMIT 200",
             ),
             new QuestionRule(
                 key: 'production_by_day',
+                example: 'Daily production for the last 30 days',
                 label: 'Output by day, last 30 days',
                 keywords: ['by day', 'per day', 'daily production', 'day wise', 'production trend', 'last 30 days'],
                 tables: ['shift_production_entries'],
@@ -210,6 +254,7 @@ LIMIT 200",
             ),
             new QuestionRule(
                 key: 'rejection_by_machine',
+                example: 'Rejection by machine',
                 label: 'Rejection by machine, last 30 days',
                 keywords: ['rejection', 'rejected', 'reject'],
                 hints: ['by machine', 'per machine'],
@@ -226,6 +271,7 @@ LIMIT 100",
             ),
             new QuestionRule(
                 key: 'lumps_by_machine',
+                example: 'Lumps by machine',
                 label: 'Lumps by machine, last 30 days',
                 keywords: ['lumps', 'lump'],
                 hints: ['by machine', 'per machine'],
@@ -243,6 +289,7 @@ LIMIT 100",
             ),
             new QuestionRule(
                 key: 'batches_awaiting_quality',
+                example: 'Which batches are awaiting quality?',
                 label: 'Batches waiting for a quality check',
                 keywords: ['awaiting quality', 'pending quality', 'quality queue', 'not checked', 'waiting for quality'],
                 tables: ['shift_production_entries', 'work_centers', 'items'],
@@ -258,6 +305,7 @@ LIMIT 200",
             ),
             new QuestionRule(
                 key: 'batches_awaiting_approval',
+                example: 'Which batches are awaiting approval?',
                 label: 'Batches waiting for approval',
                 keywords: ['awaiting approval', 'pending approval', 'not approved', 'waiting approval', 'to approve'],
                 tables: ['shift_production_entries', 'work_centers'],
@@ -279,6 +327,7 @@ LIMIT 200",
         return [
             new QuestionRule(
                 key: 'open_sales_orders',
+                example: 'Show open sales orders',
                 label: 'Open sales orders',
                 keywords: ['open sales order', 'pending sales order', 'sales order', 'customer order', 'open order'],
                 tables: ['sales_orders', 'customers'],
@@ -293,6 +342,7 @@ LIMIT 200",
             ),
             new QuestionRule(
                 key: 'sales_orders_by_customer',
+                example: 'Open sales orders per customer',
                 label: 'Open sales orders per customer',
                 keywords: ['by customer', 'per customer', 'customer wise', 'which customer'],
                 tables: ['sales_orders', 'customers'],
@@ -308,6 +358,7 @@ LIMIT 100",
             ),
             new QuestionRule(
                 key: 'pending_dispatch',
+                example: 'Which orders are pending dispatch?',
                 label: 'Orders confirmed but not fully delivered',
                 keywords: ['pending dispatch', 'not delivered', 'awaiting delivery', 'to dispatch', 'yet to deliver', 'pending delivery'],
                 tables: ['sales_orders', 'customers', 'deliveries'],
@@ -324,6 +375,7 @@ LIMIT 200",
             ),
             new QuestionRule(
                 key: 'recent_deliveries',
+                example: 'Deliveries in the last 30 days',
                 label: 'Deliveries in the last 30 days',
                 keywords: ['deliveries', 'dispatched', 'delivery', 'dispatch'],
                 tables: ['deliveries', 'sales_orders', 'customers'],
@@ -339,6 +391,7 @@ LIMIT 200",
             ),
             new QuestionRule(
                 key: 'recent_invoices',
+                example: 'Invoices in the last 30 days',
                 label: 'Invoices in the last 30 days',
                 keywords: ['invoice', 'invoices', 'billed', 'billing'],
                 tables: ['invoices', 'customers'],
@@ -360,6 +413,7 @@ LIMIT 200",
         return [
             new QuestionRule(
                 key: 'attendance_today',
+                example: 'Attendance today',
                 label: "Today's attendance",
                 keywords: ['attendance today', 'present today', 'who is present', 'today attendance', 'attendance'],
                 tables: ['attendances', 'employees'],
@@ -375,6 +429,7 @@ LIMIT 20",
             ),
             new QuestionRule(
                 key: 'absent_today',
+                example: 'Who is absent today?',
                 label: 'Absent today',
                 keywords: ['absent', 'absentee', 'not present', 'who is absent', 'leave today'],
                 tables: ['attendances', 'employees'],
@@ -389,6 +444,7 @@ LIMIT 200",
             ),
             new QuestionRule(
                 key: 'attendance_by_department',
+                example: 'Attendance by department',
                 label: 'Attendance by department, last 30 days',
                 keywords: ['by department', 'department wise', 'per department', 'attendance summary'],
                 tables: ['attendances', 'employees'],

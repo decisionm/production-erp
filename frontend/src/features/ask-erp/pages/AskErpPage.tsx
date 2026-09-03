@@ -121,6 +121,14 @@ export default function AskErpPage() {
                     ) : null}
                     <TableChips
                         entries={catalogue.data?.data ?? []}
+                        examples={catalogue.data?.examples ?? []}
+                        // An example is a whole question, so it is ASKED, not
+                        // typed into the box for the user to finish.
+                        onAsk={(question) => {
+                            if (ask.isPending) return;
+                            setDraft(question);
+                            ask.mutate(question);
+                        }}
                         onPick={(entry) => setDraft((current) => (current ? `${current} ${entry.label}` : `How many ${entry.label.toLowerCase()} `))}
                     />
                     <div style={{ maxHeight: 'calc(100vh - 360px)', overflowY: 'auto', paddingRight: 8 }}>

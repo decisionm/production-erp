@@ -27,6 +27,8 @@ class AskErpController extends Controller
     {
         return response()->json([
             'data' => $this->service->catalogueFor($request->user()),
+            // What the page leads with: questions to click, not table names.
+            'examples' => $this->service->examplesFor($request->user()),
             'configured' => ProviderStatus::configured(),
         ]);
     }

@@ -67,10 +67,25 @@ class AskErpApiTest extends TestCase
     public function test_catalogue_lists_only_viewable_tables(): void
     {
         $this->login(['assistant.view']);
-        $this->getJson('/api/v1/ask-erp/catalogue')->assertOk()->assertExactJson(['data' => [], 'configured' => true]);
+        $this->getJson('/api/v1/ask-erp/catalogue')->assertOk()->assertExactJson(['data' => [], 'examples' => [], 'configured' => true]);
 
         $this->login(['assistant.view', 'hrms.view']);
         $this->getJson('/api/v1/ask-erp/catalogue')->assertOk()->assertJsonPath('data.0.table', 'employees');
+    }
+
+    /**
+     * The page leads with questions, and only with ones this reader could
+     * actually get an answer to — a rule is offered only when EVERY table it
+     * touches is one they may see. Suggesting a question that would then be
+     * refused is worse than suggesting nothing.
+     */
+    public function test_examples_are_filtered_to_what_the_reader_could_actually_ask(): void
+    {
+        // The catalogue in setUp holds `employees` alone, so the attendance
+        // rules — which also need `attendances` — are not offerable.
+        $this->login(['assistant.view', 'hrms.view']);
+
+        $this->getJson('/api/v1/ask-erp/catalogue')->assertOk()->assertJsonPath('examples', []);
     }
 
     public function test_conversation_round_trip(): void

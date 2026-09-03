@@ -16,8 +16,9 @@ vi.mock('@/lib/api', () => ({
 
 import AskErpPage from './pages/AskErpPage';
 
-const catalogue: { data: CatalogueEntry[]; configured: boolean } = {
+const catalogue: { data: CatalogueEntry[]; examples: string[]; configured: boolean } = {
     data: [{ table: 'employees', label: 'Employees', module: 'hrms' }],
+    examples: ['Who is absent today?', 'How much stock do we have?'],
     configured: true,
 };
 
@@ -60,10 +61,20 @@ function render(path: string, configured = true): string {
 }
 
 describe('AskErpPage', () => {
-    it('renders the catalogue chips, the conversation list and the open thread', () => {
+    it('leads with questions to click, not with the table list', () => {
         const html = render('/ask-erp?conversation=1');
 
-        expect(html).toContain('Employees');
+        // The page used to open with one chip per table — 122 of them for an
+        // Administrator. Questions are what a person can act on; the table
+        // list stays, behind its count.
+        expect(html).toContain('Who is absent today?');
+        expect(html).toContain('How much stock do we have?');
+        expect(html).toContain('Tables you can query (1)');
+    });
+
+    it('renders the conversation list and the open thread', () => {
+        const html = render('/ask-erp?conversation=1');
+
         expect(html).toContain('Staff headcount');
         expect(html).toContain('2 messages');
         expect(html).toContain('employees by status');
