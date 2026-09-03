@@ -1,11 +1,23 @@
-import { useQuery } from '@tanstack/react-query';
-import { Alert, Card, Col, Empty, Input, Row, Segmented, Space, Statistic, Table, Tag, Tooltip, Typography } from 'antd';
+import { UploadOutlined } from '@ant-design/icons';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Alert, Button, Card, Col, Empty, Input, Row, Segmented, Space, Statistic, Table, Tag, Tooltip, Typography, Upload } from 'antd';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { getClientOutstanding } from '@/features/finance/api';
+import { useAuthStore } from '@/features/auth/store';
+import { getClientOutstanding, importClientOutstanding } from '@/features/finance/api';
+import {
+    OUTSTANDING_IMPORT_ACCEPT,
+    type OutstandingImportOutcome,
+    canImportClientOutstanding,
+    outstandingImportOutcome,
+} from '@/features/finance/outstandingImport';
 import type { AgeingBucket, ClientOutstanding, OutstandingBill, PendingOrderLine } from '@/features/finance/types';
 import { columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
+import { showApiError } from '@/lib/showApiError';
 import { TABLE_STICKY } from '@/lib/tableProps';
+
+/** The one query key the position lives under — read here, invalidated after an import. */
+const CLIENT_OUTSTANDING_KEY = ['finance', 'client-outstanding'] as const;
 
 const { Text } = Typography;
 
@@ -96,12 +108,47 @@ export function isStalledRead(q: { isSuccess: boolean; isError: boolean; fetchSt
 
 export default function ClientOutstandingPage() {
     const { data, isPending, isSuccess, isError, fetchStatus, failureReason, error } = useQuery({
-        queryKey: ['finance', 'client-outstanding'],
+        queryKey: CLIENT_OUTSTANDING_KEY,
         queryFn: getClientOutstanding,
     });
 
     const [search, setSearch] = useState('');
     const [focus, setFocus] = useState<Focus>('all');
+
+    /*
+     * THE HAND PATH, for the days the agent cannot deliver a position.
+     *
+     * The tray button on the factory PC stays the normal road. This is here
+     * because the page can be — and on this instance has been — empty while
+     * the agent is down, and the owner can still export Group Outstandings ›
+     * Sundry Debtors › Pending Bills out of Tally by hand.
+     */
+    const queryClient = useQueryClient();
+    const user = useAuthStore((state) => state.user);
+    const mayImport = canImportClientOutstanding(user);
+    const [importOutcome, setImportOutcome] = useState<OutstandingImportOutcome | null>(null);
+
+    const importPosition = useMutation({
+        mutationFn: importClientOutstanding,
+        onSuccess: async (result) => {
+            setImportOutcome(outstandingImportOutcome(result));
+
+            /*
+             * ALWAYS, INCLUDING AFTER A SKIP. The table has to come from the
+             * server rather than from what the page happened to be holding:
+             * `skipped_empty` says the POSITION was kept, which is not a
+             * promise that nothing else about the read moved, and a refetch
+             * is cheap next to a debtor figure that is quietly one upload
+             * behind.
+             */
+            await queryClient.invalidateQueries({ queryKey: CLIENT_OUTSTANDING_KEY });
+        },
+        onError: (failure) => {
+            // No stale outcome left standing over a refusal.
+            setImportOutcome(null);
+            showApiError(failure, 'Could not import the Tally export');
+        },
+    });
 
     const clients = useMemo(() => {
         const rows = data?.clients ?? [];
@@ -294,12 +341,48 @@ export default function ClientOutstandingPage() {
 
     return (
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Space direction="vertical" size={4}>
-                <Typography.Title level={4} style={{ margin: 0 }}>Client outstanding &amp; pending purchases</Typography.Title>
-                <Text type="secondary">
-                    Every figure on this page is read from Tally. It is not the ERP&rsquo;s own invoice ledger.
-                </Text>
+            <Space style={{ width: '100%', justifyContent: 'space-between', alignItems: 'flex-start' }} wrap>
+                <Space direction="vertical" size={4}>
+                    <Typography.Title level={4} style={{ margin: 0 }}>Client outstanding &amp; pending purchases</Typography.Title>
+                    <Text type="secondary">
+                        Every figure on this page is read from Tally. It is not the ERP&rsquo;s own invoice ledger.
+                    </Text>
+                </Space>
+
+                {/* Drawn for finance.manage only — a courtesy, never the gate:
+                    the endpoint 403s regardless of what this page shows. */}
+                {mayImport && (
+                    <Upload
+                        accept={OUTSTANDING_IMPORT_ACCEPT}
+                        showUploadList={false}
+                        beforeUpload={(file) => {
+                            // The browser reads nothing out of the XML; the
+                            // whole file goes to the server, which owns the
+                            // one reader for Tally's shape.
+                            importPosition.mutate(file);
+                            return false;
+                        }}
+                    >
+                        <Button icon={<UploadOutlined />} loading={importPosition.isPending} disabled={importPosition.isPending}>
+                            Import Tally export
+                        </Button>
+                    </Upload>
+                )}
             </Space>
+
+            {/* A 200 THAT CHANGED NOTHING LOOKS DIFFERENT FROM ONE THAT DID.
+                Left standing until it is dismissed rather than flashed as a
+                toast: "nothing usable in that file" is the message somebody
+                must actually see, and it is the one a toast would eat. */}
+            {importOutcome && (
+                <Alert
+                    type={importOutcome.tone}
+                    showIcon
+                    closable
+                    onClose={() => setImportOutcome(null)}
+                    title={importOutcome.text}
+                />
+            )}
 
             {/* THE HONESTY BANNER. The page is exactly as current as the last
                 operator pull, and says which date it is showing rather than

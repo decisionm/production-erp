@@ -3,7 +3,12 @@
 namespace App\Modules\Finance\Http\Controllers;
 
 use App\Http\Controllers\Controller;
+use App\Modules\Core\Services\AppSettingService;
+use App\Modules\Finance\Http\Requests\ImportClientOutstandingRequest;
 use App\Modules\Finance\Services\ClientOutstandingService;
+use App\Modules\Finance\Services\TallyOutstandingExportParser;
+use App\Modules\TallySync\Http\Controllers\TallySettingsController;
+use App\Modules\TallySync\Services\TallyReceivableSyncService;
 use Illuminate\Http\JsonResponse;
 
 /**
@@ -27,5 +32,46 @@ class ClientOutstandingController extends Controller
     public function index(): JsonResponse
     {
         return response()->json(['data' => $this->outstanding->report()]);
+    }
+
+    /**
+     * POST /finance/client-outstanding/import — fill the page from a Tally
+     * export taken by hand.
+     *
+     * WHY A SECOND DOOR EXISTS. The position normally arrives from the local
+     * Tally agent, and that path has two failure points nobody in the office
+     * can do anything about: the factory PC must be running, and its Tally
+     * must answer on the XML gateway. On 03-Sep-2026 both were down for an
+     * afternoon and Accounts could not see what a single client owed, while a
+     * perfectly good export of exactly that position sat on a laptop.
+     *
+     * IT IS THE SAME DESTINATION, THROUGH THE SAME SERVICE. This does not get
+     * its own table, its own rules, or its own idea of what an outstanding is.
+     * It parses the file into the same rows the agent posts and hands them to
+     * TallyReceivableSyncService, so every guard that protects the agent path
+     * protects this one: the company scoping, the all-or-nothing replace, and
+     * the refusal to wipe a standing position on an export that yielded
+     * nothing.
+     *
+     * ORDERS ARE NEVER TOUCHED. This report is bills only. Passing an empty
+     * order list would delete the pending sales orders the agent last
+     * delivered, so the service is handed back exactly what it already holds
+     * — a bills-only import replaces bills, and says nothing about shipping.
+     */
+    public function import(
+        ImportClientOutstandingRequest $request,
+        TallyOutstandingExportParser $parser,
+        TallyReceivableSyncService $receivables,
+        AppSettingService $settings
+    ): JsonResponse {
+        $contents = (string) file_get_contents($request->file('file')->getRealPath());
+
+        $bills = $parser->parse($contents);
+
+        $company = $settings->get(TallySettingsController::KEY_COMPANY);
+
+        $summary = $receivables->syncBills($bills, $request->validated()['as_of'], $company);
+
+        return response()->json(['data' => $summary]);
     }
 }
