@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TABLE_STICKY } from '@/lib/tableProps';
-import { FONT_FAMILY, appTheme, brand, dark } from './tokens';
+import { FONT_FAMILY, FONT_FAMILY_MONO, appTheme, brand, dark } from './tokens';
 
 /**
  * Pins the visual refresh (03-Sep-2026): the brand's own two colours carry
@@ -35,12 +35,27 @@ describe('appTheme', () => {
         expect(light.token?.colorLinkHover).toBe(brand.orange);
     });
 
-    it('names the bundled Archivo face first, with a system fallback stack, in both modes', () => {
+    it('names the bundled Plex Sans face first, with a system fallback stack, in both modes', () => {
         for (const mode of ['light', 'dark'] as const) {
             expect(appTheme(mode).token?.fontFamily).toBe(FONT_FAMILY);
         }
-        expect(FONT_FAMILY.startsWith("'Archivo Variable'")).toBe(true);
+        expect(FONT_FAMILY.startsWith("'IBM Plex Sans Variable'")).toBe(true);
         expect(FONT_FAMILY).toContain('sans-serif');
+    });
+
+    /*
+     * The pairing is the whole point of the change, so it is pinned: the
+     * figures' face must be a DIFFERENT family from the prose's, and must end
+     * in a generic the browser is guaranteed to have. A `--brand-mono` that
+     * quietly resolved back to the sans is the failure this catches — it is
+     * what `--dash-mono` did for a month before Plex arrived, and nothing
+     * looked broken, the columns just never lined up.
+     */
+    it('sets the figures in their own monospaced face, not the prose face', () => {
+        expect(FONT_FAMILY_MONO.startsWith("'IBM Plex Mono'")).toBe(true);
+        expect(FONT_FAMILY_MONO).toContain('monospace');
+        expect(FONT_FAMILY_MONO).not.toBe(FONT_FAMILY);
+        expect(FONT_FAMILY_MONO).not.toContain('IBM Plex Sans');
     });
 
     it('gives every table a dark header with white text in both modes', () => {

@@ -21,7 +21,11 @@
     --dash-run: #237804;
     --dash-hold: #ad6800;
     --dash-stop: #cf1322;
-    --dash-mono: var(--brand-font);
+    /* Now an ACTUAL monospace (04-Sep). This variable always named the face
+       the dashboard's figures are set in; until Plex arrived there was no
+       mono in the app and it pointed at the sans, which is why a column of
+       quantities here never quite lined up. */
+    --dash-mono: var(--brand-mono);
     /* The current shift is a SOLID fill. Its own two values, because "ink as
        the fill, white on top" cannot survive a mode where ink is near-white. */
     --dash-active-bg: var(--dash-ink);
@@ -140,8 +144,9 @@
 .dash-date {
     font-family: var(--dash-mono);
     font-size: 30px;
-    font-weight: 800;
-    font-stretch: 112%;
+    /* 600 is the heaviest weight bundled for Plex Mono, and `font-stretch`
+       went with Archivo's width axis — Plex has none, so it drew nothing. */
+    font-weight: 600;
     line-height: 1.15;
     letter-spacing: 0.02em;
 }

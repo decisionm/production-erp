@@ -74,9 +74,28 @@ export const askBubbleBg: Record<ThemeMode, string> = {
     dark: '#3A55A8',
 };
 
-/** Archivo is bundled (`@fontsource-variable/archivo`), so no request leaves the factory network for a font. */
+/**
+ * IBM Plex Sans, bundled (`@fontsource-variable/ibm-plex-sans`), so no request
+ * leaves the factory network for a font.
+ *
+ * It replaced Archivo on 04-Sep. Archivo did display and data in one wide,
+ * heavy voice, which is a fine masthead and a poor column of quantities. Plex
+ * was drawn for industrial screens and has a MONOSPACED SIBLING, and this is a
+ * factory ERP whose every page is figures.
+ */
 export const FONT_FAMILY =
-    "'Archivo Variable', 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+    "'IBM Plex Sans Variable', 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif";
+
+/**
+ * The face for FIGURES ONLY — quantities, batch codes, cycle times, times of
+ * day. Never for prose: a paragraph in mono is slower to read, and the point
+ * of the pairing is that the numbers stand out from the words around them.
+ *
+ * Static weights (`@fontsource/ibm-plex-mono/500`, `/600`), because Plex Mono
+ * has no variable build. Only the two the screens use are bundled.
+ */
+export const FONT_FAMILY_MONO =
+    "'IBM Plex Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace";
 
 /** The sidebar's palette for a mode — the menu is dark-on-navy either way. */
 function siderTokens(mode: ThemeMode) {

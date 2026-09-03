@@ -16,8 +16,14 @@
     --brand-success: #1b8a4c;
     --brand-warning: #d98e04;
     --brand-danger: #c8321f;
-    --brand-font: 'Archivo Variable', 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    --brand-font: 'IBM Plex Sans Variable', 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
         'Helvetica Neue', Arial, sans-serif;
+    /* THE FIGURES' OWN FACE. This is a factory screen whose whole job is
+       numbers — quantities, cycle times, batch codes, GSTINs — and a
+       monospaced sibling makes a column of them comparable rather than merely
+       present: digits share a width, and a 5 cannot be read as an S. The
+       words stay in the sans and keep quiet. */
+    --brand-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
     /* The sidebar is dark navy in BOTH modes, so its edge is its own value. */
     --brand-sider-edge: #0a1741;
     /* What the page ground and the words on it are, per mode. */
@@ -89,14 +95,15 @@ body {
 /* Type                                                                  */
 /* ------------------------------------------------------------------ */
 
-/* Page titles: Archivo one width step wider and heavy. The extra width is
-   the one typographic gesture on a page; everything below it is width 100. */
+/* Page titles: heavy and tightened. Archivo's width axis was the old gesture
+   here (`font-stretch: 112%`) and Plex Sans has no width axis at all — a
+   stretch it cannot do is not a smaller effect, it is silently nothing. So
+   the emphasis moves to the axes Plex does have, weight and tracking. */
 h1.ant-typography,
 h2.ant-typography,
 h3.ant-typography {
-    font-stretch: 112%;
-    font-weight: 800;
-    letter-spacing: -0.01em;
+    font-weight: 700;
+    letter-spacing: -0.02em;
 }
 
 h4.ant-typography,
@@ -465,13 +472,14 @@ body.is-resizing-sider .ant-layout {
     font-size: 14px;
 }
 
-/* The queue position is the one figure that means "how soon": wide, heavy, navy. */
+/* The queue position is the one figure that means "how soon": heavy, navy,
+   and in the figures' own face so a column of them lines up. */
 .queue-position {
     display: inline-block;
     min-width: 28px;
+    font-family: var(--brand-mono);
     font-size: 20px;
-    font-weight: 800;
-    font-stretch: 112%;
+    font-weight: 600;
     line-height: 1;
     color: var(--brand-navy);
     font-variant-numeric: tabular-nums;
