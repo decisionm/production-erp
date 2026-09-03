@@ -137,6 +137,15 @@ export function appTheme(mode: ThemeMode = 'light'): ThemeConfig {
                 triggerBg: sider.siderBg,
                 headerBg: isDark ? dark.bgContainer : '#ffffff',
                 bodyBg: isDark ? dark.bg : brand.glass,
+                /*
+                 * PINNED, and load-bearing. antd derives the header's height
+                 * from `controlHeight` (x2), so raising controls to 38 pushed
+                 * this to 76 — while every list in the app freezes its table
+                 * header at TABLE_STICKY's 64. The 12px difference is a band
+                 * where rows scroll through the app bar. tokens.test.ts pins
+                 * these two numbers to each other.
+                 */
+                headerHeight: 64,
             },
             Menu: sider.menu,
             Button: {
