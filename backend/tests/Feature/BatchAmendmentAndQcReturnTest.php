@@ -851,7 +851,7 @@ class BatchAmendmentAndQcReturnTest extends TestCase
         $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/amend", $figures)
             ->assertOk();
 
-        $this->assertSame('9500', (string) ShiftProductionEntry::query()->findOrFail($entryId)->quantity_produced);
+        $this->assertAmount('9500', ShiftProductionEntry::query()->findOrFail($entryId)->quantity_produced);
 
         // The whole point of the guard: the next shift's opening did not move.
         $this->assertSame($openingBefore, $ledger->openingFor($child->refresh(), $this->resin->id));
@@ -883,7 +883,7 @@ class BatchAmendmentAndQcReturnTest extends TestCase
         $this->assertStringContainsString('80', $amend->json('message'));
 
         // Untouched by the refusal.
-        $this->assertSame('10000', (string) ShiftProductionEntry::query()->findOrFail($entryId)->quantity_produced);
+        $this->assertAmount('10000', ShiftProductionEntry::query()->findOrFail($entryId)->quantity_produced);
     }
 
     /** Resubmitting the SAME closing weight changes nothing, so it is allowed. */
