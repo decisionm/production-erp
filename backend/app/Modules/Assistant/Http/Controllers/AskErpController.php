@@ -11,6 +11,7 @@ use App\Modules\Assistant\Http\Resources\ConversationResource;
 use App\Modules\Assistant\Http\Resources\MessageResource;
 use App\Modules\Assistant\Models\AskErpConversation;
 use App\Modules\Assistant\Services\AskErpService;
+use App\Modules\Assistant\Services\ProviderStatus;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -26,7 +27,9 @@ class AskErpController extends Controller
     {
         return response()->json([
             'data' => $this->service->catalogueFor($request->user()),
-            'configured' => (string) config('ask-erp.api_key') !== '',
+            // What the page leads with: questions to click, not table names.
+            'examples' => $this->service->examplesFor($request->user()),
+            'configured' => ProviderStatus::configured(),
         ]);
     }
 

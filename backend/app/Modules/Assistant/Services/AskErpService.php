@@ -7,6 +7,7 @@ use App\Modules\Assistant\Exceptions\AskErpException;
 use App\Modules\Assistant\Exceptions\SqlRefusedException;
 use App\Modules\Assistant\Models\AskErpConversation;
 use App\Modules\Assistant\Models\AskErpMessage;
+use App\Modules\Assistant\Services\Rules\RuleBook;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -30,6 +31,23 @@ class AskErpService
             static fn ($spec) => ['table' => $spec->table, 'label' => $spec->label, 'module' => $spec->module],
             $this->retriever->allowedTables($user),
         ));
+    }
+
+    /**
+     * Questions this reader can click and send, rather than the list of
+     * tables they may see. The page led with all 122 table names, which named
+     * no question a supervisor would ask and filled the screen for anyone
+     * holding every permission.
+     *
+     * Drawn from the rule book on EVERY driver, not only `rules`: these are
+     * good questions for a model too, and offering the same ones keeps the
+     * page's suggestions honest when the driver is switched.
+     *
+     * @return list<string>
+     */
+    public function examplesFor(User $user): array
+    {
+        return RuleBook::examplesFor(array_keys($this->retriever->allowedTables($user)));
     }
 
     public function ask(User $user, AskErpConversation $conversation, string $question): AskErpMessage

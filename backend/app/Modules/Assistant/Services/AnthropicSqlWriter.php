@@ -56,73 +56,29 @@ class AnthropicSqlWriter implements SqlWriter
                 break;
             }
         }
-        if (! is_array($json) || trim((string) ($json['sql'] ?? '')) === '') {
-            throw new AskErpException('Could not turn that into a query. Try naming the table or the field.', 422);
-        }
 
-        $hint = $json['chart_hint'] ?? 'none';
-
-        return new SqlDraft(
-            sql: trim((string) $json['sql']),
-            answerTemplate: (string) ($json['answer_template'] ?? ''),
-            chartHint: in_array($hint, ['bar', 'line', 'none'], true) ? $hint : 'none',
-        );
+        return SqlPrompt::draftFrom($json);
     }
+
+    /*
+     * The prompt and the schema moved to SqlPrompt when a second provider
+     * arrived — they describe the feature, not this vendor. These three stay
+     * as the names the rest of the code and its tests already call.
+     */
 
     public static function systemPrompt(): string
     {
-        return <<<'TXT'
-You write one SQL query that answers a question about a manufacturing ERP's MySQL database.
-
-Rules:
-- Output a single SELECT (a WITH ... SELECT is fine). Never write, alter, or lock anything.
-- Use only the tables and columns listed in the request. Do not invent columns. If the question cannot be answered from them, return an empty sql string.
-- Alias every table. Prefer aggregates and GROUP BY over raw row dumps. Add ORDER BY.
-- Money and quantities are DECIMAL; use ROUND(..., 2) on sums.
-- Dates: use CURDATE(), DATE_SUB, YEAR(), MONTH(); the factory is in India.
-- Soft-deleted rows have deleted_at IS NOT NULL — exclude them unless asked.
-- Keep results under 200 rows; add LIMIT.
-- answer_template is one plain sentence using {{count}} for the number of rows, {{first.<column>}} for a value from the first row, and {{sum.<column>}} for a column total. Use the output column aliases.
-- chart_hint is "bar" for one label plus one number per row, "line" when the label is a date or month, else "none".
-TXT;
+        return SqlPrompt::system();
     }
 
     public static function userPrompt(SqlRequest $request): string
     {
-        $parts = ['Today is '.$request->today.'.', '', 'Tables available:', implode("\n\n", $request->tableSpecs)];
-
-        if ($request->history !== []) {
-            $parts[] = '';
-            $parts[] = 'Earlier in this conversation:';
-            foreach ($request->history as $turn) {
-                $parts[] = 'Q: '.$turn['question'];
-                if (! empty($turn['sql'])) {
-                    $parts[] = 'SQL: '.$turn['sql'];
-                }
-                if (! empty($turn['answer'])) {
-                    $parts[] = 'A: '.$turn['answer'];
-                }
-            }
-        }
-
-        $parts[] = '';
-        $parts[] = 'Question: '.$request->question;
-
-        return implode("\n", $parts);
+        return SqlPrompt::user($request);
     }
 
     /** @return array<string, mixed> */
     public static function outputSchema(): array
     {
-        return [
-            'type' => 'object',
-            'properties' => [
-                'sql' => ['type' => 'string'],
-                'answer_template' => ['type' => 'string'],
-                'chart_hint' => ['type' => 'string', 'enum' => ['bar', 'line', 'none']],
-            ],
-            'required' => ['sql', 'answer_template', 'chart_hint'],
-            'additionalProperties' => false,
-        ];
+        return SqlPrompt::outputSchema();
     }
 }
