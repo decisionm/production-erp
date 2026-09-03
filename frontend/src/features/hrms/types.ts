@@ -94,6 +94,8 @@ export interface AttendancePersonRange {
         /** Where the day came from: the applied record, or an upload. */
         source: 'attendance' | 'import';
         needs_review: boolean;
+        /** Read from a run nobody has applied — not merely from an upload. */
+        provisional: boolean;
     }[];
     summary: AttendanceTally;
 }

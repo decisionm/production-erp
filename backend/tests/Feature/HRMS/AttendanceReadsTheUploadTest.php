@@ -175,6 +175,28 @@ class AttendanceReadsTheUploadTest extends TestCase
         $this->assertSame(['attendance', 'import'], $response->json('data.days.*.source'));
         $this->assertSame(['present', 'week_off'], $response->json('data.days.*.status'));
         $this->assertSame(1, $response->json('data.summary.week_off'));
+        // And NOTHING here is provisional. The week off came from the upload
+        // because applying deliberately writes no row for one — the month is
+        // finished, and a screen must not call it half-done for ever after.
+        $this->assertSame(0, $response->json('data.summary.from_import'));
+        $this->assertSame([false, false], $response->json('data.days.*.provisional'));
+    }
+
+    public function test_an_applied_month_is_never_called_provisional_by_department_either(): void
+    {
+        $this->actAs();
+        $import = $this->uploadRun();
+        $import->update(['status' => 'applied', 'applied_at' => now()]);
+        $this->line($import, $this->anand, '2026-07-01', 'week_off');
+        $this->line($import, $this->anand, '2026-07-02', 'present');
+        Attendance::create(['employee_id' => $this->anand->id, 'date' => '2026-07-02', 'status' => 'present']);
+
+        $response = $this->getJson('/api/v1/hrms/attendance/summary?from=2026-07-01&to=2026-07-31')->assertOk();
+
+        $this->assertSame(0, $response->json('data.totals.from_import'));
+        $this->assertSame(1, $response->json('data.totals.week_off'), 'the week off is still read from the upload');
+        $departments = collect($response->json('data.departments'))->keyBy('department');
+        $this->assertSame(0, $departments['Production Department']['from_import']);
     }
 
     public function test_a_period_the_upload_does_not_cover_is_still_empty(): void

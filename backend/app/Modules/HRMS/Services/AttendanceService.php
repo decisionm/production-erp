@@ -8,6 +8,7 @@ use App\Modules\HRMS\Models\AttendanceImport;
 use App\Modules\HRMS\Models\AttendanceImportLine;
 use App\Modules\HRMS\Models\Employee;
 use App\Modules\HRMS\Models\Enums\AttendanceImportResolution;
+use App\Modules\HRMS\Models\Enums\AttendanceImportStatus;
 use App\Modules\HRMS\Models\Enums\AttendanceStatus;
 use App\Support\Lists\ListSort;
 use Carbon\CarbonImmutable;
@@ -86,6 +87,7 @@ class AttendanceService
                 'notes' => $day->notes,
                 'source' => 'attendance',
                 'needs_review' => false,
+                'provisional' => false,
             ];
         }
 
@@ -95,6 +97,12 @@ class AttendanceService
             $resolution = $line->resolution?->value;
 
             $rows[$date] = [
+                // PROVISIONAL means the run behind this day is not applied
+                // yet — not merely that the day came from an upload. An
+                // APPLIED month still answers its week offs from the
+                // upload, because applying deliberately writes no row for
+                // them, and calling those provisional would tell the office
+                // a finished month is unfinished.
                 'id' => null,
                 'date' => $date,
                 'status' => $resolution,
@@ -105,6 +113,7 @@ class AttendanceService
                 // Not present, not absent, not anything yet — and the
                 // software does not get to pick on the reviewer's behalf.
                 'needs_review' => $resolution === null,
+                'provisional' => $line->import?->status !== AttendanceImportStatus::Applied,
             ];
         }
 
@@ -125,7 +134,7 @@ class AttendanceService
             'summary' => $this->tally(
                 array_count_values(array_filter(array_column($days, 'status'))),
                 needsReview: count(array_filter($days, static fn (array $day) => $day['needs_review'])),
-                fromImport: count(array_filter($days, static fn (array $day) => $day['source'] === 'import')),
+                fromImport: count(array_filter($days, static fn (array $day) => ($day['provisional'] ?? false) === true)),
             ),
         ];
     }
@@ -144,6 +153,7 @@ class AttendanceService
     private function uploadedDays(int $employeeId, string $from, string $to)
     {
         return AttendanceImportLine::query()
+            ->with('import:id,status')
             ->where('employee_id', $employeeId)
             ->whereBetween('date', [$from, $to])
             ->whereNotExists(fn ($query) => $query
@@ -275,6 +285,7 @@ class AttendanceService
         $factory = [];
         $needsReview = [];
         $fromImport = [];
+        $uploaded = [];
         foreach ($rows as $row) {
             $name = $this->departmentName($row->department);
             $status = (string) $row->status;
@@ -291,7 +302,12 @@ class AttendanceService
         foreach ($this->uploadedDaysByDepartment($from, $to) as $row) {
             $name = $this->departmentName($row->department);
             $days = (int) $row->days;
-            $fromImport[$name] = ($fromImport[$name] ?? 0) + $days;
+            $uploaded[$name] = ($uploaded[$name] ?? 0) + $days;
+
+            // Only a run nobody has applied makes its days provisional.
+            if ($row->import_status !== AttendanceImportStatus::Applied->value) {
+                $fromImport[$name] = ($fromImport[$name] ?? 0) + $days;
+            }
 
             if ($row->resolution === null) {
                 $needsReview[$name] = ($needsReview[$name] ?? 0) + $days;
@@ -305,7 +321,7 @@ class AttendanceService
         }
 
         // A department may exist only in the upload.
-        foreach (array_keys($fromImport) as $name) {
+        foreach (array_keys($uploaded) as $name) {
             $counted[$name] ??= [];
         }
 
@@ -375,6 +391,7 @@ class AttendanceService
     {
         return DB::table('attendance_import_lines as l')
             ->join('employees', 'employees.id', '=', 'l.employee_id')
+            ->join('attendance_imports as i', 'i.id', '=', 'l.attendance_import_id')
             ->whereBetween('l.date', [$from, $to])
             ->whereNotNull('l.employee_id')
             ->whereNotExists(fn ($query) => $query
@@ -382,9 +399,10 @@ class AttendanceService
                 ->from('attendances as a')
                 ->whereColumn('a.employee_id', 'l.employee_id')
                 ->whereColumn('a.date', 'l.date'))
-            ->groupBy('employees.department', 'l.resolution')
+            ->groupBy('employees.department', 'l.resolution', 'i.status')
             ->selectRaw('employees.department as department')
             ->selectRaw('l.resolution as resolution')
+            ->selectRaw('i.status as import_status')
             ->selectRaw('COUNT(*) as days')
             ->get();
     }

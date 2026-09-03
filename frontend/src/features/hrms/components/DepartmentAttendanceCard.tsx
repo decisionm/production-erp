@@ -16,8 +16,8 @@ function provisionalLine(data: AttendanceSummary): string {
     const review = data.totals.needs_review > 0 ? ` ${data.totals.needs_review} still need an answer.` : '';
 
     return named === ''
-        ? `${days} read from an attendance upload that has not been applied yet.${review}`
-        : `${days} read from ${named}, not applied yet.${review}`;
+        ? `${days} read from an attendance upload nobody has applied yet.${review}`
+        : `${days} read from ${named}, which nobody has applied yet.${review}`;
 }
 
 /** The factory's own line, so nobody adds up a column to get it. */

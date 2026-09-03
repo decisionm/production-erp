@@ -27,10 +27,10 @@ const person: AttendancePersonRange = {
     from: range.from,
     to: range.to,
     days: [
-        { id: 1, date: '2026-09-01', status: 'present', check_in: '2026-09-01T00:30:00+00:00', check_out: '2026-09-01T08:30:00+00:00', notes: null, source: 'attendance', needs_review: false },
-        { id: 2, date: '2026-09-02', status: 'absent', check_in: null, check_out: null, notes: 'no punch', source: 'attendance', needs_review: false },
+        { id: 1, date: '2026-09-01', status: 'present', check_in: '2026-09-01T00:30:00+00:00', check_out: '2026-09-01T08:30:00+00:00', notes: null, source: 'attendance', needs_review: false, provisional: false },
+        { id: 2, date: '2026-09-02', status: 'absent', check_in: null, check_out: null, notes: 'no punch', source: 'attendance', needs_review: false, provisional: false },
         // Read from an upload nobody has applied, and not yet answered.
-        { id: null, date: '2026-09-03', status: null, check_in: '2026-09-03T00:30:00+00:00', check_out: null, notes: null, source: 'import', needs_review: true },
+        { id: null, date: '2026-09-03', status: null, check_in: '2026-09-03T00:30:00+00:00', check_out: null, notes: null, source: 'import', needs_review: true, provisional: true },
     ],
     summary: { present: 18, absent: 2, half_day: 1, on_leave: 1, recorded: 22, week_off: 2, needs_review: 3, from_import: 5 },
 };
@@ -101,6 +101,35 @@ describe('PersonAttendanceCard', () => {
         expect(html).toContain('Nothing recorded for this person in this period.');
     });
 
+    it('says which upload the provisional days came from, and stays silent once it is applied', () => {
+        const seed = (client: QueryClient) => {
+            client.setQueryData(['hrms', 'employees', 'all'], {
+                data: [{ id: 11, employee_code: 'SPP-01', name: 'Mayavathi', status: 'active' }],
+                meta: { current_page: 1, per_page: 1000, total: 1, last_page: 1 },
+            });
+        };
+
+        const provisional = render(<PersonAttendanceCard range={range} />, (client) => {
+            seed(client);
+            client.setQueryData(['hrms', 'attendance', 'person', 11, range.from, range.to], person);
+        });
+        expect(provisional).toContain('5 days');
+        expect(provisional).toContain('not been applied yet');
+
+        // APPLIED: the week offs still come from the upload — applying
+        // writes no row for one — but the month is finished, and saying
+        // otherwise for ever after would be worse than saying nothing.
+        const applied = render(<PersonAttendanceCard range={range} />, (client) => {
+            seed(client);
+            client.setQueryData(['hrms', 'attendance', 'person', 11, range.from, range.to], {
+                ...person,
+                days: person.days.map((day) => ({ ...day, provisional: false })),
+                summary: { ...person.summary, from_import: 0 },
+            });
+        });
+        expect(applied).not.toContain('not been applied yet');
+    });
+
     it('offers only active employees in the dropdown', () => {
         const html = render(<PersonAttendanceCard range={range} />, (client) => {
             client.setQueryData(['hrms', 'employees', 'all'], {
@@ -137,6 +166,29 @@ describe('DepartmentAttendanceCard', () => {
         expect(html).toContain('Most absent');
         expect(html).toContain('SPP-40');
         expect(html).toContain('5 days');
+    });
+
+    it('does not call an applied month provisional', () => {
+        const html = render(<DepartmentAttendanceCard range={range} />, (client) => {
+            client.setQueryData(['hrms', 'attendance', 'summary', range.from, range.to], {
+                ...summary,
+                departments: summary.departments.map((row) => ({ ...row, from_import: 0 })),
+                totals: { ...summary.totals, from_import: 0 },
+                imports: [{ id: 1, file_name: 'july.xlsx', status: 'applied', period_from: '2026-09-01', period_to: '2026-09-30' }],
+            });
+        });
+
+        expect(html).toContain('Production Department');
+        expect(html).not.toContain('applied yet');
+    });
+
+    it('names the upload the provisional days came from', () => {
+        const html = render(<DepartmentAttendanceCard range={range} />, (client) => {
+            client.setQueryData(['hrms', 'attendance', 'summary', range.from, range.to], summary);
+        });
+
+        expect(html).toContain('july.xlsx');
+        expect(html).toContain('applied yet');
     });
 
     it('says the period is empty rather than drawing an empty chart', () => {
