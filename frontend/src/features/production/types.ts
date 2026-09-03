@@ -259,6 +259,30 @@ export interface ProductionMetrics {
      * absence as "unknown" — treat it as "none".
      */
     stock_shortfalls?: StockShortfall[] | null;
+    /**
+     * Resin this batch named that the Store never issued to Production/WIP
+     * (DEC-20260903-003) — the batch closed, the desk that signs it is told.
+     * Same wire as stock_shortfalls: optional, absent on an older backend,
+     * and an empty array is the normal answer. Absence means "none".
+     */
+    unissued_materials?: UnissuedMaterial[] | null;
+}
+
+/**
+ * One resin line the Store had not handed to Production on any open Store
+ * Issue when the batch consumed it (DEC-20260903-003). Frozen with its names
+ * at completion, exactly as ShiftProductionEntryService::unissuedMaterials()
+ * emits it; `quantity` is the kilograms the line consumed, in the item's own
+ * unit.
+ */
+export interface UnissuedMaterial {
+    item_id?: number | null;
+    item_name?: string | null;
+    item_uom?: string | null;
+    quantity?: string | number | null;
+    warehouse_id?: number | null;
+    warehouse_name?: string | null;
+    basis?: string | null;
 }
 
 /**
@@ -397,6 +421,42 @@ export function readStockShortfalls(
         // Printed verbatim when present, never composed here: which location
         // makes a shortfall mean what is the server's call, and a sentence
         // this side invented could contradict it.
+        basis: (line.basis ?? '').trim() || null,
+    }));
+}
+
+export interface ReadableUnissuedMaterial {
+    key: string;
+    item: string;
+    warehouse: string;
+    /** Numeric string as sent, trailing zeros trimmed; null when not stated. */
+    quantity: string | null;
+    unit: string | null;
+    basis: string | null;
+}
+
+/**
+ * The un-issued resin lines on a completed entry, in the shape a screen can
+ * print — `metrics.unissued_materials` only, for the same reason
+ * readStockShortfalls() reads only `metrics.stock_shortfalls`. Names, never
+ * ids, with the same fallback wording.
+ */
+export function readUnissuedMaterials(
+    entry: Pick<ShiftProductionEntry, 'metrics'> | null | undefined,
+): ReadableUnissuedMaterial[] {
+    const lines = entry?.metrics?.unissued_materials;
+    if (!Array.isArray(lines)) return [];
+
+    return lines.map((line, index) => ({
+        key: `${line.item_id ?? 'item'}-${line.warehouse_id ?? 'wh'}-${index}`,
+        item:
+            (line.item_name ?? '').trim() ||
+            (line.item_id != null ? `unnamed material (id ${line.item_id})` : 'unnamed material'),
+        warehouse:
+            (line.warehouse_name ?? '').trim() ||
+            (line.warehouse_id != null ? `unnamed store (id ${line.warehouse_id})` : 'unnamed store'),
+        quantity: trimNumeric(line.quantity),
+        unit: (line.item_uom ?? '').trim() || null,
         basis: (line.basis ?? '').trim() || null,
     }));
 }

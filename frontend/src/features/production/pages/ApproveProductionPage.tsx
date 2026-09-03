@@ -25,6 +25,7 @@ import type {
     MachineDowntimeLog,
     ProductionMetrics,
     ReadableStockShortfall,
+    ReadableUnissuedMaterial,
     ShiftProductionEntry,
     ShiftProductionEntryStatus,
     VoucherPreview,
@@ -38,6 +39,7 @@ import {
     readQuality,
     readQualityStageEnabled,
     readStockShortfalls,
+    readUnissuedMaterials,
 } from '@/features/production/types';
 import { type PackingRounding, roundPer, useProductionSettings } from '@/features/production/packing';
 import { type ColumnKind, columnSorter, filterOptions, onFilterBy } from '@/lib/clientSort';
@@ -722,6 +724,39 @@ function ExpectedVsActualSection({ row, metrics }: { row: ShiftProductionEntry; 
  * approval and it stays that way: refusing here would push the argument back to
  * the supervisor, which is the failure this whole change exists to undo.
  */
+/**
+ * Resin the batch named that the Store never issued to Production/WIP
+ * (DEC-20260903-003). Amber, not red: nothing went negative and nothing is
+ * refused — the question it raises is why the floor ran on a material the
+ * Store did not hand over, and this desk is where that gets asked.
+ */
+function UnissuedMaterialSection({ lines }: { lines: ReadableUnissuedMaterial[] }) {
+    if (lines.length === 0) return null;
+
+    return (
+        <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="Resin the Store did not issue:"
+            description={
+                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                    {lines.map((line) => (
+                        <li key={line.key}>
+                            <Typography.Text strong>
+                                {line.quantity ?? '—'}
+                                {line.unit ? ` ${line.unit}` : ''}
+                            </Typography.Text>{' '}
+                            of {line.item} came out of {line.warehouse}
+                            {line.basis ? <> — {line.basis}</> : null}
+                        </li>
+                    ))}
+                </ul>
+            }
+        />
+    );
+}
+
 function StockShortfallSection({ shortfalls }: { shortfalls: ReadableStockShortfall[] }) {
     if (shortfalls.length === 0) return null;
 
@@ -1698,6 +1733,7 @@ export default function ApproveProductionPage() {
                             <Space size={4} wrap>
                                 <Tag color={statusColor[s]}>{statusLabel[s]}</Tag>
                                 {readStockShortfalls(row).length > 0 && <Tag color="red">Stock went negative</Tag>}
+                                {readUnissuedMaterials(row).length > 0 && <Tag color="orange">Resin not issued</Tag>}
                             </Space>
                         ),
                     },
@@ -1793,6 +1829,7 @@ export default function ApproveProductionPage() {
                             a row whose metrics block is null for any other
                             reason. */}
                         <StockShortfallSection shortfalls={readStockShortfalls(detailRow)} />
+                        <UnissuedMaterialSection lines={readUnissuedMaterials(detailRow)} />
                         <Steps
                             size="small"
                             current={chainStep(detailRow)}
