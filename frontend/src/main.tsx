@@ -6,6 +6,7 @@ import '@fontsource-variable/archivo/wdth.css';
 import { registerSW } from 'virtual:pwa-register';
 import App from './app/App';
 import { queryClient } from '@/lib/queryClient';
+import { useDisplayStore } from '@/theme/store';
 import { appTheme } from '@/theme/tokens';
 import './index.css';
 
@@ -21,12 +22,26 @@ if (!container) {
     throw new Error('Root element #root not found.');
 }
 
+/**
+ * The theme is a function of the person's own light/dark choice, so the
+ * ConfigProvider has to live inside a component that subscribes to it.
+ * `appTheme` swaps antd's algorithm as well as the tokens, so a component
+ * this app never names still follows the mode.
+ */
+function ThemedApp() {
+    const mode = useDisplayStore((state) => state.mode);
+
+    return (
+        <ConfigProvider theme={appTheme(mode)} tag={{ variant: 'solid' }}>
+            <App />
+        </ConfigProvider>
+    );
+}
+
 createRoot(container).render(
     <StrictMode>
         <QueryClientProvider client={queryClient}>
-            <ConfigProvider theme={appTheme} tag={{ variant: 'solid' }}>
-                <App />
-            </ConfigProvider>
+            <ThemedApp />
         </QueryClientProvider>
     </StrictMode>,
 );

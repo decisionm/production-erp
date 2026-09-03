@@ -18,6 +18,43 @@
     --brand-danger: #c8321f;
     --brand-font: 'Archivo Variable', 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
         'Helvetica Neue', Arial, sans-serif;
+    /* The sidebar is dark navy in BOTH modes, so its edge is its own value. */
+    --brand-sider-edge: #0a1741;
+    /* What the page ground and the words on it are, per mode. */
+    --app-bg: var(--brand-glass);
+    --app-text: var(--brand-ink);
+    --app-text-secondary: var(--brand-text-secondary);
+    --app-surface: #ffffff;
+    --app-rule: var(--brand-rule);
+}
+
+/* ------------------------------------------------------------------ */
+/* Dark mode. Set by theme/store.ts as data-theme on <html>, so the       */
+/* ground is painted before the first component and every portal (a      */
+/* Modal, a Dropdown, a Select's list) is inside the same scope.         */
+/*                                                                       */
+/* The words come first: #e9edf7 on #0f1526 clears WCAG AAA, and the      */
+/* secondary tone clears AA — a dark screen the floor cannot read is      */
+/* worse than a bright one. theme/tokens.ts carries the same values for   */
+/* the antd side; these are the few rules a token cannot reach.          */
+/* ------------------------------------------------------------------ */
+
+:root[data-theme='dark'] {
+    --brand-glass: #0f1526;
+    --brand-ink: #e9edf7;
+    --brand-text-secondary: #afb9d0;
+    --brand-rule: #2a3450;
+    --brand-rule-soft: #212b42;
+    --brand-navy: #5b7bd6;
+    --brand-navy-deep: #ffffff;
+    --brand-orange: #ff9440;
+    --brand-orange-soft: #232e4c;
+    --brand-sider-edge: #060b1c;
+    --app-bg: #0f1526;
+    --app-text: #e9edf7;
+    --app-text-secondary: #afb9d0;
+    --app-surface: #171f33;
+    --app-rule: #2a3450;
 }
 
 html,
@@ -34,9 +71,15 @@ body,
 
 body {
     font-family: var(--brand-font);
-    background: var(--brand-glass);
-    color: var(--brand-ink);
+    background: var(--app-bg);
+    color: var(--app-text);
     -webkit-font-smoothing: antialiased;
+    /* The scrollbars and form controls the browser paints follow the mode too. */
+    color-scheme: light;
+}
+
+:root[data-theme='dark'] body {
+    color-scheme: dark;
 }
 
 /* ------------------------------------------------------------------ */
@@ -71,7 +114,7 @@ h5.ant-typography {
 /* ------------------------------------------------------------------ */
 
 .app-sider {
-    border-inline-end: 1px solid var(--brand-rule);
+    border-inline-end: 1px solid var(--brand-sider-edge);
 }
 
 .app-sider .ant-menu-inline,
@@ -104,7 +147,101 @@ h5.ant-typography {
 
 .app-sider .ant-menu-item-selected {
     font-weight: 700;
-    box-shadow: 0 1px 2px rgba(10, 20, 91, 0.08);
+}
+
+/* ------------------------------------------------------------------ */
+/* Sidebar icons: motion that answers a hand, never motion on its own.  */
+/* ------------------------------------------------------------------ */
+
+.app-sider .ant-menu-item .anticon,
+.app-sider .ant-menu-submenu-title .anticon {
+    transition:
+        transform 180ms cubic-bezier(0.2, 0.7, 0.3, 1),
+        color 180ms ease;
+    will-change: transform;
+}
+
+.app-sider .ant-menu-item:hover .anticon,
+.app-sider .ant-menu-submenu-title:hover .anticon {
+    transform: scale(1.16) translateX(1px);
+    color: var(--brand-orange);
+}
+
+.app-sider .ant-menu-item:active .anticon,
+.app-sider .ant-menu-submenu-title:active .anticon {
+    transform: scale(0.94);
+}
+
+/* The one you are on sits a shade larger and wears the accent. */
+.app-sider .ant-menu-item-selected .anticon {
+    transform: scale(1.1);
+    color: var(--brand-orange);
+}
+
+/* The group caret turns rather than jumps. */
+.app-sider .ant-menu-submenu-arrow {
+    transition: transform 200ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+/* Collapsing is the one width change worth easing. */
+.app-sider,
+.app-sider .ant-layout-sider-children {
+    transition: width 200ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+/* ------------------------------------------------------------------ */
+/* The sidebar's drag handle.                                           */
+/* ------------------------------------------------------------------ */
+
+.app-sider-resize {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    z-index: 11;
+    cursor: col-resize;
+    background: transparent;
+    transition: background 140ms ease;
+    touch-action: none;
+}
+
+.app-sider-resize:hover,
+.app-sider-resize:focus-visible {
+    background: var(--brand-orange);
+    outline: none;
+}
+
+/* While dragging: no text selection anywhere, and the edge tracks the
+   finger instead of easing behind it. */
+body.is-resizing-sider {
+    user-select: none;
+    cursor: col-resize;
+}
+
+body.is-resizing-sider .app-sider,
+body.is-resizing-sider .app-sider .ant-layout-sider-children,
+body.is-resizing-sider .ant-layout {
+    transition: none !important;
+}
+
+.app-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 0 auto;
+}
+
+.app-theme-toggle {
+    flex: 0 0 auto;
+}
+
+.app-theme-toggle .anticon {
+    font-size: 17px;
+    transition: transform 220ms cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+
+.app-theme-toggle:hover .anticon {
+    transform: rotate(-14deg) scale(1.1);
 }
 
 .app-header {
@@ -266,6 +403,25 @@ h5.ant-typography {
 
     .ant-card-hoverable {
         transition: none;
+    }
+
+    /* The sidebar's icon motion and its width easing are decoration; a
+       device that asked for less gets the same layout with none of it. */
+    .app-sider,
+    .app-sider .ant-layout-sider-children,
+    .app-sider .ant-menu-item .anticon,
+    .app-sider .ant-menu-submenu-title .anticon,
+    .app-sider .ant-menu-submenu-arrow,
+    .app-sider-resize,
+    .app-theme-toggle .anticon {
+        transition: none;
+    }
+
+    .app-sider .ant-menu-item:hover .anticon,
+    .app-sider .ant-menu-submenu-title:hover .anticon,
+    .app-sider .ant-menu-item-selected .anticon,
+    .app-theme-toggle:hover .anticon {
+        transform: none;
     }
 }
 

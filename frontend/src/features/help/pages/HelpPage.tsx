@@ -1,6 +1,6 @@
 import { Collapse, Space, Tag, Typography } from 'antd';
 import { Link } from 'react-router-dom';
-import { buildNavItems } from '@/app/AppLayout';
+import { outlineNavItems } from '@/app/AppLayout';
 import { useAuthStore } from '@/features/auth/store';
 import { HELP_BY_ROUTE, HELP_FAQ, type HelpEntry } from '@/features/help/helpContent';
 
@@ -21,7 +21,7 @@ import { HELP_BY_ROUTE, HELP_FAQ, type HelpEntry } from '@/features/help/helpCon
  * words, and no words describe a screen that is not in the menu.
  */
 
-type NavGroup = ReturnType<typeof buildNavItems>[number];
+type NavGroup = ReturnType<typeof outlineNavItems>[number];
 type NavLeaf = NonNullable<NavGroup['children']>[number];
 
 function Entry({ leaf }: { leaf: NavLeaf }) {
@@ -55,7 +55,7 @@ function Entry({ leaf }: { leaf: NavLeaf }) {
 
 export default function HelpPage() {
     const user = useAuthStore((state) => state.user);
-    const groups = buildNavItems(user);
+    const groups = outlineNavItems(user);
 
     const singles = groups.filter((group) => !group.children && group.key !== '/help');
     const modules = groups.filter((group) => (group.children?.length ?? 0) > 0);

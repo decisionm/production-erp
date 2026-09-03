@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
-import { buildNavItems } from '@/app/AppLayout';
+import { outlineNavItems } from '@/app/AppLayout';
 import { HELP_BY_ROUTE } from '@/features/help/helpContent';
 import HelpPage from '@/features/help/pages/HelpPage';
 import type { User } from '@/features/auth/types';
@@ -41,7 +41,7 @@ const everything: User = {
 } as User;
 
 const visibleRoutes = (user: User): string[] =>
-    buildNavItems(user).flatMap((group) => (group.children ? group.children.map((leaf) => leaf.key) : [group.key]));
+    outlineNavItems(user).flatMap((group) => (group.children ? group.children.map((leaf) => leaf.key) : [group.key]));
 
 function render(): string {
     const queryClient = new QueryClient();
