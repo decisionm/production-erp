@@ -5,6 +5,7 @@ namespace App\Modules\Assistant\Services;
 use App\Modules\Assistant\Catalogue\SchemaCatalogue;
 use App\Modules\Assistant\Catalogue\SensitiveColumns;
 use App\Modules\Assistant\Catalogue\TableSpec;
+use App\Modules\Assistant\Services\Rules\RuleBook;
 use Illuminate\Contracts\Auth\Authenticatable;
 
 /**
@@ -97,6 +98,41 @@ class SchemaRetriever
             foreach ($allowed[$table]->joinedTables() as $neighbour) {
                 if (isset($allowed[$neighbour]) && ! in_array($neighbour, $picked, true)) {
                     $picked[] = $neighbour;
+                }
+            }
+        }
+
+        return array_map(static fn (string $table) => $allowed[$table], $picked);
+    }
+
+    /**
+     * What to show a model when the question's words matched no table.
+     *
+     * NOT a refusal, and not everything either. "today productivity?" was
+     * turned away on the live floor without Claude seeing it, because no
+     * table is called productivity — a word matcher deciding what a model
+     * cannot answer. Handing over all 122 tables would be the other mistake:
+     * a prompt nobody can afford and a model asked to find the needle.
+     *
+     * So: the tables this factory's own rule book names, which is a curated
+     * list of what its people actually ask about, in rule-book order, cut to
+     * the same budget a matched question gets. Permission still decides what
+     * is in it.
+     *
+     * @return list<TableSpec>
+     */
+    public function defaultTables(Authenticatable $user, int $limit): array
+    {
+        $allowed = $this->allowedTables($user);
+        $picked = [];
+
+        foreach (RuleBook::all() as $rule) {
+            foreach ($rule->tables as $table) {
+                if (isset($allowed[$table]) && ! in_array($table, $picked, true)) {
+                    $picked[] = $table;
+                }
+                if (count($picked) >= $limit) {
+                    break 2;
                 }
             }
         }
