@@ -44,7 +44,7 @@ import {
     punchLine,
 } from '@/features/hrms/attendanceReview';
 import MonthStrip, { MonthStripLegend } from '@/features/hrms/components/MonthStrip';
-import PersonPanel from '@/features/hrms/components/PersonPanel';
+import PersonDays from '@/features/hrms/components/PersonDays';
 import {
     ATTENDANCE_IMPORT_LINE_LIST_SPEC,
     ISSUE_LABELS,
@@ -196,7 +196,11 @@ export default function AttendanceImportPage() {
 
     const invalidate = () => queryClient.invalidateQueries({ queryKey: ['hrms', 'attendance-imports'] });
 
-    const [person, setPerson] = useState<AttendanceImportEmployee | null>(null);
+    // A person's days open INSIDE their row. One at a time, so the list
+    // stays readable and a reviewer always knows whose month they are
+    // looking at.
+    const [expanded, setExpanded] = useState<string[]>([]);
+    const [personSaid, setPersonSaid] = useState<string | null>(null);
 
     const [editing, setEditing] = useState<AttendanceImportLine | null>(null);
     const { control, handleSubmit, reset: resetForm, watch, formState: { errors } } = useForm<ResolutionFormValues>({
@@ -345,7 +349,7 @@ export default function AttendanceImportPage() {
 
             {view === 'people' ? (
                 <>
-                    <Space style={{ marginBottom: 12 }} wrap>
+                    <Space style={{ marginBottom: 12, width: '100%', justifyContent: 'space-between' }} wrap>
                         <Input.Search
                             allowClear
                             placeholder="Employee code or name"
@@ -360,9 +364,20 @@ export default function AttendanceImportPage() {
                         <MonthStripLegend />
                     </Space>
 
-                    <Space style={{ marginBottom: 8 }} wrap>
+                    {personSaid ? (
+                        <Alert
+                            type="success"
+                            showIcon
+                            style={{ marginBottom: 12 }}
+                            message={personSaid}
+                            closable
+                            onClose={() => setPersonSaid(null)}
+                        />
+                    ) : null}
+
+                    <div style={{ marginBottom: 8 }}>
                         <Typography.Text type="secondary">{pageRangeLine(people.data?.meta, 'people')}</Typography.Text>
-                    </Space>
+                    </div>
 
                     <ListReadAlert state={people} entity="people" />
 
@@ -373,6 +388,26 @@ export default function AttendanceImportPage() {
                         loading={people.isFetching}
                         dataSource={people.data?.data}
                         pagination={serverPagination(people.data?.meta, setPeoplePage, 'people')}
+                        expandable={{
+                            expandedRowKeys: expanded,
+                            onExpandedRowsChange: (keys) => setExpanded(keys.slice(-1) as string[]),
+                            expandedRowRender: (row) => (
+                                <PersonDays
+                                    importId={id}
+                                    person={row}
+                                    mayWrite={mayWrite && data?.status === 'review'}
+                                    onSaved={(count) => {
+                                        // Confirm here and close the person: the
+                                        // save refetches the list underneath, and
+                                        // the next person is the next thing to do.
+                                        setPersonSaid(
+                                            `${row.employee_code} — ${count} ${count === 1 ? 'day' : 'days'} saved.`,
+                                        );
+                                        setExpanded([]);
+                                    }}
+                                />
+                            ),
+                        }}
                         locale={{
                             emptyText: (
                                 <ListEmpty
@@ -426,12 +461,21 @@ export default function AttendanceImportPage() {
                             },
                             {
                                 title: '',
-                                width: 90,
-                                render: (_, row) => (
-                                    <Button size="small" onClick={() => setPerson(row)}>
-                                        {row.open_count > 0 ? 'Answer' : 'View'}
-                                    </Button>
-                                ),
+                                width: 110,
+                                render: (_, row) => {
+                                    const isOpen = expanded.includes(row.employee_code);
+
+                                    return (
+                                        <Button
+                                            size="small"
+                                            type={isOpen ? 'default' : 'primary'}
+                                            ghost={!isOpen && row.open_count > 0}
+                                            onClick={() => setExpanded(isOpen ? [] : [row.employee_code])}
+                                        >
+                                            {isOpen ? 'Close' : row.open_count > 0 ? 'Answer' : 'View'}
+                                        </Button>
+                                    );
+                                },
                             },
                         ]}
                     />
@@ -564,13 +608,6 @@ export default function AttendanceImportPage() {
                 </>
             )}
 
-            <PersonPanel
-                importId={id}
-                person={person}
-                open={person !== null}
-                onClose={() => setPerson(null)}
-                mayWrite={mayWrite && data?.status === 'review'}
-            />
 
             <Modal
                 maskClosable={false}
