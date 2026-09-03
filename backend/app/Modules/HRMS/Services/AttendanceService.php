@@ -98,7 +98,17 @@ class AttendanceService
     {
         $applied = DB::table('attendances as a')
             ->selectRaw('a.id as id, a.employee_id as employee_id, a.date as date, a.status as status')
-            ->selectRaw('a.check_in as check_in, a.check_out as check_out, a.notes as notes')
+            // CAST, because the two halves of this column are not the same
+            // kind of thing: an APPLIED day holds a datetime and an uploaded
+            // one holds the report's wall clock. MySQL resolves a union
+            // column to ONE type and quietly reads "06:00:00" as
+            // "0000-00-00 06:00:00" when it picks datetime — which SQLite
+            // does not do, so it passed every local test and failed only on
+            // CI. Both sides arrive as text and listedDay() reads each by
+            // its source.
+            ->selectRaw('CAST(a.check_in AS CHAR) as check_in')
+            ->selectRaw('CAST(a.check_out AS CHAR) as check_out')
+            ->selectRaw('a.notes as notes')
             ->selectRaw("'attendance' as source, 0 as needs_review, 0 as provisional");
 
         $uploaded = DB::table('attendance_import_lines as l')
@@ -116,8 +126,8 @@ class AttendanceService
                 ->whereColumn('l2.date', 'l.date')
                 ->whereColumn('l2.id', '>', 'l.id'))
             ->selectRaw('null as id, l.employee_id as employee_id, l.date as date, l.resolution as status')
-            ->selectRaw('COALESCE(l.resolved_check_in, l.first_in) as check_in')
-            ->selectRaw('COALESCE(l.resolved_check_out, l.last_out) as check_out')
+            ->selectRaw('CAST(COALESCE(l.resolved_check_in, l.first_in) AS CHAR) as check_in')
+            ->selectRaw('CAST(COALESCE(l.resolved_check_out, l.last_out) AS CHAR) as check_out')
             ->selectRaw('l.notes as notes')
             ->selectRaw("'import' as source")
             ->selectRaw('CASE WHEN l.resolution IS NULL THEN 1 ELSE 0 END as needs_review')
@@ -341,7 +351,13 @@ class AttendanceService
             return null;
         }
 
-        return CarbonImmutable::parse($date.' '.substr($wallClock, 0, 5), config('tally-sync.factory_timezone', 'Asia/Kolkata'))
+        // "06:00", "06:00:00" or a whole datetime, from a model or from the
+        // union's cast column — take the clock and nothing else. A date
+        // arriving here glued to a date is what turned a punch time into
+        // "0000-00-00 06:00:00" on MySQL once already.
+        $clock = str_contains($wallClock, ' ') ? substr($wallClock, strpos($wallClock, ' ') + 1) : $wallClock;
+
+        return CarbonImmutable::parse($date.' '.substr($clock, 0, 5), config('tally-sync.factory_timezone', 'Asia/Kolkata'))
             ->utc()
             ->toIso8601String();
     }
