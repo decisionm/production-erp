@@ -7,6 +7,7 @@ use App\Modules\Inventory\Models\Item;
 use App\Modules\Inventory\Models\Warehouse;
 use App\Modules\Inventory\Services\StockMovementService;
 use App\Modules\Production\Models\Shift;
+use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Testing\TestResponse;
@@ -203,6 +204,50 @@ class ReturnedByQualityVisibleTest extends TestCase
         $indexedTwice = $this->entryJson($entryId);
         $this->assertSame($secondReason, $indexedTwice['quality_return']['reason']);
         $this->assertSame(2, $indexedTwice['quality_return']['times']);
+    }
+
+    /**
+     * A row written before this key existed is not guaranteed to be an
+     * array — returnToProduction() itself only ever appends well-formed
+     * rows, so this has to be simulated directly on the model. Spliced
+     * between two good rows (not appended at the end), so a read that
+     * merely trusted the last array offset — rather than filtering every
+     * row through is_array — would also happen to pass; this pins the
+     * filter, not the position.
+     */
+    public function test_a_malformed_legacy_row_is_skipped_but_the_good_rows_still_count(): void
+    {
+        $this->actAs();
+        $entryId = $this->completedBatch();
+
+        $this->actAs();
+        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/return-to-production", [
+            'reason' => 'First real reason.',
+        ])->assertOk();
+
+        $secondChecker = $this->actAs();
+        $secondReason = 'Second real reason — the one that should win.';
+        $this->postJson("/api/v1/production/shift-production-entries/{$entryId}/return-to-production", [
+            'reason' => $secondReason,
+        ])->assertOk();
+
+        $entry = ShiftProductionEntry::query()->findOrFail($entryId);
+        $snapshot = $entry->config_snapshot;
+        $snapshot['quality_returns'] = [
+            $snapshot['quality_returns'][0],
+            'a legacy string, not a row',
+            $snapshot['quality_returns'][1],
+        ];
+        $entry->config_snapshot = $snapshot;
+        $entry->save();
+
+        $indexed = $this->entryJson($entryId);
+
+        // The malformed row does not count, and the LAST GOOD row still wins
+        // — not the last row by array position, which would be the string.
+        $this->assertSame(2, $indexed['quality_return']['times']);
+        $this->assertSame($secondReason, $indexed['quality_return']['reason']);
+        $this->assertSame($secondChecker->name, $indexed['quality_return']['returned_by_name']);
     }
 
     /**
