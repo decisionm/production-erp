@@ -23,6 +23,19 @@ class AttendanceService
     /** What an employee with no department is called on the summary. */
     private const NO_DEPARTMENT = 'No department';
 
+    /**
+     * A LONG DAY is two hours past the shift, a VERY LONG one four.
+     *
+     * Deliberately measured on the clock rather than read off the punch
+     * app's "Total OT" column: that column is the app's arithmetic against
+     * the shift window it was configured with, and that window is the one
+     * which called 232 full shifts half days in July 2026. The clock is
+     * what the factory agreed to trust (DEC-20260903-005).
+     */
+    private const LONG_DAY_MINUTES = 600;
+
+    private const VERY_LONG_DAY_MINUTES = 720;
+
     public function __construct(private readonly HrmsListQuery $query) {}
 
     /**
@@ -640,6 +653,207 @@ class AttendanceService
                 ->whereColumn('l2.employee_id', 'l.employee_id')
                 ->whereColumn('l2.date', 'l.date')
                 ->whereColumn('l2.id', '>', 'l.id'));
+    }
+
+    /**
+     * THE READS THAT ARE NOT A COUNT OF STATUSES.
+     *
+     * Three questions the tally cannot answer and the office keeps asking:
+     * which DAYS the factory ran short, how LONG the days actually were,
+     * and who the punch report keeps failing on.
+     *
+     * Hours come from the punch report and NOT from the app's own OT, Late
+     * In or Early Out columns. Those are the app's arithmetic against the
+     * shift window it was configured with — the same window that called 232
+     * full shifts half days in July. What is trusted here is the clock: how
+     * long the person was actually inside, judged against the owner's own
+     * anchors (DEC-20260903-005).
+     *
+     * @return array<string, mixed>
+     */
+    public function insights(string $from, string $to): array
+    {
+        return [
+            'from' => $from,
+            'to' => $to,
+            'turnout' => $this->turnoutByDay($from, $to),
+            'hours' => $this->hoursWorked($from, $to),
+            'longest_days' => $this->peopleByLongDays($from, $to),
+            'most_mismatched' => $this->peopleByMismatches($from, $to),
+        ];
+    }
+
+    /**
+     * WHO TURNED UP, DAY BY DAY — the shape of a month, not its total.
+     *
+     * A month that is 80% present can be a steady month or a fortnight
+     * where half the floor was missing, and only one of those needs
+     * somebody to do something about it.
+     *
+     * Unanswered days are carried separately rather than folded into the
+     * absences: a day nobody has reviewed is not a day nobody worked, and a
+     * turnout chart that treats it as one invents a bad day.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function turnoutByDay(string $from, string $to): array
+    {
+        $days = [];
+        $add = function (string $date, ?string $status, int $count) use (&$days) {
+            $days[$date] ??= [
+                'date' => $date, 'present' => 0, 'half_day' => 0, 'absent' => 0,
+                'on_leave' => 0, 'week_off' => 0, 'needs_review' => 0,
+            ];
+
+            $key = match ($status) {
+                null => 'needs_review',
+                AttendanceImportResolution::WeekOff->value => 'week_off',
+                default => $status,
+            };
+
+            if (array_key_exists($key, $days[$date])) {
+                $days[$date][$key] += $count;
+            }
+        };
+
+        foreach (
+            DB::table('attendances')
+                ->whereBetween('date', [$from, $to])
+                ->groupBy('date', 'status')
+                ->selectRaw('date as date, status as status, COUNT(*) as people')
+                ->get() as $row
+        ) {
+            $add(CarbonImmutable::parse($row->date)->toDateString(), (string) $row->status, (int) $row->people);
+        }
+
+        foreach (
+            $this->newestLines($from, $to)
+                ->whereNotNull('l.employee_id')
+                ->whereNotExists(fn ($query) => $query
+                    ->selectRaw('1')
+                    ->from('attendances as a')
+                    ->whereColumn('a.employee_id', 'l.employee_id')
+                    ->whereColumn('a.date', 'l.date'))
+                ->groupBy('l.date', 'l.resolution')
+                ->selectRaw('l.date as date, l.resolution as status, COUNT(*) as people')
+                ->get() as $row
+        ) {
+            $add(CarbonImmutable::parse($row->date)->toDateString(), $row->status, (int) $row->people);
+        }
+
+        ksort($days);
+
+        return array_values($days);
+    }
+
+    /**
+     * HOW LONG THE DAYS ACTUALLY WERE.
+     *
+     * A long day is two hours past the shift. It is not overtime as the
+     * punch app reports it — it is time on the clock, which is the only
+     * part of that report the factory has agreed to trust.
+     *
+     * @return array<string, int>
+     */
+    private function hoursWorked(string $from, string $to): array
+    {
+        $row = $this->newestLines($from, $to)
+            ->whereNotNull('l.employee_id')
+            ->where('l.worked_minutes', '>', 0)
+            ->selectRaw('COUNT(*) as days')
+            ->selectRaw('COALESCE(SUM(l.worked_minutes), 0) as minutes')
+            ->selectRaw('SUM(CASE WHEN l.worked_minutes >= ? THEN 1 ELSE 0 END) as long_days', [self::LONG_DAY_MINUTES])
+            ->selectRaw('SUM(CASE WHEN l.worked_minutes >= ? THEN 1 ELSE 0 END) as very_long_days', [self::VERY_LONG_DAY_MINUTES])
+            ->selectRaw('SUM(CASE WHEN l.worked_minutes < ? THEN 1 ELSE 0 END) as short_days', [AttendanceImportService::HALF_DAY_MINUTES])
+            ->selectRaw('SUM(CASE WHEN l.worked_minutes > ? THEN 1 ELSE 0 END) as implausible_days', [AttendanceImportService::IMPLAUSIBLE_MINUTES])
+            ->first();
+
+        $days = (int) ($row->days ?? 0);
+
+        return [
+            'days' => $days,
+            'total_minutes' => (int) ($row->minutes ?? 0),
+            // Rounded to the minute, not the second: nobody schedules a
+            // factory in seconds, and a mean to two decimals reads as false
+            // precision over a punch clock.
+            'average_minutes' => $days === 0 ? 0 : (int) round(((int) $row->minutes) / $days),
+            'long_days' => (int) ($row->long_days ?? 0),
+            'very_long_days' => (int) ($row->very_long_days ?? 0),
+            'short_days' => (int) ($row->short_days ?? 0),
+            'implausible_days' => (int) ($row->implausible_days ?? 0),
+        ];
+    }
+
+    /**
+     * The people working the longest days. Not a league table — it is a
+     * fatigue and a cost question, and it is asked of the clock rather than
+     * of the app's overtime column.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function peopleByLongDays(string $from, string $to, int $limit = 10): array
+    {
+        return $this->newestLines($from, $to)
+            ->join('employees', 'employees.id', '=', 'l.employee_id')
+            ->whereNotNull('l.employee_id')
+            ->where('l.worked_minutes', '>=', self::LONG_DAY_MINUTES)
+            ->where('l.worked_minutes', '<=', AttendanceImportService::IMPLAUSIBLE_MINUTES)
+            ->groupBy('employees.id', 'employees.employee_code', 'employees.name', 'employees.department')
+            ->selectRaw('employees.id as employee_id')
+            ->selectRaw('employees.employee_code as employee_code')
+            ->selectRaw('employees.name as name')
+            ->selectRaw('employees.department as department')
+            ->selectRaw('COUNT(*) as long_days')
+            ->selectRaw('COALESCE(SUM(l.worked_minutes), 0) as minutes')
+            ->orderByDesc('long_days')
+            ->orderBy('employees.employee_code')
+            ->limit($limit)
+            ->get()
+            ->map(static fn ($row) => [
+                'employee_id' => (int) $row->employee_id,
+                'employee_code' => (string) $row->employee_code,
+                'name' => (string) $row->name,
+                'department' => $row->department,
+                'long_days' => (int) $row->long_days,
+                'minutes' => (int) $row->minutes,
+            ])
+            ->all();
+    }
+
+    /**
+     * The people the punch report keeps failing on. A badge that does not
+     * read, a shift the app cannot place, somebody who forgets to punch out
+     * — the fix is different in each case, and none of them is the reviewer
+     * answering the same person eleven times a month.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function peopleByMismatches(string $from, string $to, int $limit = 10): array
+    {
+        return $this->newestLines($from, $to)
+            ->join('employees', 'employees.id', '=', 'l.employee_id')
+            ->whereNotNull('l.employee_id')
+            ->whereNotNull('l.issue')
+            ->groupBy('employees.id', 'employees.employee_code', 'employees.name', 'employees.department')
+            ->selectRaw('employees.id as employee_id')
+            ->selectRaw('employees.employee_code as employee_code')
+            ->selectRaw('employees.name as name')
+            ->selectRaw('employees.department as department')
+            ->selectRaw('COUNT(*) as mismatches')
+            ->selectRaw('SUM(CASE WHEN l.resolution IS NULL THEN 1 ELSE 0 END) as unanswered')
+            ->orderByDesc('mismatches')
+            ->orderBy('employees.employee_code')
+            ->limit($limit)
+            ->get()
+            ->map(static fn ($row) => [
+                'employee_id' => (int) $row->employee_id,
+                'employee_code' => (string) $row->employee_code,
+                'name' => (string) $row->name,
+                'department' => $row->department,
+                'mismatches' => (int) $row->mismatches,
+                'unanswered' => (int) $row->unanswered,
+            ])
+            ->all();
     }
 
     /** Everybody with a day in the range, applied or merely uploaded. */

@@ -4,6 +4,7 @@ import type { Paginated } from '@/lib/types';
 import type { PunchEmployee } from './punchReport';
 import type {
     Attendance,
+    AttendanceInsights,
     AttendanceMine,
     AttendanceImport,
     AttendanceImportEmployee,
@@ -197,6 +198,15 @@ export async function downloadAttendanceSheet(employeeId: number, from: string, 
     });
 
     return { filename: `attendance-${from}-to-${to}.pdf`, blob: response.data as Blob };
+}
+
+/**
+ * Turnout by day, how long the days ran, and who the punch report keeps
+ * failing on — needs hrms.manage, like the department read.
+ */
+export async function getAttendanceInsights(from: string, to: string): Promise<AttendanceInsights> {
+    const { data } = await api.get<{ data: AttendanceInsights }>('/hrms/attendance/insights', { params: { from, to } });
+    return data.data;
 }
 
 /** The factory by department for one range — needs hrms.manage. */
