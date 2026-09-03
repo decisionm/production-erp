@@ -635,11 +635,37 @@ export async function exportOutstandingPosition(
     // Bill-wise first, the report second — and it says which one answered.
     const bills = await exportBills(target, asOf);
 
-    const ordersXml = await exportReport(target, 'Sales Order Outstanding', asOf);
-    const orders = parsePendingSalesOrders(ordersXml);
+    // NEITHER READ MAY TAKE THE WHOLE PULL DOWN WITH IT.
+    //
+    // Until 0.4.7 a throw from either export propagated out of
+    // runReceivablesSync, so the agent posted NOTHING: no receivables row, no
+    // `receivables.received` event, no counts — the ERP could not distinguish
+    // "the operator never pressed it" from "Tally refused the request". That
+    // is exactly the state the live instance sat in on 03-Sep-2026: a healthy
+    // agent doing successful `masters.received` reads minutes apart, an
+    // operator who had pressed the button, and total silence on this path.
+    //
+    // A failed read now yields an EMPTY list and a logged reason, and the pull
+    // goes on to post. Posting an empty position is safe by design — the cloud
+    // declines to wipe a standing position on an entirely empty pull and
+    // answers `skipped_empty` — so the cost is nothing and the gain is that
+    // every press leaves a trace on both sides.
+    let orders: PendingSalesOrder[] = [];
 
-    if (orders.length === 0) {
-        logger.warn('Receivables read found no pending sales orders', { asOf, ...describeDocument(ordersXml) });
+    try {
+        const ordersXml = await exportReport(target, 'Sales Order Outstanding', asOf);
+
+        orders = parsePendingSalesOrders(ordersXml);
+
+        if (orders.length === 0) {
+            logger.warn('Receivables read found no pending sales orders', { asOf, ...describeDocument(ordersXml) });
+        }
+    } catch (err) {
+        // The message only — never a URL with a company in it, never a body.
+        logger.error('Sales Order Outstanding read failed', {
+            asOf,
+            message: err instanceof Error ? err.message : String(err),
+        });
     }
 
     return { bills, orders };
