@@ -17,6 +17,7 @@ use App\Modules\Procurement\Models\Vendor;
 use App\Modules\Sales\Events\DeliveryDispatched;
 use App\Modules\Sales\Models\Customer;
 use App\Modules\Sales\Models\Delivery;
+use App\Modules\Sales\Models\Enums\InvoiceStatus;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\Invoice;
 use App\Modules\Sales\Models\SalesOrder;
@@ -171,17 +172,29 @@ class GenericEnqueueReplayTest extends TestCase
         return GoodsReceiptNote::query()->findOrFail($id);
     }
 
+    /**
+     * An issued invoice, written and transitioned through the models: the
+     * ERP raises no invoice any more (DEC-20260903-004), and the enqueue this
+     * file replays hangs off Invoice::updated, never off the withdrawn route.
+     */
     private function issuedInvoice(): Invoice
     {
-        $id = $this->salesDesk()->postJson('/api/v1/sales/invoices', [
+        $invoice = Invoice::create([
             'sales_order_id' => $this->order->id,
+            'customer_id' => $this->order->customer_id,
+            'status' => InvoiceStatus::Draft,
             'invoice_date' => '2026-08-10',
             'notes' => 'August supply',
-            'lines' => [['sales_order_line_id' => $this->line->id, 'quantity' => '2000', 'unit_price' => '4.50']],
-        ])->assertSuccessful()->json('data.id');
-        $this->postJson("/api/v1/sales/invoices/{$id}/issue")->assertSuccessful()->assertJsonPath('data.status', 'issued');
+        ]);
+        $invoice->lines()->create([
+            'sales_order_line_id' => $this->line->id,
+            'item_id' => $this->line->item_id,
+            'quantity' => '2000',
+            'unit_price' => '4.50',
+        ]);
+        $invoice->update(['status' => InvoiceStatus::Issued]);
 
-        return Invoice::query()->findOrFail($id);
+        return $invoice->refresh();
     }
 
     private function postedJournal(): JournalEntry

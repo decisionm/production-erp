@@ -2,16 +2,11 @@
 
 namespace App\Modules\Sales\Services;
 
-use App\Exceptions\InvalidStatusTransitionException;
-use App\Modules\Sales\Exceptions\OverInvoiceException;
 use App\Modules\Sales\Models\Enums\InvoiceStatus;
-use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\Invoice;
-use App\Modules\Sales\Models\InvoiceLine;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\LazyCollection;
 
 /**
@@ -23,6 +18,19 @@ use Illuminate\Support\LazyCollection;
  */
 class InvoiceService
 {
+    /**
+     * WHAT ANY FIGURE BUILT ON THESE ROWS STANDS ON, in the few words a
+     * screen can print.
+     *
+     * The ERP's own sales invoice is retired (DEC-20260903-004), so every
+     * invoice here is history and nothing new joins it. Finance's receivables
+     * and Compliance's GSTR-1 both read this service and both print this
+     * constant, so the two screens cannot drift into different sentences
+     * about the same fact. Where those figures read from INSTEAD is the Tally
+     * invoice import build (DEC-20260902-046), not this service.
+     */
+    public const BASIS = 'Retired ERP invoice history';
+
     /** Loaded on every invoice the service hands back, so the resource never lazy-loads. */
     private const WITH = ['lines.item', 'customer', 'salesOrder'];
 
@@ -122,110 +130,6 @@ class InvoiceService
             ->where('status', '!=', InvoiceStatus::Draft)
             ->orderBy('invoice_date')
             ->get();
-    }
-
-    /**
-     * @param  array{sales_order_id: int, invoice_date: string, due_date?: string, notes?: string, lines: array<int, array{sales_order_line_id: int, quantity: string, unit_price: string}>}  $data
-     */
-    public function create(array $data, ?int $createdBy): Invoice
-    {
-        return DB::transaction(function () use ($data, $createdBy) {
-            // Under the SAME row locks the delivery path takes, because the
-            // cap below is a sum across every invoice raised against the
-            // line, and two invoices raised together must not both pass it.
-            $order = DeliveryService::orderLockQuery((int) $data['sales_order_id'])->firstOrFail();
-            $order->setRelation('lines', DeliveryService::lineLockQuery((int) $order->id)->get());
-
-            // A cancelled order is closed to billing (Phase 3.5): nothing
-            // left against it and nothing may be invoiced against it. The
-            // same exception (→ 422) the delivery path raises for its guard.
-            if ($order->status === SalesOrderStatus::Cancelled) {
-                throw InvalidStatusTransitionException::make('sales order', $order->status->value, 'invoiced');
-            }
-
-            // Derive customer_id from the sales order server-side rather than
-            // trusting a client-supplied value — mirrors how the GRN flow
-            // derives item_id from the PO line rather than the request body.
-            $invoice = Invoice::create([
-                'sales_order_id' => $order->id,
-                'customer_id' => $order->customer_id,
-                'status' => InvoiceStatus::Draft,
-                'invoice_date' => $data['invoice_date'],
-                'due_date' => $data['due_date'] ?? null,
-                'notes' => $data['notes'] ?? null,
-                'created_by' => $createdBy,
-            ]);
-
-            // WHAT IS ALREADY BILLED against each of this order's lines,
-            // every invoice counted: no invoice status cancels one, so a
-            // draft, an issued and a paid document all hold their quantity.
-            // Read once before the loop and carried forward in memory, so
-            // two lines of THIS document against one order line add up too.
-            $billed = InvoiceLine::query()
-                ->whereIn('sales_order_line_id', $order->lines->pluck('id'))
-                ->groupBy('sales_order_line_id')
-                ->selectRaw('sales_order_line_id, SUM(quantity) as quantity')
-                ->pluck('quantity', 'sales_order_line_id');
-
-            foreach ($data['lines'] as $lineData) {
-                // Form request validation ties sales_order_line_id to this
-                // sales_order_id, so a miss here means a genuine bug, not
-                // a normal user error — let it fail loudly.
-                $soLine = $order->lines->firstWhere('id', $lineData['sales_order_line_id']);
-
-                // NEVER MORE THAN THE CUSTOMER ORDERED. The live spot check
-                // (03-Sep-2026) found this document fed straight from the
-                // order with no cap, no counter and no uniqueness, so one
-                // line could be billed any number of times at any quantity.
-                // The cap is the ORDERED quantity, deliberately not the
-                // delivered one: whether the ERP keeps its own invoice at
-                // all, and whether a proforma may precede dispatch, is the
-                // owner's (Q96, DEC-20260831-012), and capping at delivered
-                // here would answer that from the code. Refused the way
-                // over-delivery is: a 422 naming the line, what remains and
-                // what was asked, inside this transaction, so no header
-                // survives a refused line.
-                $already = bcadd((string) ($billed[$soLine->id] ?? '0'), '0', 4);
-                $remaining = bcsub((string) $soLine->quantity, $already, 4);
-                $requested = bcadd((string) $lineData['quantity'], '0', 4);
-
-                if (bccomp($requested, $remaining, 4) > 0) {
-                    throw OverInvoiceException::forLine(
-                        $soLine->id,
-                        bccomp($remaining, '0', 4) === 1 ? $remaining : '0.0000',
-                        $requested,
-                    );
-                }
-
-                $billed[$soLine->id] = bcadd($already, $requested, 4);
-
-                $invoice->lines()->create([
-                    'sales_order_line_id' => $soLine->id,
-                    'item_id' => $soLine->item_id,
-                    'quantity' => $lineData['quantity'],
-                    'unit_price' => $lineData['unit_price'],
-                ]);
-            }
-
-            return $this->decorate($invoice);
-        });
-    }
-
-    public function issue(Invoice $invoice): Invoice
-    {
-        if ($invoice->status !== InvoiceStatus::Draft) {
-            throw InvalidStatusTransitionException::make(
-                'invoice',
-                $invoice->status->value,
-                InvoiceStatus::Issued->value,
-            );
-        }
-
-        $invoice->update(['status' => InvoiceStatus::Issued]);
-
-        // Decorated like a list row: the Sales entry the model event just
-        // queued (TallySyncEventServiceProvider) is already on the response.
-        return $this->decorate($invoice);
     }
 
     /**

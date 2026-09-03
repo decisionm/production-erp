@@ -12,6 +12,8 @@ use App\Modules\Production\Models\Shift;
 use App\Modules\Production\Models\ShiftProductionEntry;
 use App\Modules\Production\Models\WorkCenter;
 use App\Modules\Sales\Models\Customer;
+use App\Modules\Sales\Models\Enums\InvoiceStatus;
+use App\Modules\Sales\Models\Invoice;
 use App\Modules\Sales\Models\SalesOrder;
 use App\Modules\TallySync\Models\Enums\TallyLedgerRole;
 use App\Modules\TallySync\Models\Enums\TallySyncStatus;
@@ -23,6 +25,7 @@ use Illuminate\Testing\TestResponse;
 use Laravel\Sanctum\Sanctum;
 use Spatie\Permission\Models\Permission;
 use Tests\Support\SeedsSalesTallyMasterData;
+use Tests\Support\WritesInvoiceHistory;
 use Tests\TestCase;
 
 /**
@@ -54,6 +57,7 @@ class SalesTraceChainTest extends TestCase
 {
     use RefreshDatabase;
     use SeedsSalesTallyMasterData;
+    use WritesInvoiceHistory;
 
     private Item $bottle;
 
@@ -223,13 +227,14 @@ class SalesTraceChainTest extends TestCase
         return $response->assertSuccessful()->json('data.id');
     }
 
+    /**
+     * A draft invoice row. Written through the models because the ERP raises
+     * no invoice any more (DEC-20260903-004); what this chain is about is how
+     * an EXISTING invoice reads back through the order, which is unchanged.
+     */
     private function draftInvoice(SalesOrder $order, string $quantity): int
     {
-        return $this->postJson('/api/v1/sales/invoices', [
-            'sales_order_id' => $order->id,
-            'invoice_date' => '2026-08-12',
-            'lines' => [['sales_order_line_id' => $order->lines->first()->id, 'quantity' => $quantity, 'unit_price' => '4.50']],
-        ])->assertSuccessful()->assertJsonPath('data.status', 'draft')->json('data.id');
+        return $this->invoiceHistory($order, $quantity)->id;
     }
 
     // ---- readers ------------------------------------------------------------
@@ -328,7 +333,10 @@ class SalesTraceChainTest extends TestCase
         $this->assertSame(2, TallySyncEntry::query()->count(), 'Two Delivery Notes and nothing else so far');
 
         // 3. Issue → the Sales voucher is queued.
-        $this->postJson("/api/v1/sales/invoices/{$invoiceId}/issue")->assertSuccessful()->assertJsonPath('data.status', 'issued');
+        // The transition the Tally listener watches, not the withdrawn
+        // endpoint (DEC-20260903-004) — the voucher this step is about is
+        // still the one the domain event enqueues.
+        Invoice::findOrFail($invoiceId)->update(['status' => InvoiceStatus::Issued]);
         $dnScanned = $this->entryFor('Delivery Note', $scanned);
         $dnTyped = $this->entryFor('Delivery Note', $typed);
         $sales = $this->entryFor('Sales', $invoiceId);

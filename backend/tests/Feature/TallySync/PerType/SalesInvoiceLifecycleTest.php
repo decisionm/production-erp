@@ -4,6 +4,7 @@ namespace Tests\Feature\TallySync\PerType;
 
 use App\Modules\Inventory\Models\Item;
 use App\Modules\Sales\Models\Customer;
+use App\Modules\Sales\Models\Enums\InvoiceStatus;
 use App\Modules\Sales\Models\Enums\SalesOrderStatus;
 use App\Modules\Sales\Models\Invoice;
 use App\Modules\Sales\Models\SalesOrder;
@@ -13,8 +14,15 @@ use App\Modules\TallySync\Models\TallySyncEntry;
 use App\Modules\TallySync\Services\TallyLedgerMappingService;
 
 /**
- * Sales (invoice): a draft invoice (POST /sales/invoices) ISSUED (POST
- * /sales/invoices/{id}/issue) → Invoice::updated → Tally 'Sales'.
+ * Sales (invoice): a draft invoice moved to ISSUED → Invoice::updated →
+ * Tally 'Sales'.
+ *
+ * The two endpoints that used to drive this (POST /sales/invoices and
+ * .../issue) are withdrawn: the ERP's own sales invoice is retired
+ * (DEC-20260903-004). The listener never hung off them — it hangs off the
+ * model transition — so this lifecycle is unchanged and is now driven there
+ * directly. No NEW invoice can appear on live; what this suite protects is
+ * the queue's contract for the rows that already exist.
  *
  * REAL SALES ARE INVOICED IN TALLY (DEC-20260809-003) — the ERP Sales
  * module is demo-scale and its Tally builder is unvalidated and carries no
@@ -66,33 +74,55 @@ class SalesInvoiceLifecycleTest extends PerTypeLifecycleTestCase
         return $this->asUser($this->staff('Sales Desk', ['sales.view', 'sales.manage']));
     }
 
+    /**
+     * THE DOMAIN TRANSITION, not the endpoint. The ERP's own invoice is
+     * retired (DEC-20260903-004) and there is no route left to create or
+     * issue one — but the Tally staging listener has always hung off
+     * `Invoice::updated`, not off the controller, so the lifecycle this file
+     * pins is reached exactly as it always was. What is no longer under test
+     * here is the ROUTE; InvoiceRetiredTest holds that door shut.
+     */
     protected function enqueueViaDomain(): TallySyncEntry
     {
-        $this->invoiceId = $this->salesDesk()->postJson('/api/v1/sales/invoices', [
+        $invoice = Invoice::create([
             'sales_order_id' => $this->order->id,
+            'customer_id' => $this->order->customer_id,
+            'status' => InvoiceStatus::Draft,
             'invoice_date' => '2026-08-10',
             'notes' => 'August supply',
-            'lines' => [['sales_order_line_id' => $this->line->id, 'quantity' => '2000', 'unit_price' => '4.50']],
-        ])->assertSuccessful()->json('data.id');
+        ]);
+        $invoice->lines()->create([
+            'sales_order_line_id' => $this->line->id,
+            'item_id' => $this->line->item_id,
+            'quantity' => '2000',
+            'unit_price' => '4.50',
+        ]);
+        $this->invoiceId = $invoice->id;
 
         // A draft has no statutory effect and enqueues nothing …
         $this->assertSame(0, TallySyncEntry::query()->count(), 'A draft invoice must not reach the queue');
 
         // … issuing it does.
-        $this->salesDesk()->postJson("/api/v1/sales/invoices/{$this->invoiceId}/issue")
-            ->assertSuccessful()
-            ->assertJsonPath('data.status', 'issued');
+        $invoice->update(['status' => InvoiceStatus::Issued]);
+        $this->assertSame('issued', $invoice->fresh()->status->value);
 
         return TallySyncEntry::query()->sole();
     }
 
+    /**
+     * Re-saving an ALREADY issued invoice stages nothing further: the
+     * listener fires on a CHANGE to issued, and a no-op save changes nothing.
+     * The old 422 came from the withdrawn endpoint's status guard; the
+     * property that actually matters — one voucher, not two — is asserted
+     * straight against the queue.
+     */
     protected function attemptDuplicateEnqueue(TallySyncEntry $entry): void
     {
-        $this->salesDesk()->postJson("/api/v1/sales/invoices/{$this->invoiceId}/issue")
-            ->assertStatus(422)
-            ->assertJsonPath('message', 'Cannot transition invoice from "issued" to "issued".');
+        $invoice = Invoice::findOrFail($this->invoiceId);
+        $invoice->update(['status' => InvoiceStatus::Issued]);
 
         $this->assertSame(1, Invoice::query()->count());
+        $this->assertSame(1, TallySyncEntry::query()->count(), 'Re-saving an issued invoice must not stage a second voucher');
     }
 
     protected function expectedCategoryKey(): string

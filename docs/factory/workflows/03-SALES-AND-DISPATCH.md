@@ -140,14 +140,26 @@ Every item below is a GAP against a record now in force.
 10. The production queue by promised date with sticky manual position and
     moved flag (DEC-20260902-031); finished-goods-only picker and server
     refusal (DEC-20260902-035).
-11. Stale text: the Tally mirror statement on the Sales pages; superseded ids
+11. Stale text: the Tally mirror statement on the Sales pages (the Invoices
+    page no longer shows it — PR #89 removed the panel from a page whose
+    document is retired; the Sales Orders page still does, and the SERVER's
+    own sentences still describe the reversed outbound direction, which is
+    this item's remaining work and is a wording change asserted verbatim by
+    TallyMirrorHonestyTest); superseded ids
     in code comments; one dashboard sales count.
 12. Retire the ERP's own sales invoice (DEC-20260903-004, from the 03-Sep
     Dispatch -> Invoice spot check): withdraw the Invoices screen and the
     create/issue routes, keep existing rows as read-only history on the
     order's trace, and stop building receivables and GST figures on them.
     Until this ships, an ERP invoice cannot bill more than the customer
-    ordered (PR #88).
+    ordered (PR #88). **Built: PR #90** — the create and issue routes and
+    their controller actions, request and service methods are gone; the
+    Invoices page is a read-only history list; receivables and GSTR-1 carry a
+    `basis` saying they stand on retired ERP invoice history. The interim cap
+    of PR #88 went with the writer it guarded. **Still owed by this item:**
+    the receivables and GSTR-1 SOURCE is unchanged and still reads those
+    rows — where it reads from instead is item 3 (the Tally invoice import),
+    exactly as the decision provides.
 
 ## Status
 
