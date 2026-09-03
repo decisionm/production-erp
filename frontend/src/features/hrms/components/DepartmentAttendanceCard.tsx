@@ -32,7 +32,8 @@ function FactoryLine({ totals }: { totals: AttendanceSummary['totals'] }) {
         { label: 'On Leave', value: totals.on_leave },
         { label: 'Week Off', value: totals.week_off },
         { label: 'Needs review', value: totals.needs_review },
-        { label: 'Mismatches', value: totals.mismatches },
+        // Crosses the statuses rather than being one of them — see Tally.
+        { label: 'Punch mismatches', value: totals.mismatches },
     ];
 
     return (
@@ -107,9 +108,9 @@ export default function DepartmentAttendanceCard({ range }: { range: DateRange }
                             render: (days: number) => (days > 0 ? <Tag color="gold">{days}</Tag> : '—'),
                         },
                         {
-                            title: 'Mismatches',
+                            title: 'Punch mismatches',
                             dataIndex: 'mismatches',
-                            width: 110,
+                            width: 150,
                             render: (days: number) => (days > 0 ? <Tag color="volcano">{days}</Tag> : '—'),
                         },
                         { title: 'Days', dataIndex: 'recorded', width: 80 },

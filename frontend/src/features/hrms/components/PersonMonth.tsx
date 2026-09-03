@@ -53,7 +53,11 @@ export function Tally({ summary }: { summary: AttendanceTally }) {
     // counting a day somebody has already settled — otherwise this card and
     // the import review page would disagree about the same month.
     if (summary.mismatches > 0) {
-        tiles.push({ label: 'Mismatches', value: summary.mismatches, color: '#b45309' });
+        // "Punch mismatches", not "Mismatches": it CROSSES the statuses
+        // rather than being one of them — an answered mismatch is counted
+        // here AND under whatever it was answered as — and a tile row that
+        // reads like a status is a tile row somebody will add up.
+        tiles.push({ label: 'Punch mismatches', value: summary.mismatches, color: '#b45309' });
     }
 
     return (
