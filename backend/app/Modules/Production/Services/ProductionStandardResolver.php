@@ -5,6 +5,7 @@ namespace App\Modules\Production\Services;
 use App\Modules\Production\Models\ProductionStandard;
 use App\Modules\Production\Models\ProductionStandardPackaging;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Which product standards a machine may run today, and which one applies.
@@ -87,8 +88,22 @@ class ProductionStandardResolver
      * master's packing, and warningsFor() says so in so many words. An
      * EXPLICITLY chosen incomplete id gets the same null — a stale client
      * must not do what the picker no longer offers.
+     *
+     * $requireChoice (DEC-20260902-020) turns the one truly ambiguous case —
+     * several complete packagings, none default, and no id named at all —
+     * from a silent null into a 422 naming the field. It is OFF by default
+     * on purpose: BatchPreviewController, ProductStandardsWorkspaceService
+     * and SalesCostInsightService all call this method to DESCRIBE a
+     * standard (a preview, a workspace row, a cost estimate), never to
+     * gate one, and warningsFor() already tells the preview screen
+     * 'packaging_choice_required' as an advisory. Only startBatch() — the
+     * one call that actually creates the batch and freezes its packaging
+     * into the snapshot — opts in. The other two null-producing paths above
+     * (no standard; an explicit id that does not resolve) are unchanged
+     * even with $requireChoice true: this refuses exactly the case the
+     * decision names, nothing wider.
      */
-    public function resolvePackaging(?ProductionStandard $standard, ?int $packagingId = null): ?ProductionStandardPackaging
+    public function resolvePackaging(?ProductionStandard $standard, ?int $packagingId = null, bool $requireChoice = false): ?ProductionStandardPackaging
     {
         if ($standard === null) {
             return null;
@@ -106,7 +121,15 @@ class ProductionStandardResolver
             return $complete->first();
         }
 
-        return $complete->firstWhere('is_default', true);
+        $default = $complete->firstWhere('is_default', true);
+
+        if ($default === null && $requireChoice && $complete->count() > 1) {
+            throw ValidationException::withMessages([
+                'production_standard_packaging_id' => 'Choose how it is packed.',
+            ]);
+        }
+
+        return $default;
     }
 
     /**
