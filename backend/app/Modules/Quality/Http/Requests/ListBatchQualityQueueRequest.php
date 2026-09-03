@@ -17,6 +17,16 @@ use Illuminate\Foundation\Http\FormRequest;
  * the produced count, the production date; absent, the queue is worked
  * front to back as before. A page size outside 1..100 is refused, as on
  * every list.
+ *
+ * `returned` (03-Sep-2026, Task 2 of "Returned by Quality") narrows the
+ * queue's OWN membership to rows that carry at least one entry in
+ * config_snapshot['quality_returns'] — it can never widen it. Because the
+ * queue already excludes a batch still awaiting the floor's correction
+ * (whereAwaitingQualityCheck), the only rows this can ever surface are ones
+ * that were sent back AND already re-submitted: a batch back for a second
+ * look, not new to the desk. Same `boolean` reading as `due` on the
+ * instrument register (ListMeasuringInstrumentsRequest) — anything not
+ * literally truthy is no filter.
  */
 class ListBatchQualityQueueRequest extends FormRequest
 {
@@ -36,6 +46,7 @@ class ListBatchQualityQueueRequest extends FormRequest
     {
         return [
             'q' => ['sometimes', 'nullable', 'string', 'max:100'],
+            'returned' => ['sometimes', 'nullable', 'boolean'],
             'sort' => ListSort::rule(self::SORTABLE),
             'per_page' => ['sometimes', 'nullable', 'integer', 'between:1,'.self::PER_PAGE_MAX],
             'page' => ['sometimes', 'nullable', 'integer', 'min:1'],
@@ -48,6 +59,12 @@ class ListBatchQualityQueueRequest extends FormRequest
         $term = trim((string) $this->validated('q'));
 
         return $term === '' ? null : $term;
+    }
+
+    /** Only batches that carry a quality return, resubmitted or not? */
+    public function returnedOnly(): bool
+    {
+        return $this->boolean('returned');
     }
 
     /** The validated sort, or null for the queue's own order (oldest first). */

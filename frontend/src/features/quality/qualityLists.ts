@@ -38,11 +38,32 @@ export const PRODUCTION_QC_SORT_FIELDS: readonly string[] = ['batch_number', 'qu
 /** ShiftProductionEntryService with oldestFirst: production date ascending — a queue is worked front to back. */
 export const PRODUCTION_QC_DEFAULT_SORT = 'production_date';
 
+/**
+ * `returned` is the "Returned" switch (03-Sep-2026, Task 2 of "Returned by
+ * Quality") — same `=1` spelling and same round trip as the instrument
+ * register's `due` below: on the URL as `returned=1`, dropped for anything
+ * else, read with `productionQcReturnedOnly` and turned into the server's
+ * `returned: 1` with `productionQcListRequest`.
+ */
 export const PRODUCTION_QC_LIST: QualityList = {
-    spec: { strings: ['sort'], allowed: { sort: sortOptions(PRODUCTION_QC_SORT_FIELDS) } },
+    spec: { strings: ['returned', 'sort'], allowed: { returned: ['1'], sort: sortOptions(PRODUCTION_QC_SORT_FIELDS) } },
     sortFields: PRODUCTION_QC_SORT_FIELDS,
     defaultSort: PRODUCTION_QC_DEFAULT_SORT,
 };
+
+export type ProductionQcListParams = SortedListParams & { returned?: string };
+
+/** The URL's `returned=1` → the server's `returned: 1`; absent → no key at all. */
+export function productionQcListRequest(params: ProductionQcListParams): Record<string, string | number | undefined> {
+    const { returned, ...rest } = params;
+
+    return compactParams({ ...rest, returned: returned === '1' ? 1 : undefined });
+}
+
+/** Is the "Returned" switch on, as the URL says? */
+export function productionQcReturnedOnly(params: ProductionQcListParams): boolean {
+    return params.returned === '1';
+}
 
 // ------------------------------------------------------ incoming inspections
 

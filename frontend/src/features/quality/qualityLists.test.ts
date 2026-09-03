@@ -11,6 +11,8 @@ import {
     type QualityList,
     instrumentListRequest,
     instrumentsDueOnly,
+    productionQcListRequest,
+    productionQcReturnedOnly,
 } from './qualityLists';
 
 /**
@@ -86,11 +88,21 @@ describe('the lists keep the filters they already had on the URL', () => {
         expect(readListParams(new URLSearchParams('item_id=abc'), SPC_LIST.spec)).toEqual({});
     });
 
-    it('the queue admits only q, page, per_page and sort — its membership is the server\'s', () => {
+    it('the queue admits only q, page, per_page, sort and returned — its membership is the server\'s', () => {
         expect(readListParams(new URLSearchParams('q=amber&status=pending&sort=-batch_number&per_page=50'), PRODUCTION_QC_LIST.spec)).toEqual({
             q: 'amber',
             sort: '-batch_number',
             per_page: 50,
         });
+    });
+
+    it('the queue: returned=1 becomes the server\'s returned: 1, and anything else is no filter', () => {
+        const on = readListParams(new URLSearchParams('returned=1&sort=-batch_number&per_page=50'), PRODUCTION_QC_LIST.spec);
+        expect(productionQcReturnedOnly(on)).toBe(true);
+        expect(productionQcListRequest(on)).toEqual({ returned: 1, sort: '-batch_number', per_page: 50 });
+
+        const off = readListParams(new URLSearchParams('returned=maybe'), PRODUCTION_QC_LIST.spec);
+        expect(productionQcReturnedOnly(off)).toBe(false);
+        expect(productionQcListRequest(off)).toEqual({});
     });
 });
