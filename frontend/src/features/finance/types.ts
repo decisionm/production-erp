@@ -114,6 +114,13 @@ export interface ClientOutstanding {
     customer_id: number | null;
     customer_code: string | null;
     customer_name: string | null;
+    /**
+     * The linked ERP customer's address, where a customer is linked AND has
+     * one on file. Null on every unlinked ledger — which, on this instance,
+     * is all of them: the follow-up draft is composed regardless and simply
+     * leaves the To line for the sender to fill.
+     */
+    customer_email: string | null;
     party_ledger_name: string;
     party_ledger_guid: string | null;
     is_linked: boolean;

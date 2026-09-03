@@ -43,6 +43,7 @@ const report: ClientOutstandingReport = {
             customer_id: null,
             customer_code: null,
             customer_name: null,
+            customer_email: null,
             party_ledger_name: 'Northwind Traders',
             party_ledger_guid: 'ledger-guid-northwind',
             is_linked: false,

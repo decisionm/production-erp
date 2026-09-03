@@ -155,6 +155,15 @@ class ClientOutstandingTest extends TestCase
         $this->assertFalse($client['is_linked']);
         $this->assertNull($client['customer_id']);
         $this->assertSame('10000.0000', $client['outstanding_amount']);
+
+        // The row still carries the address FIELD — the key is asserted
+        // separately from its value, because reading a key that was never
+        // written evaluates to null and would pass the null check alone.
+        // Every row on this instance is this row today: 135 Tally parties,
+        // none linked. The follow-up draft is composed for all of them and
+        // simply has no recipient to fill in yet.
+        $this->assertArrayHasKey('customer_email', $client);
+        $this->assertNull($client['customer_email']);
     }
 
     public function test_a_linked_customer_is_resolved_by_its_recorded_ledger_guid(): void
@@ -166,6 +175,7 @@ class ClientOutstandingTest extends TestCase
         $customer = Customer::query()->create([
             'code' => 'TL-9',
             'name' => 'Northwind Traders Pvt Ltd',
+            'email' => 'accounts@northwind.example',
             'is_active' => true,
         ]);
         $customer->forceFill([
@@ -180,6 +190,39 @@ class ClientOutstandingTest extends TestCase
         $this->assertTrue($client['is_linked']);
         $this->assertSame($customer->id, $client['customer_id']);
         $this->assertSame('Northwind Traders Pvt Ltd', $client['customer_name']);
+
+        // The positive half. Asserting only that an unlinked row is null
+        // would pass against a field hardcoded to null and never resolved at
+        // all — this is what proves the address actually comes off the linked
+        // customer, and what a follow-up draft will address itself with once
+        // the ledgers are matched.
+        $this->assertSame('accounts@northwind.example', $client['customer_email']);
+    }
+
+    public function test_a_linked_customer_with_a_blank_email_reports_no_address(): void
+    {
+        $customer = Customer::query()->create([
+            'code' => 'TL-10',
+            'name' => 'Blank Address Ltd',
+            'email' => '   ',
+            'is_active' => true,
+        ]);
+        $customer->forceFill([
+            'tally_ledger_guid' => 'ledger-guid-northwind',
+            'tally_ledger_name' => 'Northwind Traders',
+        ])->save();
+
+        $this->bill();
+
+        $client = $this->clientNamed($this->report(), 'Northwind Traders');
+
+        // The customer IS linked, so the row keeps the link. What it must not
+        // do is hand out whitespace as an address: a reader that only tests
+        // for emptiness would treat "   " as a real recipient and compose a
+        // draft addressed to nothing. One thing to test — null or an address.
+        $this->assertTrue($client['is_linked']);
+        $this->assertSame($customer->id, $client['customer_id']);
+        $this->assertNull($client['customer_email']);
     }
 
     public function test_pending_orders_are_summed_and_valueless_lines_are_counted_not_invented(): void

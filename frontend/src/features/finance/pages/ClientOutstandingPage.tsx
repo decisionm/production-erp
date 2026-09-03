@@ -1,10 +1,12 @@
-import { UploadOutlined } from '@ant-design/icons';
+import { MailOutlined, UploadOutlined } from '@ant-design/icons';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Card, Col, Empty, Input, Row, Segmented, Space, Statistic, Table, Tag, Tooltip, Typography, Upload } from 'antd';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuthStore } from '@/features/auth/store';
 import { getClientOutstanding, importClientOutstanding } from '@/features/finance/api';
+import { clientLabel, money } from '@/features/finance/clientOutstandingFormat';
+import { followUpDraft } from '@/features/finance/followUpDraft';
 import {
     OUTSTANDING_IMPORT_ACCEPT,
     type OutstandingImportOutcome,
@@ -20,11 +22,6 @@ import { TABLE_STICKY } from '@/lib/tableProps';
 const CLIENT_OUTSTANDING_KEY = ['finance', 'client-outstanding'] as const;
 
 const { Text } = Typography;
-
-/** The name the Client column prints first: the ERP customer where linked, else the Tally ledger. */
-function clientLabel(row: ClientOutstanding): string {
-    return row.customer_id !== null ? (row.customer_name ?? row.party_ledger_name) : row.party_ledger_name;
-}
 
 /** Linked to an ERP customer or not — the second line of the Client column, as a filter. */
 function clientLink(row: ClientOutstanding): 'linked' | 'unlinked' {
@@ -55,16 +52,6 @@ const CLIENT_LINK_LABELS: Record<string, string> = { linked: 'Linked', unlinked:
  * operator presses the tray button — the factory's rule since the Aug-2026
  * corruption scare — so "as at" is a real and sometimes old date.
  */
-
-/** Money arrives as a decimal STRING and is only ever formatted, never parsed to a number for display. */
-function money(value: string | null): string {
-    if (value === null) return '—';
-
-    const n = Number(value);
-    if (!Number.isFinite(n)) return value;
-
-    return n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
 
 /** Sorting needs a number; display never uses this. */
 function num(value: string | null): number {
@@ -340,6 +327,34 @@ export default function ClientOutstandingPage() {
                     ? <Tag style={{ marginInlineEnd: 0 }}>Balance only</Tag>
                     : count,
         },
+        {
+            /*
+             * OPENS A DRAFT. IT DOES NOT SEND ANYTHING.
+             *
+             * An <a href="mailto:"> — antd renders a Button with `href` as an
+             * anchor — so the operator's own mail client opens on a letter
+             * they read, edit and send under their own name. No server call,
+             * no queue, no outbound integration: drafts are prepared here and
+             * a human sends them.
+             *
+             * LIVE ON EVERY ROW, deliberately. Not one client on this
+             * instance is linked to an ERP customer, so wiring this to the
+             * address would have drawn a disabled button on all 135 rows —
+             * a control that never works teaches an operator the feature is
+             * broken. Where there is no address the mailto carries no
+             * recipient and the sender supplies it; the figures are already
+             * typed either way, which is the useful half.
+             */
+            title: 'Follow-up',
+            key: 'follow_up',
+            align: 'center' as const,
+            width: 120,
+            render: (_: unknown, row: ClientOutstanding) => (
+                <Button size="small" icon={<MailOutlined />} href={followUpDraft(row, data?.as_of ?? null).url}>
+                    Mail
+                </Button>
+            ),
+        },
     ];
 
     return (
@@ -572,6 +587,10 @@ export default function ClientOutstandingPage() {
                                 <Table.Summary.Cell index={12} align="right">
                                     <Text strong>{hasBalanceOnly ? 'Partial' : totals.bill_count}</Text>
                                 </Table.Summary.Cell>
+                                {/* Follow-up: a per-client action has no total,
+                                    but the cell is still owed or every figure
+                                    in this row slides left of its heading. */}
+                                <Table.Summary.Cell index={13} />
                             </Table.Summary.Row>
                         </Table.Summary>
                     )
