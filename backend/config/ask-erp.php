@@ -1,6 +1,12 @@
 <?php
 
 return [
+    // Which model writes the SQL: 'anthropic' (the default, and what the
+    // design was reviewed against) or 'openai'. The choice changes the
+    // transport only — the prompt, the schema, the permission filtering and
+    // SqlGuard are the same on both paths.
+    'driver' => env('ASK_ERP_DRIVER', 'anthropic'),
+
     // Anthropic API key. Read from env only; never logged, never sent to the SPA.
     'api_key' => env('ANTHROPIC_API_KEY'),
 
@@ -19,6 +25,22 @@ return [
     // connection. Live sets ASK_ERP_DB_CONNECTION=ask_erp with a read-only
     // MySQL user (config/database.php).
     'connection' => env('ASK_ERP_DB_CONNECTION'),
+
+    // The OpenAI path, used only when driver = openai. Its own key, because
+    // the two providers are separate accounts with separate billing and one
+    // must never be tried against the other's endpoint.
+    'openai' => [
+        'api_key' => env('OPENAI_API_KEY'),
+        'model' => env('ASK_ERP_OPENAI_MODEL', 'gpt-5.2'),
+        // minimal | low | medium | high. Low by default: the schema is
+        // already in the prompt, so this is transcription more than
+        // reasoning, and latency is the binding constraint on shared hosting.
+        'reasoning_effort' => env('ASK_ERP_OPENAI_EFFORT', 'low'),
+        // Reasoning tokens are spent inside this ceiling, so it sits well
+        // above the Anthropic max_tokens rather than level with it.
+        'max_completion_tokens' => (int) env('ASK_ERP_OPENAI_MAX_TOKENS', 8000),
+        'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
+    ],
 
     'catalogue_path' => resource_path('schema-catalogue'),
 
