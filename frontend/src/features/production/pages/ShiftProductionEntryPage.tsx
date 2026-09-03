@@ -8,7 +8,7 @@ import {
 } from '@ant-design/icons';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Alert, Button, Card, Checkbox, Col, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, type InputRef, message, Modal, Radio, Row, Segmented, Select, Space, Table, Tag, TimePicker, Tooltip, Typography } from 'antd';
+import { Alert, Button, Card, Checkbox, Col, DatePicker, Descriptions, Drawer, Form, Input, InputNumber, type InputRef, message, Modal, Pagination, Radio, Row, Segmented, Select, Space, Switch, Table, Tag, TimePicker, Tooltip, Typography } from 'antd';
 import dayjs from 'dayjs';
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -89,6 +89,7 @@ import {
 } from '@/features/production/types';
 import { currentShift, justEndedShift, productionDateFor } from '@/features/production/shiftClock';
 import { correctionLists } from '@/features/production/correctionReads';
+import { correctableFiltersActive, type CorrectableFilters } from '@/features/production/correctableFilters';
 // The SAME label the Quality queue's row tag shows, off the SAME
 // `quality_return` key — see returnedByQuality.ts for why this is not a
 // duplicate of `readReturnReason`/`correction` above.
@@ -117,6 +118,7 @@ import { roundPer, useProductionSettings } from '@/features/production/packing';
 import { itemLabel, uomOf } from '@/lib/itemLabel';
 import { apiErrorParts } from '@/lib/apiError';
 import { showApiError } from '@/lib/showApiError';
+import { pageRangeLine } from '@/lib/tableProps';
 import {
     buildStartBatchStandardUrl,
     hasStartBatchResume,
@@ -1528,6 +1530,16 @@ export default function ShiftProductionEntryPage() {
     const stateStyles = useMemo(() => stateStyle(themeMode), [themeMode]);
     const [selectedShiftId, setSelectedShiftId] = useState<number | undefined>(undefined);
     const [graceBannerDismissed, setGraceBannerDismissed] = useState(false);
+    // "Earlier batches — still correctable" control row (03-Sep-2026, Task
+    // 2): the committed filters and the current page. Not URL-synced —
+    // this is one card list embedded in a much larger operational page, not
+    // a dedicated list route, and the default (empty filters, page 1) is
+    // exactly today's unfiltered view.
+    const [correctableFilters, setCorrectableFilters] = useState<CorrectableFilters>({});
+    const [correctablePage, setCorrectablePage] = useState(1);
+    // The search box's own draft, separate from the committed `q`, so
+    // typing does not requery on every keystroke — only Enter/search does.
+    const [correctableSearchDraft, setCorrectableSearchDraft] = useState('');
     const [startingMachine, setStartingMachine] = useState<WorkCenter | null>(null);
     const [pendingStartBatchResume, setPendingStartBatchResume] = useState<StartBatchResumeDraft | null>(null);
     const pendingStartBatchResumeRef = useRef<StartBatchResumeDraft | null>(null);
@@ -1745,12 +1757,10 @@ export default function ShiftProductionEntryPage() {
         // that must leave the rest of the floor screen working.
         retry: false,
     });
-    const { data: correctableRead } = useQuery({
-        queryKey: ['production', 'shift-production-entries', 'correctable'],
-        queryFn: listCorrectableEntries,
-        refetchInterval: 60000,
-        retry: false,
-    });
+    // `correctableRead` (the "Earlier batches" query) moved below `today` is
+    // computed — it caps its own read to strictly before `today`
+    // (correctableFilters.ts's `date_to`), so it needs that value before it
+    // can run. See the query beside `completedTodayPage`.
     // Authoritative machine-running state — every in-progress batch across
     // all shifts/dates, unpaginated. Distinct from `completedToday` (the
     // server's today-scoped, completed-only page below) so a batch left
@@ -2115,6 +2125,29 @@ export default function ShiftProductionEntryPage() {
         return map;
     }, [moldChangeLogs]);
 
+    /**
+     * "Earlier batches — still correctable" (03-Sep-2026, Task 2), and
+     * capped to strictly BEFORE `today` (post-review fix, same day): the two
+     * sections are meant to be date-disjoint from Completed Today below, and
+     * that boundary is now the QUERY's job, not a client-side subtraction —
+     * see correctableFilters.ts's `date_to` cap and correctionReads.ts's
+     * updated docblock for why the old client-side subtraction broke once
+     * this read became a real page instead of a full walk. `today` here is
+     * the SAME production day passed to `listCompletedEntriesForDay` below,
+     * not a fresh clock read — a night shift's batches, filed under
+     * yesterday, are correctly still "earlier" until the day itself rolls.
+     */
+    const { data: correctableRead } = useQuery({
+        queryKey: ['production', 'shift-production-entries', 'correctable', correctableFilters, correctablePage, today],
+        queryFn: () => listCorrectableEntries(today, correctableFilters, correctablePage),
+        refetchInterval: 60000,
+        retry: false,
+        // Keeps the current page's cards on screen while a filter change or
+        // the 60s poll fetches the next answer, instead of the list
+        // flashing empty between requests.
+        placeholderData: (previous) => previous,
+    });
+
     // COMPLETED TODAY, SERVER-SIDE (Phase 5.5, WS-C). The server answers
     // exactly today's completed batches — production_date = the shift-aware
     // factory day (`today`), batch_status = completed, up to 100 rows — so
@@ -2146,6 +2179,14 @@ export default function ShiftProductionEntryPage() {
      * that disappears at 06:45 for the shift that is still writing its
      * paperwork.
      *
+     * Date-disjoint from Completed Today by the READ itself now, not by
+     * anything filtered here — `correctableRead` above already asked the
+     * server for strictly-before-`today` rows (correctableFilters.ts's
+     * `date_to` cap), so `completedToday` is no longer passed into
+     * correctionLists() at all (post-review fix, 03-Sep-2026; see
+     * correctionReads.ts's docblock for why the old client-side subtraction
+     * broke once this read became a real page).
+     *
      * The client predicates (isAwaitingCorrection / canAmendCompletion) still
      * run inside correctionLists() as a PARITY GUARD: the server filtered by
      * the same fields, so they drop nothing on a matching backend — and on one
@@ -2153,9 +2194,23 @@ export default function ShiftProductionEntryPage() {
      */
     const { awaitingCorrection, correctableEarlier } = correctionLists({
         awaiting: awaitingCorrectionRead?.entries,
-        correctable: correctableRead?.entries,
-        completedToday,
+        correctable: correctableRead?.data,
     });
+    // The control row's Clear button, and whether the (now server-paged,
+    // server-filtered) section has anything to show for the current
+    // filters — distinct from `correctableEarlier.length`, which is the
+    // PARITY-GUARDED count for just this page.
+    const correctableFiltersOn = correctableFiltersActive(correctableFilters);
+    const correctableSectionVisible = correctableEarlier.length > 0 || correctableFiltersOn;
+    const updateCorrectableFilters = (patch: Partial<CorrectableFilters>) => {
+        setCorrectableFilters((prev) => ({ ...prev, ...patch }));
+        setCorrectablePage(1);
+    };
+    const clearCorrectableFilters = () => {
+        setCorrectableFilters({});
+        setCorrectableSearchDraft('');
+        setCorrectablePage(1);
+    };
 
     // A grid outage can happen more than once in a shift — this is a list,
     // not a single per-shift value, so every "Log Power Interruption" adds
@@ -6166,16 +6221,109 @@ export default function ShiftProductionEntryPage() {
                 nobody reads on the day it matters. They sit under the day's work
                 instead, with the same eligibility gate (canAmendCompletion) and
                 the same drawer — only the framing changed. */}
-            {correctableEarlier.length > 0 && (
+            {correctableSectionVisible && (
                 <div style={{ marginTop: 32 }}>
+                    {/* THE CONTROL ROW (03-Sep-2026, Task 2) — batch number, Machine,
+                        Shift and Product narrow the same server read Task 1 taught these
+                        filters to; the date range reuses date_from/date_to; Returned and
+                        the sort switch are the two remaining server params. Every control
+                        writes into `correctableFilters` and resets to page 1 — the pager
+                        below is the only thing that moves the page on its own. Machine,
+                        Shift and Product options are the SAME lists the rest of this page
+                        already reads (activeWorkCenters, shiftOptions, itemOptions) — no
+                        new master read for this row. */}
+                    <Space wrap size={8} style={{ marginBottom: 16 }}>
+                        <Input.Search
+                            allowClear
+                            placeholder="Batch number"
+                            style={{ width: 180 }}
+                            value={correctableSearchDraft}
+                            onChange={(event) => setCorrectableSearchDraft(event.target.value)}
+                            onSearch={(value) => updateCorrectableFilters({ q: value.trim() || undefined })}
+                        />
+                        <Select<number>
+                            allowClear
+                            showSearch
+                            optionFilterProp="label"
+                            placeholder="Machine"
+                            style={{ width: 160 }}
+                            options={activeWorkCenters.map((wc) => ({ value: wc.id, label: wc.name }))}
+                            value={correctableFilters.work_center_id}
+                            onChange={(value) => updateCorrectableFilters({ work_center_id: value ?? undefined })}
+                        />
+                        <Select<number>
+                            allowClear
+                            placeholder="Shift"
+                            style={{ width: 140 }}
+                            options={shiftOptions}
+                            value={correctableFilters.shift_id}
+                            onChange={(value) => updateCorrectableFilters({ shift_id: value ?? undefined })}
+                        />
+                        <Select<number>
+                            allowClear
+                            showSearch
+                            optionFilterProp="label"
+                            placeholder="Product"
+                            style={{ width: 220 }}
+                            options={itemOptions}
+                            value={correctableFilters.item_id}
+                            onChange={(value) => updateCorrectableFilters({ item_id: value ?? undefined })}
+                        />
+                        <DatePicker.RangePicker
+                            allowEmpty={[true, true]}
+                            placeholder={['Date from', 'to']}
+                            value={[
+                                correctableFilters.date_from ? dayjs(correctableFilters.date_from) : null,
+                                correctableFilters.date_to ? dayjs(correctableFilters.date_to) : null,
+                            ]}
+                            onChange={(range) =>
+                                updateCorrectableFilters({
+                                    date_from: range?.[0]?.format('YYYY-MM-DD'),
+                                    date_to: range?.[1]?.format('YYYY-MM-DD'),
+                                })
+                            }
+                            // This section is "earlier than today" by definition
+                            // (correctableQuery's date_to cap) — today itself and
+                            // beyond belong to Completed Today, never here, so the
+                            // calendar does not offer them. Without this, picking
+                            // today/a future date as `date_to` would silently get
+                            // clamped back by the query, and picking it as
+                            // `date_from` alongside the clamp could ask the server
+                            // for date_from > date_to and 422.
+                            disabledDate={(date) => !date.isBefore(dayjs(today), 'day')}
+                        />
+                        <Space size={4}>
+                            <Typography.Text>Returned</Typography.Text>
+                            <Switch
+                                checked={!!correctableFilters.returned}
+                                onChange={(checked) => updateCorrectableFilters({ returned: checked || undefined })}
+                            />
+                        </Space>
+                        <Segmented
+                            value={correctableFilters.sort ?? 'newest'}
+                            onChange={(value) => updateCorrectableFilters({ sort: value as 'newest' | 'oldest' })}
+                            options={[
+                                { label: 'Newest first', value: 'newest' },
+                                { label: 'Oldest first', value: 'oldest' },
+                            ]}
+                        />
+                        {correctableFiltersOn && (
+                            <Button size="small" onClick={clearCorrectableFilters}>
+                                Clear
+                            </Button>
+                        )}
+                    </Space>
                     <SectionHeading
                         title="Earlier batches — still correctable"
                         extra={
                             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                {correctableEarlier.length} batch{correctableEarlier.length === 1 ? '' : 'es'} · quality has not checked these yet
+                                {pageRangeLine(correctableRead?.meta, 'batches')} · quality has not checked these yet
                             </Typography.Text>
                         }
                     />
+                    {correctableEarlier.length === 0 && (
+                        <Typography.Text type="secondary">No batches match these filters.</Typography.Text>
+                    )}
                     <Space direction="vertical" size={6} style={{ width: '100%' }}>
                         {correctableEarlier.map((entry) => {
                             const returnedTag = returnedTagText(entry.quality_return);
@@ -6225,6 +6373,18 @@ export default function ShiftProductionEntryPage() {
                             );
                         })}
                     </Space>
+                    {correctableRead && correctableRead.meta.last_page > 1 && (
+                        <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+                            <Pagination
+                                size="small"
+                                current={correctableRead.meta.current_page}
+                                pageSize={correctableRead.meta.per_page}
+                                total={correctableRead.meta.total}
+                                showSizeChanger={false}
+                                onChange={(nextPage) => setCorrectablePage(nextPage)}
+                            />
+                        </div>
+                    )}
                 </div>
             )}
 

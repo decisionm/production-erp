@@ -174,6 +174,16 @@ class ShiftProductionEntryService
      * already excludes one still awaiting the floor's fix
      * (whereAwaitingQualityCheck) — this flag narrows the queue, it never
      * widens it. False — every existing caller — is no filter.
+     *
+     * `$itemId` / `$batchNumber` (03-Sep-2026, "Earlier batches — still
+     * correctable" filters, Task 1): `$itemId` is a plain exact match on
+     * the product, the same shape as `$workCenterId` / `$shiftId` beside
+     * it. `$batchNumber` is deliberately NARROWER than `$q` above — it
+     * matches ONLY shift_production_entries.batch_number (whereMatchesTerm
+     * also matches the product and machine names, which is right for the
+     * quality queue's single search box but wrong here, where the product
+     * and machine already have their own exact filters). Null — every
+     * existing caller — is no filter.
      */
     public function paginate(
         int $perPage = 20,
@@ -193,6 +203,8 @@ class ShiftProductionEntryService
         bool $oldestFirst = false,
         ?string $sort = null,
         bool $returned = false,
+        ?int $itemId = null,
+        ?string $batchNumber = null,
     ): LengthAwarePaginator {
         $includeCancelled = $includeCancelled || $batchStatus === BatchStatus::Cancelled;
 
@@ -268,6 +280,7 @@ class ShiftProductionEntryService
             ->when($dateTo, fn ($query) => $query->where('production_date', '<', Carbon::parse($dateTo)->addDay()->toDateString()))
             ->when($workCenterId, fn ($query) => $query->where('work_center_id', $workCenterId))
             ->when($shiftId, fn ($query) => $query->where('shift_id', $shiftId))
+            ->when($itemId, fn ($query) => $query->where('item_id', $itemId))
             ->when($correctable, fn ($query) => $this->whereCorrectable($query))
             ->when($awaitingCorrection, fn ($query) => $this->whereAwaitingCorrection($query))
             ->when($awaitingQualityCheck, fn ($query) => $this->whereAwaitingQualityCheck($query))
@@ -277,6 +290,7 @@ class ShiftProductionEntryService
             // live), so this needs no per-driver whereRaw of its own.
             ->when($returned, fn ($query) => $query->whereJsonLength('config_snapshot->quality_returns', '>', 0))
             ->when(trim((string) $q) !== '', fn ($query) => $this->whereMatchesTerm($query, trim((string) $q)))
+            ->when($batchNumber !== null, fn ($query) => $this->whereBatchNumberMatches($query, $batchNumber))
             // The id is the tie-breaker either way: a day's batches share a
             // production_date, and the id is monotonic in creation order.
             ->when($sort === null, fn ($query) => $query
@@ -405,8 +419,8 @@ class ShiftProductionEntryService
      */
     private function whereMatchesTerm($query, string $term): void
     {
-        $needle = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_strtolower($term)).'%';
-        $like = fn ($column) => "lower({$column}) like ? escape '!'";
+        $needle = $this->likeNeedle($term);
+        $like = fn ($column) => $this->likeClause($column);
 
         $query->where(function ($any) use ($needle, $like) {
             $any->whereRaw($like('shift_production_entries.batch_number'), [$needle])
@@ -417,6 +431,34 @@ class ShiftProductionEntryService
                     $either->whereRaw($like('work_centers.code'), [$needle])->orWhereRaw($like('work_centers.name'), [$needle]);
                 }));
         });
+    }
+
+    /**
+     * The correctable list's own search box (03-Sep-2026, Task 1 of
+     * "Earlier batches — still correctable" filters): batch_number ONLY,
+     * NOT product or machine — those already have exact filters
+     * ($itemId, $workCenterId) on this list, so a typed term here can only
+     * mean the batch number. Same case-insensitive, wildcard-escaped
+     * substring match as whereMatchesTerm() above, on one column instead
+     * of three.
+     *
+     * @param  Builder<ShiftProductionEntry>  $query
+     */
+    private function whereBatchNumberMatches($query, string $term): void
+    {
+        $query->whereRaw($this->likeClause('shift_production_entries.batch_number'), [$this->likeNeedle($term)]);
+    }
+
+    /** Case-insensitive substring needle for likeClause(), with `%`/`_`/`!` escaped as literals. */
+    private function likeNeedle(string $term): string
+    {
+        return '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_strtolower($term)).'%';
+    }
+
+    /** `lower(column) like ? escape '!'` — portable across sqlite and mysql/mariadb, no per-driver SQL needed. */
+    private function likeClause(string $column): string
+    {
+        return "lower({$column}) like ? escape '!'";
     }
 
     /**

@@ -91,25 +91,31 @@ describe('walkEntryPages', () => {
 
 describe('correctionLists', () => {
     it('undefined reads (still loading, or 403 for a login without production.view) derive two empty lists', () => {
-        const lists = correctionLists({ awaiting: undefined, correctable: undefined, completedToday: [] });
+        const lists = correctionLists({ awaiting: undefined, correctable: undefined });
         expect(lists.awaitingCorrection).toEqual([]);
         expect(lists.correctableEarlier).toEqual([]);
     });
 
     it('awaitingCorrection is the server list, order kept, and the parity guard drops a row the resource does not flag', () => {
         const rows = [sentBack(3), entry(4), sentBack(5)];
-        const lists = correctionLists({ awaiting: rows, correctable: [], completedToday: [] });
+        const lists = correctionLists({ awaiting: rows, correctable: [] });
         expect(lists.awaitingCorrection.map((e) => e.id)).toEqual([3, 5]);
     });
 
-    it('correctableEarlier = correctable rows minus the sent-back ones minus what Completed Today already shows', () => {
-        const shownToday = entry(7, { production_date: '2026-08-17' });
+    it('correctableEarlier = correctable rows minus the sent-back ones — nothing here is date-scoped any more', () => {
+        // Post-review fix (03-Sep-2026): correctionLists() used to also drop
+        // whatever id the Completed Today read held (`shownToday`), which is
+        // exactly what broke pagination — see the module docblock. That
+        // exclusion is gone; disjointness from Completed Today is now the
+        // CALLER's job (correctableQuery's date_to cap), not this function's.
+        // A same-day row reaching this function (which should no longer
+        // happen once the caller applies the cap) is NOT excluded here.
+        const todayLike = entry(7, { production_date: '2026-09-03' });
         const lists = correctionLists({
             awaiting: [sentBack(5)],
-            correctable: [entry(6), sentBack(5), shownToday, entry(8)],
-            completedToday: [shownToday],
+            correctable: [entry(6), sentBack(5), todayLike, entry(8)],
         });
-        expect(lists.correctableEarlier.map((e) => e.id)).toEqual([6, 8]);
+        expect(lists.correctableEarlier.map((e) => e.id)).toEqual([6, 7, 8]);
     });
 
     it('the parity guard on correctable drops a row the resource says is not amendable (approved, running, or quality-checked)', () => {
@@ -121,14 +127,13 @@ describe('correctionLists', () => {
                 entry(3, { quality: { checked: true } }),
                 entry(4),
             ],
-            completedToday: [],
         });
         expect(lists.correctableEarlier.map((e) => e.id)).toEqual([4]);
     });
 
     it('a sent-back batch is never listed twice — it belongs to the amber panel, not the quiet line', () => {
         const back = sentBack(9);
-        const lists = correctionLists({ awaiting: [back], correctable: [back], completedToday: [] });
+        const lists = correctionLists({ awaiting: [back], correctable: [back] });
         expect(lists.awaitingCorrection.map((e) => e.id)).toEqual([9]);
         expect(lists.correctableEarlier).toEqual([]);
     });

@@ -256,7 +256,12 @@ class EntriesIndexFiltersTest extends TestCase
     {
         $entry = $this->entry();
 
-        $this->assertSame([$entry->id], $this->ids('colour=amber&sort=-id&foo=bar'));
+        // `sort` used to be one of these unknown-and-ignored keys on THIS
+        // endpoint (it only meant something on the quality queue's own
+        // request). 03-Sep-2026 gave it real meaning here too — newest/oldest,
+        // not the quality queue's ListSort spelling — so it is validated now
+        // and no longer a stand-in for "unrecognised"; `zzz` replaces it.
+        $this->assertSame([$entry->id], $this->ids('colour=amber&zzz=-id&foo=bar'));
     }
 
     public function test_an_empty_filter_value_is_no_filter(): void
