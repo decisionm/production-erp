@@ -1,0 +1,142 @@
+name: Add a role to a user
+
+# Adds ONE existing role to ONE existing user on the live instance. Dry by
+# default: without write=true it prints exactly who it found and what they
+# would gain, and changes nothing.
+#
+# WHY THIS IS A WORKFLOW AND NOT A SEEDER. Which person keeps the store is a
+# fact about the factory, not about the code — a seeder that assigned logins
+# would make an authorization change a side effect of deploying, and would
+# reassert itself on every future deploy after somebody deliberately removed
+# it. AGENTS.md is explicit that live master-data changes go through a manual
+# workflow, dry-run first, written only after a person has read the dry run.
+#
+# THE ROLES SCREEN IS STILL THE NORMAL ROUTE. This exists for when the change
+# is asked for from the repository; it does not replace a person clicking it.
+#
+# THE DANGER IS THE WRONG LOGIN, not the wrong role. A display name is not
+# unique, and a role granted to a second person of the same name is an
+# incident nothing later detects, because the app simply works for them. So
+# the command refuses on anything but exactly one match and prints every
+# candidate with its email — search by name to FIND the person, then re-run
+# with their email to name them beyond doubt.
+#
+# IT ONLY ADDS. A user who holds Shift Floor and gains Store holds both, and
+# their permissions stack. Removing a role costs somebody access mid-shift, is
+# a different act with a different blast radius, and is deliberately not
+# available here.
+#
+# READ `roles:show` FIRST ("Show roles", read-only) to see what the role you
+# are about to grant actually holds on live today. Roles are runtime data —
+# dev fixtures do not answer it.
+
+# Least privilege: nothing here writes to the repository. Every workflow uses
+# only checkout, setup-node/php and same-run artifacts, and reaches the server
+# over SSH with a deploy key — never the GITHUB_TOKEN.
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      user:
+        description: 'Email (or part of a name) identifying exactly one user, e.g. vasanth@example.com'
+        required: true
+        type: string
+      role:
+        description: 'The EXISTING role to add, e.g. Store'
+        required: true
+        type: string
+      write:
+        description: 'Actually write. Leave false for a dry run that changes nothing.'
+        type: boolean
+        default: false
+
+concurrency:
+  group: assign-user-role
+  cancel-in-progress: false
+
+jobs:
+  assign:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          keys=""
+          for attempt in 1 2 3; do
+            keys=$(ssh-keyscan -T 15 -p "${{ secrets.SSH_PORT }}" -H "${{ secrets.SSH_HOST }}") || true
+            if [ -n "$keys" ]; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "ssh-keyscan attempt ${attempt} returned no host key; retrying in $((attempt * 10))s"
+              sleep "$((attempt * 10))"
+            fi
+          done
+          if [ -z "$keys" ]; then
+            echo "::error::The host returned no SSH host key. Check hPanel → Advanced → SSH Access, and whether brute-force protection has banned the runner. Re-running often clears a transient failure."
+            exit 1
+          fi
+          printf '%s\n' "$keys" >> ~/.ssh/known_hosts
+
+      - name: Report what is about to run
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+          USER_RAW: ${{ inputs.user }}
+          ROLE_RAW: ${{ inputs.role }}
+        run: |
+          if [ "$WRITE_RAW" = "true" ]; then
+            echo "::warning::WRITING on the live instance: adding role '${ROLE_RAW}' to the user matching '${USER_RAW}'. Nothing is removed."
+          else
+            echo "Dry run — nothing will be written."
+          fi
+
+      # THE INPUTS ARE FREE TEXT A PERSON TYPES INTO A FORM, and everything
+      # sent over ssh is re-parsed by a shell on the far side — so an email or
+      # a name carrying a quote, a semicolon or a backtick would otherwise run
+      # as a command on the live server. `printf %q` renders each value as a
+      # token that the remote shell parses back to exactly the literal string,
+      # and the values are never reached by ${{ }} interpolation inside the
+      # command: they arrive as environment variables of THIS step first.
+      - name: Run it
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+          USER_RAW: ${{ inputs.user }}
+          ROLE_RAW: ${{ inputs.role }}
+        run: |
+          set -o pipefail
+
+          FLAGS=""
+          [ "$WRITE_RAW" = "true" ] && FLAGS="--write"
+
+          USER_Q=$(printf '%q' "$USER_RAW")
+          ROLE_Q=$(printf '%q' "$ROLE_RAW")
+
+          ssh -i ~/.ssh/deploy_key -p "${{ secrets.SSH_PORT }}" \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" \
+            "cd '${{ secrets.DEPLOY_PATH }}/backend' && \$(bash scripts/pick-php.sh 2>/dev/null || echo /opt/alt/php84/usr/bin/php) artisan roles:assign $USER_Q $ROLE_Q $FLAGS" \
+            2>&1 | tee output.txt
+
+      - name: Summarise
+        if: always()
+        env:
+          WRITE_RAW: ${{ inputs.write }}
+          USER_RAW: ${{ inputs.user }}
+          ROLE_RAW: ${{ inputs.role }}
+        run: |
+          {
+            echo '### Add a role to a user'
+            echo ''
+            echo "user: \`$USER_RAW\` · role: \`$ROLE_RAW\` · write: \`$WRITE_RAW\`"
+            echo ''
+            echo 'This only ADDS a role. Nothing is removed, no login is created, and no role is created.'
+            echo 'After a write, the person must sign out and back in before the new permissions apply.'
+            echo ''
+            echo '```'
+            tail -c 60000 output.txt 2>/dev/null || echo '(no output captured)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
