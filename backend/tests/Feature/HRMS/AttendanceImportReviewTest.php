@@ -147,6 +147,20 @@ class AttendanceImportReviewTest extends TestCase
         );
     }
 
+    public function test_the_employee_master_spells_the_name_not_the_punch_file(): void
+    {
+        $this->actAs();
+        // The report shouts every name in capitals; the master does not.
+        Employee::query()->where('employee_code', 'SPP-01')->update(['name' => 'Anand Kumar']);
+        $import = $this->upload();
+
+        $rows = collect($this->getJson("/api/v1/hrms/attendance-imports/{$import->id}/employees")->json('data'));
+
+        $this->assertSame('Anand Kumar', $rows->firstWhere('employee_code', 'SPP-01')['employee_name']);
+        // Somebody with no master record keeps the only name there is.
+        $this->assertSame('NOBODY', $rows->firstWhere('employee_code', 'ZZZ-99')['employee_name']);
+    }
+
     public function test_an_employee_missing_from_the_master_is_flagged_rather_than_hidden(): void
     {
         $this->actAs();
