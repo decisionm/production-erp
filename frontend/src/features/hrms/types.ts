@@ -84,6 +84,53 @@ export interface Attendance {
 }
 
 /** One person's range on the Attendance page: the days, and what they came to. */
+/** One day of the turnout chart: who was on the floor, and who is unanswered. */
+export interface AttendanceTurnoutDay {
+    date: string;
+    present: number;
+    half_day: number;
+    absent: number;
+    on_leave: number;
+    week_off: number;
+    needs_review: number;
+}
+
+/**
+ * The three reads that are not a count of statuses: which days the factory
+ * ran short, how long the days ran, and who the punch report keeps failing
+ * on. Hours come off the CLOCK, never off the punch app's own OT column.
+ */
+export interface AttendanceInsights {
+    from: string;
+    to: string;
+    turnout: AttendanceTurnoutDay[];
+    hours: {
+        days: number;
+        total_minutes: number;
+        average_minutes: number;
+        long_days: number;
+        very_long_days: number;
+        short_days: number;
+        implausible_days: number;
+    };
+    longest_days: {
+        employee_id: number;
+        employee_code: string;
+        name: string;
+        department: string | null;
+        long_days: number;
+        minutes: number;
+    }[];
+    most_mismatched: {
+        employee_id: number;
+        employee_code: string;
+        name: string;
+        department: string | null;
+        mismatches: number;
+        unanswered: number;
+    }[];
+}
+
 /**
  * The caller's OWN range. Same shape as one person's, except that a login
  * with no employee row behind it has no person to name.

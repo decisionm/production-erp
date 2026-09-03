@@ -999,6 +999,10 @@ Route::prefix('v1')->group(function () {
             Route::get('attendance/person', [AttendanceController::class, 'person']);
             Route::get('attendance/person/sheet', [AttendanceController::class, 'sheet']);
             Route::get('attendance/summary', [AttendanceController::class, 'summary']);
+            // Turnout by day, the length of the days, and the people the
+            // punch report keeps failing on — `hrms.manage`, inside the
+            // controller, exactly as summary asks.
+            Route::get('attendance/insights', [AttendanceController::class, 'insights']);
             Route::post('attendance/mark', [AttendanceController::class, 'mark']);
 
             // The punch-report import (03-Sep design, Track 2): the browser

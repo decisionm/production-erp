@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
+import { rangeFor } from './attendanceRange';
 import type { AttendanceMine } from './types';
 
 /**
@@ -30,6 +31,7 @@ vi.mock('@/features/auth/store', () => ({
 
 import MyAttendanceCard from './components/MyAttendanceCard';
 import AttendancePage from './pages/AttendancePage';
+import MyAttendancePage from './pages/MyAttendancePage';
 
 const range = { from: '2026-07-01', to: '2026-07-31' };
 
@@ -96,17 +98,33 @@ describe('MyAttendanceCard', () => {
     });
 });
 
-describe('the Attendance page for a login with no HRMS rights', () => {
-    it('shows my own month and nobody elses', () => {
+describe('My Attendance, on its own page', () => {
+    it('is where a login without HRMS rights reads its own month', () => {
+        // The page opens on THIS month rather than on the HRMS page's range,
+        // so the fixture is seeded under the range it will actually ask for.
+        const own = rangeFor('this_month');
+        const html = render(<MyAttendancePage />, (client) => {
+            client.setQueryData(['hrms', 'attendance', 'me', own.from, own.to], mine({ from: own.from, to: own.to }));
+        });
+
+        expect(html).toContain('My Attendance');
+        expect(html).toContain('Anand');
+    });
+});
+
+describe('the HRMS Attendance page for a login with no HRMS rights', () => {
+    it('shows nobody at all — not even the reader', () => {
         const html = render(<AttendancePage />, (client) => {
             client.setQueryData(['hrms', 'attendance', 'me', range.from, range.to], mine());
         });
 
-        expect(html).toContain('My attendance');
-        // The three management reads are not merely refused by the server —
-        // they are not on the page.
+        // Your own month is NOT duplicated here; it has its own page.
+        expect(html).not.toContain('My attendance');
+        // And the four management reads are not merely refused by the
+        // server — they are not on the page.
         expect(html).not.toContain('One person');
         expect(html).not.toContain('By department');
+        expect(html).not.toContain('Insights');
         expect(html).not.toContain('All marks');
     });
 });

@@ -84,6 +84,29 @@ class AttendanceController extends Controller
     }
 
     /**
+     * THE READS THAT ARE NOT A COUNT: turnout day by day, how long the days
+     * ran, and who the punch report keeps failing on.
+     *
+     * The same `hrms.manage` this controller asks of `summary`, and for the
+     * same reason — these are the whole factory's numbers, and a supervisor
+     * looking one person up is not being handed them.
+     */
+    public function insights(AttendanceSummaryRequest $request): JsonResponse
+    {
+        abort_unless(
+            $request->user()?->hasAnyPermission(['hrms.manage']) === true,
+            403,
+            "You don't have permission to access this feature."
+        );
+
+        $filters = $request->validated();
+
+        return response()->json([
+            'data' => $this->attendance->insights($filters['from'], $filters['to']),
+        ]);
+    }
+
+    /**
      * The factory's attendance for a range, by department.
      *
      * `module:hrms` lets a GET through on `.view` OR `.manage`, and this

@@ -1,4 +1,4 @@
-import type { AttendanceTally } from '@/features/hrms/types';
+import type { AttendanceTally, AttendanceTurnoutDay } from '@/features/hrms/types';
 
 /** One bar: what it counts, how many, and which of the six colours it takes. */
 export interface AttendanceBar {
@@ -55,4 +55,49 @@ function niceCeiling(value: number): number {
     // Four ticks over a ceiling that does not divide by four gives fractional
     // day labels, which nobody counts attendance in.
     return Math.ceil(ceiling / 4) * 4;
+}
+
+/** One day of the turnout chart, reduced to what a bar can show. */
+export interface TurnoutPoint {
+    date: string;
+    /** People whose day counted as work — a half day is still somebody in. */
+    worked: number;
+    /** Days nobody has answered: stacked ON TOP, never counted as absence. */
+    needsReview: number;
+    absent: number;
+}
+
+/**
+ * The turnout of each day, in the range's own order.
+ *
+ * `worked` deliberately includes half days: the question the chart answers
+ * is how many people were on the floor, and half a person's day is a whole
+ * person being there.
+ */
+export function turnoutPoints(days: AttendanceTurnoutDay[]): TurnoutPoint[] {
+    return days.map((day) => ({
+        date: day.date,
+        worked: day.present + day.half_day,
+        needsReview: day.needs_review,
+        absent: day.absent,
+    }));
+}
+
+/** The ceiling for the turnout chart: the tallest stacked bar, rounded up. */
+export function turnoutScale(points: TurnoutPoint[]): { max: number; ticks: number[] } {
+    const raw = Math.max(0, ...points.map((point) => point.worked + point.needsReview));
+    const max = raw <= 0 ? 1 : niceCeiling(raw);
+    const step = max / 4;
+
+    return { max, ticks: [0, step, step * 2, step * 3, max] };
+}
+
+/** Minutes as the factory says them: "8h 30m", never 510. */
+export function hoursLabel(minutes: number): string {
+    if (minutes <= 0) return '—';
+
+    const hours = Math.floor(minutes / 60);
+    const rest = minutes % 60;
+
+    return hours === 0 ? `${rest}m` : rest === 0 ? `${hours}h` : `${hours}h ${rest}m`;
 }

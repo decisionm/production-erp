@@ -11,7 +11,7 @@ import { listAttendance, listAllEmployees, markAttendance } from '@/features/hrm
 import { type DateRange, rangeFor } from '@/features/hrms/attendanceRange';
 import AttendanceRangeBar from '@/features/hrms/components/AttendanceRangeBar';
 import DepartmentAttendanceCard from '@/features/hrms/components/DepartmentAttendanceCard';
-import MyAttendanceCard from '@/features/hrms/components/MyAttendanceCard';
+import AttendanceInsightsCard from '@/features/hrms/components/AttendanceInsightsCard';
 import PersonAttendanceCard from '@/features/hrms/components/PersonAttendanceCard';
 import { ATTENDANCE_DEFAULT_SORT, ATTENDANCE_LIST_SPEC, ATTENDANCE_SORT_FIELDS, noMatchLine, pageRangeLine } from '@/features/hrms/list';
 import type { Attendance, AttendanceListParams, AttendanceStatus } from '@/features/hrms/types';
@@ -134,17 +134,19 @@ export default function AttendancePage() {
             </div>
 
             <Space orientation="vertical" size="middle" style={{ width: '100%', marginBottom: 24 }}>
-                {/* YOUR OWN MONTH FIRST, for whoever is looking. The read
-                    behind it takes no employee, so it can be shown to any
-                    login without showing anybody else's attendance. */}
-                <MyAttendanceCard range={range} />
+                {/* YOUR OWN month is not here: it has its own page, at
+                    /my-attendance, in the sidebar for every login. Carrying
+                    it here as well spent the top of an HR screen on the one
+                    person its reader is not looking for. */}
 
                 {/* Everybody ELSE'S attendance is a management read: looking
-                    a colleague up, and the factory by department. Both
-                    endpoints refuse a login that lacks the permission as
+                    a colleague up, the factory by department, and the three
+                    questions a tally cannot answer. Every one of those
+                    endpoints refuses a login that lacks the permission as
                     well — the page does not merely hide them. */}
                 {mayManage ? <PersonAttendanceCard range={range} /> : null}
                 {mayManage ? <DepartmentAttendanceCard range={range} /> : null}
+                {mayManage ? <AttendanceInsightsCard range={range} /> : null}
             </Space>
 
             {!mayList ? null : (

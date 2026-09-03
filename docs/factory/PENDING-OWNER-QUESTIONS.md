@@ -2993,3 +2993,36 @@ what must happen when the wrongly-identified batch has already reached Tally.
 **Blocks:** the quality desk's stated need. Nothing on the floor today — the
 batch can still be checked or sent back; only its product is uncorrectable.
 *Open since 2026-09-03.*
+
+## Q98 · What is a PAYABLE day? The ERP can count the month but must not decide what it is worth
+
+The July punch report is now readable end to end: 1,829 days, judged on the
+clock (DEC-20260903-005 — eight hours a full day, four a half). The ERP can
+already say, per person, how many days were present, half, absent, on leave,
+a week off, and how many nobody has answered.
+
+It cannot say what to PAY, and it must not guess. Four things only the owner
+can settle, and none of them is derivable from the punch report:
+
+A. **Does a week off pay?** July's report carries 46 of them. A week off is
+   not attendance, and whether it is paid is a wage-structure decision, not
+   an attendance one.
+B. **Does a half day pay exactly half?** The screens count it as half for the
+   present-percentage. That is a display convention this office chose, not a
+   pay rule anybody has stated.
+C. **What happens to a day nobody answered?** 659 of July's days were open
+   when this was written. They are not absences — the software refuses to
+   call them one — but a payroll file has to say something.
+D. **Is a long day worth more?** The clock shows 210 days past ten hours and
+   44 past twelve in the July file, with shifts running 10:10 to 20:20. The
+   punch app prints its own "Total OT" column, but that column is computed
+   against the shift window the app was configured with — the same window
+   that called 232 full shifts half days — so the ERP does not use it and
+   will not until there is a rule to compute overtime FROM.
+
+**What is built and waiting:** the month's counts per person, the hours off
+the clock, and the export. Nothing pays anybody until A-D are answered.
+
+**Blocks:** the "final file for payroll" from the original HRMS ask. The
+month can be corrected and read today; it cannot be turned into money.
+*Open since 2026-09-04.*
