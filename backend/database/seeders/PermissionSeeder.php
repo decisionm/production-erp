@@ -67,7 +67,7 @@ class PermissionSeeder extends Seeder
             Role::findOrCreate($roleName, 'web')->givePermissionTo($addedLine);
         }
 
-        // PROCUREMENT WRITE FOR ACCOUNTS (DEC-20260903-001): Accounts holds
+        // PROCUREMENT WRITE FOR ACCOUNTS (DEC-20260903-005): Accounts holds
         // full procurement write so that Accounts may approve a purchase
         // requisition. Approval is gated on the procurement write permission,
         // and the procurement module has ONE write permission covering
