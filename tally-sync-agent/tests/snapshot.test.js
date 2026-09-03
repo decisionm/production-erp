@@ -374,7 +374,7 @@ test('agentVersion() reads package.json and is the strict semver the release gat
     assert.match(agentVersion(), /^\d+\.\d+\.\d+$/);
 });
 
-test('this candidate is 0.4.7 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9, the purchase-rate read since 0.4.0, measured receivables summary support since 0.4.6, the bill-wise Collection read since 0.4.7', () => {
+test('this candidate is 0.4.8 — snapshots since 0.3.8, the Purchase Order builder since 0.3.9, the purchase-rate read since 0.4.0, measured receivables summary support since 0.4.6, the bill-wise Collection read since 0.4.7, the measured flat Group Outstandings read since 0.4.8', () => {
     // The drawer's "agent ≥ 0.3.8" line depends on 0.3.8 being the snapshot
     // FLOOR, which does not move; the candidate itself advances. 0.3.9 added
     // purchaseOrder.ts (Phase 6, staged, flag off); 0.4.0 adds the Day Book
@@ -430,5 +430,21 @@ test('this candidate is 0.4.7 — snapshots since 0.3.8, the Purchase Order buil
     // collection rather than an error — #64's exact failure mode. That is why
     // it is the first of two shapes and not the only one, and why every
     // attempt is still described by node name and count.
-    assert.equal(agentVersion(), '0.4.7');
+    // 0.4.8 READS THE SHAPE THIS TALLY ACTUALLY RETURNS — and this one is
+    // MEASURED, not reasoned. A Group Outstandings -> Sundry Debtors ->
+    // Pending Bills export of the live company (03-Sep-2026) is a FLAT ORDERED
+    // STREAM: BILLCL, BILLDUE and the rest are SIBLINGS of BILLFIXED, and only
+    // a header row names the party.
+    //
+    // Every reader before this looked for BILLCL as a CHILD of BILLFIXED, so
+    // every row failed the closing-amount guard and the pull posted ZERO. The
+    // ERP then correctly declined to wipe a standing position on an empty
+    // answer, and the page stayed empty while Tally had been answering with
+    // 621 bills — each with a due date — the whole time.
+    //
+    // Reconciled against Tally's own footer on that export: 621 bills, 135
+    // parties, net 50,523,510.696 Dr, matching to 0.000. It also learns
+    // Tally's human date form (`3-Aug-26`), without which every due date
+    // parsed as null and the ageing spine stayed empty regardless.
+    assert.equal(agentVersion(), '0.4.8');
 });
