@@ -62,14 +62,25 @@ export interface LeaveRequest {
 
 export type AttendanceStatus = 'present' | 'absent' | 'half_day' | 'on_leave';
 
+/**
+ * One day in the list of all marks — an applied record, or the uploaded day
+ * no applied record covers. `id` is null for the second kind, which is why
+ * the table keys on `key` and not on it.
+ */
 export interface Attendance {
-    id: number;
+    id: number | null;
+    key: string;
     employee?: { id: number; name: string };
     date: string;
-    status: AttendanceStatus;
+    /** Null when the reviewer has not answered the uploaded day yet. */
+    status: AttendanceStatus | 'week_off' | null;
     check_in: string | null;
     check_out: string | null;
     notes: string | null;
+    source: 'attendance' | 'import';
+    needs_review: boolean;
+    /** Read from a run nobody has applied — not merely from an upload. */
+    provisional: boolean;
 }
 
 /** One person's range on the Attendance page: the days, and what they came to. */

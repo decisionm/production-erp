@@ -14,6 +14,7 @@ use App\Support\Lists\ListSort;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -34,27 +35,161 @@ class AttendanceService
      *
      * @param  array<string, mixed>  $filters
      */
+    /**
+     * EVERY MARK IN THE LIST, applied or merely uploaded.
+     *
+     * This list used to page `attendances` alone, which meant it was empty
+     * for a month under review — the same blankness the person and
+     * department reads had, in the one table an office actually scrolls.
+     * So it pages the SAME UNION those reads use: an applied day, or the
+     * uploaded day the applied record does not cover.
+     *
+     * A day nobody has answered yet appears with NO STATUS rather than
+     * being left out. It is a day the office still owes an answer for, and
+     * a list that hides it is how 659 of them went unnoticed.
+     */
     public function paginate(int $perPage = HrmsListQuery::PER_PAGE_DEFAULT, array $filters = []): LengthAwarePaginator
     {
-        $query = Attendance::query()->with('employee');
+        $query = DB::query()
+            ->fromSub($this->everyDay(), 'd')
+            ->leftJoin('employees as e', 'e.id', '=', 'd.employee_id')
+            ->select('d.*', 'e.name as employee_name');
 
+        // The employee grammar is Eloquent's and is shared with the other
+        // HRMS lists — so the people are matched THERE and their days are
+        // asked for by id, rather than a second spelling of "matches an
+        // employee" growing here.
         if (($term = $this->query->term($filters)) !== null) {
-            $query->whereHas('employee', fn (Builder $employee) => $this->query->whereEmployeeMatches($employee, $term));
+            $query->whereIn('d.employee_id', Employee::query()
+                ->tap(fn (Builder $employees) => $this->query->whereEmployeeMatches($employees, $term))
+                ->pluck('id'));
         }
 
         if (! empty($filters['status'])) {
-            $query->where('status', $filters['status']);
+            $query->where('d.status', $filters['status']);
         }
 
         if (! empty($filters['employee_id'])) {
-            $query->where('employee_id', (int) $filters['employee_id']);
+            $query->where('d.employee_id', (int) $filters['employee_id']);
         }
 
-        $this->query->applyDateRange($query, 'date', $filters['from'] ?? null, $filters['to'] ?? null);
+        if (! empty($filters['from'])) {
+            $query->whereDate('d.date', '>=', $filters['from']);
+        }
 
-        return ListSort::apply($query, $filters['sort'] ?? null, ListAttendanceRequest::SORTABLE, '-date')
-            ->paginate($perPage)
-            ->withQueryString();
+        if (! empty($filters['to'])) {
+            $query->whereDate('d.date', '<=', $filters['to']);
+        }
+
+        $this->orderDays($query, $filters['sort'] ?? null);
+
+        return $query->paginate($perPage)
+            ->withQueryString()
+            ->through(fn (object $row) => $this->listedDay($row));
+    }
+
+    /**
+     * The union behind the list: applied days, then the uploaded days no
+     * applied row covers. Only the NEWEST line for a day survives — a month
+     * re-uploaded as it goes carries the same day more than once, and the
+     * person read has always taken the newest.
+     */
+    private function everyDay(): QueryBuilder
+    {
+        $applied = DB::table('attendances as a')
+            ->selectRaw('a.id as id, a.employee_id as employee_id, a.date as date, a.status as status')
+            ->selectRaw('a.check_in as check_in, a.check_out as check_out, a.notes as notes')
+            ->selectRaw("'attendance' as source, 0 as needs_review, 0 as provisional");
+
+        $uploaded = DB::table('attendance_import_lines as l')
+            ->join('attendance_imports as i', 'i.id', '=', 'l.attendance_import_id')
+            ->whereNotNull('l.employee_id')
+            ->whereNotExists(fn ($query) => $query
+                ->selectRaw('1')
+                ->from('attendances as a')
+                ->whereColumn('a.employee_id', 'l.employee_id')
+                ->whereColumn('a.date', 'l.date'))
+            ->whereNotExists(fn ($query) => $query
+                ->selectRaw('1')
+                ->from('attendance_import_lines as l2')
+                ->whereColumn('l2.employee_id', 'l.employee_id')
+                ->whereColumn('l2.date', 'l.date')
+                ->whereColumn('l2.id', '>', 'l.id'))
+            ->selectRaw('null as id, l.employee_id as employee_id, l.date as date, l.resolution as status')
+            ->selectRaw('COALESCE(l.resolved_check_in, l.first_in) as check_in')
+            ->selectRaw('COALESCE(l.resolved_check_out, l.last_out) as check_out')
+            ->selectRaw('l.notes as notes')
+            ->selectRaw("'import' as source")
+            ->selectRaw('CASE WHEN l.resolution IS NULL THEN 1 ELSE 0 END as needs_review')
+            ->selectRaw('CASE WHEN i.status = ? THEN 0 ELSE 1 END as provisional', [AttendanceImportStatus::Applied->value]);
+
+        return $applied->unionAll($uploaded);
+    }
+
+    /**
+     * The list's order. ListSort is Eloquent's and this query is not one —
+     * but the URL grammar it defines is the app's, so the same `sort` values
+     * mean the same thing here, and the tiebreak is spelled out because a
+     * union has no id to fall back on.
+     */
+    private function orderDays(QueryBuilder $query, ?string $sort): void
+    {
+        $sort = ($sort === null || trim($sort) === '') ? '-date' : trim($sort);
+        $direction = str_starts_with($sort, '-') ? 'desc' : 'asc';
+        $column = ltrim($sort, '-');
+
+        if (! in_array($column, ListAttendanceRequest::SORTABLE, true)) {
+            $column = 'date';
+            $direction = 'desc';
+        }
+
+        // The list's long-standing tiebreak is the later mark first, so two
+        // loads of a page never swap rows. An uploaded day has no id and
+        // therefore sorts after the applied ones on its date — which is the
+        // right way round: the record before the provisional reading of it.
+        $query->orderBy("d.{$column}", $direction)
+            ->orderByDesc('d.id')
+            ->orderBy('d.employee_id')
+            ->orderBy('d.source');
+    }
+
+    /**
+     * One listed day in the shape the page has always been given, plus
+     * where it came from. The clock is normalised HERE because the two
+     * halves store it differently: `attendances` holds an instant in UTC,
+     * an uploaded line holds the report's own wall clock.
+     *
+     * @return array<string, mixed>
+     */
+    private function listedDay(object $row): array
+    {
+        $date = CarbonImmutable::parse($row->date)->toDateString();
+        $fromImport = $row->source === 'import';
+
+        return [
+            'id' => $row->id === null ? null : (int) $row->id,
+            // A union row has no id when it comes from an upload, so the
+            // page cannot key on one — this is what it keys on instead.
+            'key' => "{$row->source}-{$row->employee_id}-{$date}",
+            'employee' => [
+                'id' => (int) $row->employee_id,
+                'name' => $row->employee_name,
+            ],
+            'date' => $date,
+            'status' => $row->status,
+            'check_in' => $fromImport ? $this->instant($date, $row->check_in) : $this->utc($row->check_in),
+            'check_out' => $fromImport ? $this->instant($date, $row->check_out) : $this->utc($row->check_out),
+            'notes' => $row->notes,
+            'source' => $row->source,
+            'needs_review' => (bool) $row->needs_review,
+            'provisional' => (bool) $row->provisional,
+        ];
+    }
+
+    /** A stored instant, as the API has always spelled it. */
+    private function utc(?string $stored): ?string
+    {
+        return $stored === null ? null : CarbonImmutable::parse($stored)->toIso8601String();
     }
 
     /**

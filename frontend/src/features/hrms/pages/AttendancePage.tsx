@@ -28,11 +28,12 @@ const attendanceSchema = z.object({
 });
 type AttendanceFormValues = z.infer<typeof attendanceSchema>;
 
-const statusColor: Record<AttendanceStatus, string> = {
+const statusColor: Record<AttendanceStatus | 'week_off', string> = {
     present: 'green',
     absent: 'red',
     half_day: 'orange',
     on_leave: 'blue',
+    week_off: 'default',
 };
 
 const statusOptions: { value: AttendanceStatus; label: string }[] = [
@@ -188,7 +189,8 @@ export default function AttendancePage() {
             <Table<Attendance>
                 sticky={TABLE_STICKY}
                 scroll={{ x: 'max-content' }}
-                rowKey="id"
+                // An uploaded day has no id — see Attendance['key'].
+                rowKey="key"
                 loading={query.isFetching}
                 dataSource={query.data?.data}
                 // SORTED BY THE SERVER: sortOrder-controlled, re-queried.
@@ -200,7 +202,15 @@ export default function AttendancePage() {
                 locale={{ emptyText: <ListEmpty state={query} entity="attendance records" empty={emptyText} /> }}
                 columns={[
                     // A name through the relation, not a column of this table: no server sort.
-                    { title: 'Employee', render: (_, row) => row.employee?.name },
+                    {
+                        title: 'Employee',
+                        render: (_, row) => (
+                            <Space size={4}>
+                                {row.employee?.name}
+                                {row.provisional ? <Tag color="blue">upload</Tag> : null}
+                            </Space>
+                        ),
+                    },
                     {
                         title: 'Date',
                         dataIndex: 'date',
@@ -214,7 +224,12 @@ export default function AttendancePage() {
                         key: 'status',
                         sorter: true,
                         sortOrder: columnSortOrder('status', params.sort, ATTENDANCE_DEFAULT_SORT),
-                        render: (status: AttendanceStatus) => <Tag color={statusColor[status]}>{status}</Tag>,
+                        render: (status: Attendance['status']) =>
+                            status === null ? (
+                                <Tag color="gold">needs review</Tag>
+                            ) : (
+                                <Tag color={statusColor[status]}>{status}</Tag>
+                            ),
                     },
                     { title: 'Notes', dataIndex: 'notes' },
                 ]}
