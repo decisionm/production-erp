@@ -5,11 +5,15 @@ import type { PunchEmployee } from './punchReport';
 import type {
     Attendance,
     AttendanceImport,
+    AttendanceImportEmployee,
+    AttendanceImportEmployeeListParams,
+    AttendanceImportIssue,
     AttendanceImportLine,
     AttendanceImportLineListParams,
     AttendanceImportListParams,
     AttendanceImportResolution,
     AttendanceListParams,
+    BulkResolveResult,
     Employee,
     EmployeeListParams,
     LeaveBalance,
@@ -191,6 +195,31 @@ export async function listAttendanceImportLines(
     const { data } = await api.get<Paginated<AttendanceImportLine>>(`/hrms/attendance-imports/${id}/lines`, {
         params: compactParams(params),
     });
+    return data;
+}
+
+/** ONE PAGE of the run's people, searched and paged by the SERVER. */
+export async function listAttendanceImportEmployees(
+    id: number,
+    params: AttendanceImportEmployeeListParams = {},
+): Promise<Paginated<AttendanceImportEmployee>> {
+    const { data } = await api.get<Paginated<AttendanceImportEmployee>>(`/hrms/attendance-imports/${id}/employees`, {
+        params: compactParams(params),
+    });
+    return data;
+}
+
+export interface BulkResolvePayload {
+    issue: AttendanceImportIssue;
+    resolution: AttendanceImportResolution;
+    check_in?: string | null;
+    check_out?: string | null;
+    notes?: string | null;
+}
+
+/** One answer for one kind of problem, across every day still carrying it. */
+export async function bulkResolveAttendanceImportLines(id: number, payload: BulkResolvePayload): Promise<BulkResolveResult> {
+    const { data } = await api.post<BulkResolveResult>(`/hrms/attendance-imports/${id}/lines/bulk-resolve`, payload);
     return data;
 }
 
