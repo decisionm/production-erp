@@ -116,13 +116,19 @@ class AttendanceOverviewTest extends TestCase
         $this->assertSame('2026-09-01', $response->json('data.from'));
         $this->assertSame('2026-09-30', $response->json('data.to'));
 
-        // In the master's own order — present, absent, half day, on leave.
+        // In the master's own order — present, absent, half day, on leave —
+        // then the three the upload fallback adds: a week off is not
+        // attendance, an unanswered day is not yet anything, and a day read
+        // from an unapplied upload is provisional.
         $this->assertSame([
             'present' => 3,
             'absent' => 1,
             'half_day' => 1,
             'on_leave' => 1,
             'recorded' => 6,
+            'week_off' => 0,
+            'needs_review' => 0,
+            'from_import' => 0,
         ], $response->json('data.summary'));
 
         // The days come back in date order, oldest first, as a month reads.

@@ -1,8 +1,24 @@
 import { useQuery } from '@tanstack/react-query';
-import { Card, Empty, Progress, Space, Table, Tag, Typography } from 'antd';
+import { Alert, Card, Empty, Progress, Space, Table, Tag, Typography } from 'antd';
 import { getAttendanceSummary } from '@/features/hrms/api';
 import type { DateRange } from '@/features/hrms/attendanceRange';
 import type { AttendanceDepartmentRow, AttendanceSummary } from '@/features/hrms/types';
+
+/**
+ * Says which uploads these numbers are partly read from, and that nobody
+ * has applied them — a management screen that quietly totals provisional
+ * days is worse than one that shows nothing.
+ */
+function provisionalLine(data: AttendanceSummary): string {
+    const unapplied = data.imports.filter((source) => source.status === 'review');
+    const named = unapplied.map((source) => source.file_name ?? `${source.period_from} to ${source.period_to}`).join(', ');
+    const days = `${data.totals.from_import} ${data.totals.from_import === 1 ? 'day' : 'days'}`;
+    const review = data.totals.needs_review > 0 ? ` ${data.totals.needs_review} still need an answer.` : '';
+
+    return named === ''
+        ? `${days} read from an attendance upload nobody has applied yet.${review}`
+        : `${days} read from ${named}, which nobody has applied yet.${review}`;
+}
 
 /** The factory's own line, so nobody adds up a column to get it. */
 function FactoryLine({ totals }: { totals: AttendanceSummary['totals'] }) {
@@ -13,6 +29,8 @@ function FactoryLine({ totals }: { totals: AttendanceSummary['totals'] }) {
         { label: 'Half Day', value: totals.half_day },
         { label: 'Absent', value: totals.absent },
         { label: 'On Leave', value: totals.on_leave },
+        { label: 'Week Off', value: totals.week_off },
+        { label: 'Needs review', value: totals.needs_review },
     ];
 
     return (
@@ -50,6 +68,10 @@ export default function DepartmentAttendanceCard({ range }: { range: DateRange }
     return (
         <Card title="By department">
             <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
+                {data && data.totals.from_import > 0 ? (
+                    <Alert type="info" showIcon message={provisionalLine(data)} />
+                ) : null}
+
                 {data ? <FactoryLine totals={data.totals} /> : null}
 
                 <Table<AttendanceDepartmentRow>
@@ -74,6 +96,13 @@ export default function DepartmentAttendanceCard({ range }: { range: DateRange }
                         { title: 'Half Day', dataIndex: 'half_day', width: 90 },
                         { title: 'Absent', dataIndex: 'absent', width: 90 },
                         { title: 'On Leave', dataIndex: 'on_leave', width: 90 },
+                        { title: 'Week Off', dataIndex: 'week_off', width: 90 },
+                        {
+                            title: 'Needs review',
+                            dataIndex: 'needs_review',
+                            width: 120,
+                            render: (days: number) => (days > 0 ? <Tag color="gold">{days}</Tag> : '—'),
+                        },
                         { title: 'Days', dataIndex: 'recorded', width: 80 },
                         {
                             title: 'Present %',

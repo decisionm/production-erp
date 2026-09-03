@@ -82,10 +82,12 @@
                 <tr class="day {{ $day['is_sunday'] ? 'sunday' : '' }}">
                     <td class="day">{{ $day['label'] }}</td>
                     @if($day['status'] === null)
-                        {{-- Not recorded is NOT absent. Saying so on a sheet
-                             somebody is paid against would assert a fact
-                             nobody entered. --}}
-                        <td class="gap" colspan="4">not recorded</td>
+                        {{-- Three silences, and none of them is "absent".
+                             Saying absent on a sheet somebody is paid
+                             against would assert a fact nobody entered. --}}
+                        <td class="gap" colspan="4">
+                            {{ $day['needs_review'] ? 'needs review' : 'not recorded' }}
+                        </td>
                     @else
                         <td>{{ $labels[$day['status']] ?? $day['status'] }}</td>
                         <td class="time">{{ $day['check_in'] ?? '—' }}</td>
@@ -113,6 +115,9 @@
 
     <div class="footer">
         Printed {{ $printed_at }} · times are IST · a day left blank is one nobody recorded, not an absence.
+        @if($provisional)
+            <br>Provisional — read from an attendance upload that is <strong>not yet applied</strong>.
+        @endif
     </div>
 </body>
 </html>
