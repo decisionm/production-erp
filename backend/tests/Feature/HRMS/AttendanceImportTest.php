@@ -221,6 +221,56 @@ class AttendanceImportTest extends TestCase
 
     // ---- permissions ---------------------------------------------------------------
 
+    /**
+     * A WHOLE MONTH FOR THE WHOLE FACTORY, IN ONE BODY.
+     *
+     * The browser parser used to read one sheet's first fifteen days, so
+     * the largest body this endpoint had ever been given was a fraction of
+     * a month. Reading the wrapped 16-31 band and every sheet made it 56
+     * people x 31 days — past `INSERT_CHUNK`, and close enough to the
+     * request's own ceilings to be worth pinning. The August file's
+     * longest Early Out is 1,376 minutes, so that is the figure here: the
+     * real report's nearest approach to the 1,440 cap.
+     */
+    public function test_a_whole_month_for_the_whole_factory_uploads_in_one_body(): void
+    {
+        $this->actAs(['hrms.manage']);
+
+        $employees = [];
+        for ($person = 1; $person <= 56; $person++) {
+            $days = [];
+            for ($day = 1; $day <= 31; $day++) {
+                $days[] = $this->day(sprintf('2026-08-%02d', $day), 'FD', '09:00', '18:00', [
+                    'early_minutes' => 1376,
+                    'worked_minutes' => 540,
+                ]);
+            }
+
+            $employees[] = [
+                'employee_code' => sprintf('SPP-9%02d', $person),
+                'name' => 'PERSON '.$person,
+                'department' => 'Production Department',
+                'designation' => 'Operator',
+                'days' => $days,
+            ];
+        }
+
+        $response = $this->postJson('/api/v1/hrms/attendance-imports', [
+            'period_from' => '2026-08-01',
+            'period_to' => '2026-08-31',
+            'source' => 'pooja',
+            'file_name' => 'august.xlsx',
+            'employees' => $employees,
+        ])->assertCreated();
+
+        $response->assertJsonPath('data.employee_count', 56)
+            ->assertJsonPath('data.day_count', 56 * 31);
+
+        $id = (int) $response->json('data.id');
+        $this->assertSame(56 * 31, AttendanceImportLine::where('attendance_import_id', $id)->count());
+        $this->assertSame(0, Attendance::count(), 'nothing reaches attendances on upload');
+    }
+
     public function test_a_viewer_may_read_but_not_write(): void
     {
         $this->actAs(['hrms.manage']);
