@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import augustFixture from './punchReport.august.fixture.json';
 import fixture from './punchReport.fixture.json';
-import { parseClock, parseDuration, parsePunchWorkbook, punchImportPayload } from './punchReport';
+import { mergePunchSheets, parseClock, parseDuration, parsePunchWorkbook, punchImportPayload } from './punchReport';
 
 /**
  * The fixture is four employee blocks of the real July 2026 Pooja report,
@@ -133,5 +134,102 @@ describe('punchImportPayload', () => {
 
     it('refuses a parse with no period', () => {
         expect(() => punchImportPayload({ period: null, employees: [], warnings: [] }, 'x.xlsx')).toThrow('No period');
+    });
+});
+
+/**
+ * The August 2026 report, cut the same way. It is here because the file's
+ * shape changed under the parser twice at once: the month wrapped into a
+ * second, unlabelled 16-31 band, and the factory was split across four
+ * sheets. The parser read 15 days of one sheet and called that a success.
+ */
+const august = augustFixture as { sheets: Array<{ name: string; rows: unknown[][] }> };
+const staffRows = august.sheets[0].rows;
+
+describe('parsePunchWorkbook — a month that wraps', () => {
+    const staff = parsePunchWorkbook(staffRows);
+
+    it('reads the unlabelled 16-31 band, so the whole month lands', () => {
+        expect(staff.warnings).toEqual([]);
+        expect(staff.period).toEqual({ from: '2026-08-01', to: '2026-08-31' });
+        expect(staff.employees.map((e) => e.employee_code)).toEqual(['TST-01', 'TST-02']);
+        expect(staff.employees.every((e) => e.days.length === 31)).toBe(true);
+        expect(staff.employees[0].days.map((d) => d.date)).toEqual(
+            Array.from({ length: 31 }, (_, index) => `2026-08-${String(index + 1).padStart(2, '0')}`),
+        );
+    });
+
+    it('takes day 16 out of column A, where the row label would be', () => {
+        expect(staff.employees[0].days[15]).toEqual({
+            date: '2026-08-16',
+            status: 'HD',
+            first_in: '09:56',
+            last_out: '15:09',
+            ot_minutes: 0,
+            late_minutes: 26,
+            early_minutes: 200,
+            worked_minutes: 313,
+        });
+        expect(staff.employees[0].days[16]).toMatchObject({
+            date: '2026-08-17',
+            first_in: '10:39',
+            last_out: '18:34',
+            late_minutes: 69,
+            worked_minutes: 475,
+        });
+    });
+
+    it('counts the days it read against the period and says so when short', () => {
+        const clipped = staffRows.map((row) => [...row]);
+        clipped[11][0] = '';
+
+        const result = parsePunchWorkbook(clipped);
+        expect(result.employees[0].days).toHaveLength(15);
+        expect(result.warnings).toContain('TST-01: 15 of 31 days read.');
+    });
+
+    it('refuses to read the same day out of two bands', () => {
+        const doubled = staffRows.map((row) => [...row]);
+        doubled[11][0] = '15\n(Friday)';
+
+        const result = parsePunchWorkbook(doubled);
+        expect(result.warnings).toContain('TST-01: day 15 is printed twice; block skipped.');
+    });
+});
+
+describe('mergePunchSheets', () => {
+    const sheets = august.sheets.map((sheet) => ({ name: sheet.name, parsed: parsePunchWorkbook(sheet.rows) }));
+
+    it('reads every sheet in the workbook, not only the first', () => {
+        const merged = mergePunchSheets(sheets);
+        expect(merged.warnings).toEqual([]);
+        expect(merged.period).toEqual({ from: '2026-08-01', to: '2026-08-31' });
+        expect(merged.employees.map((e) => e.employee_code)).toEqual(['TST-01', 'TST-02', 'TST-03']);
+        expect(merged.employees.reduce((sum, e) => sum + e.days.length, 0)).toBe(93);
+    });
+
+    it('reads an employee printed on two sheets once, and names where', () => {
+        const merged = mergePunchSheets([...sheets, { name: 'Copy', parsed: parsePunchWorkbook(staffRows) }]);
+        expect(merged.employees).toHaveLength(3);
+        expect(merged.warnings).toEqual([
+            'Copy: TST-01 was already read on "Staff"; this copy is skipped.',
+            'Copy: TST-02 was already read on "Staff"; this copy is skipped.',
+        ]);
+    });
+
+    it('skips a sheet whose period disagrees and keeps the rest', () => {
+        const other = staffRows.map((row) => [...row]);
+        other[0][0] = String(other[0][0]).replace('To: 2026-08-31', 'To: 2026-09-30');
+
+        const merged = mergePunchSheets([...sheets, { name: 'September', parsed: parsePunchWorkbook(other) }]);
+        expect(merged.employees).toHaveLength(3);
+        expect(merged.warnings).toContain(
+            'September: period 2026-08-01 to 2026-09-30 differs from 2026-08-01 to 2026-08-31; sheet skipped.',
+        );
+    });
+
+    it('leaves a lone sheet\'s warnings unprefixed', () => {
+        const merged = mergePunchSheets([{ name: 'only', parsed: parsePunchWorkbook([]) }]);
+        expect(merged.warnings).toEqual(['No employee blocks found (no "From:" row).']);
     });
 });
