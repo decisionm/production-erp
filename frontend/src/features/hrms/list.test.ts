@@ -96,13 +96,16 @@ describe('the sort rides beside the filters each page already carried', () => {
     it('leave balances: remaining is computed, not a column, so it is never sent', () => {
         expect(read('sort=remaining_days', LEAVE_BALANCE_LIST_SPEC)).toEqual({});
         expect(LEAVE_BALANCE_SORT_FIELDS).not.toContain('remaining_days');
+        // Accrued is allocated − opening, computed in the resource the same way.
+        expect(read('sort=accrued_days', LEAVE_BALANCE_LIST_SPEC)).toEqual({});
+        expect(LEAVE_BALANCE_SORT_FIELDS).not.toContain('accrued_days');
     });
 
     it('the sortable columns are exactly the ones the List*Requests accept', () => {
         expect(EMPLOYEE_SORT_FIELDS).toEqual(['employee_code', 'name', 'designation', 'department', 'date_of_joining', 'status']);
         expect(ATTENDANCE_SORT_FIELDS).toEqual(['date', 'status']);
         expect(LEAVE_REQUEST_SORT_FIELDS).toEqual(['start_date', 'end_date', 'days', 'status']);
-        expect(LEAVE_TYPE_SORT_FIELDS).toEqual(['code', 'name', 'default_annual_days', 'is_active']);
-        expect(LEAVE_BALANCE_SORT_FIELDS).toEqual(['year', 'allocated_days', 'used_days']);
+        expect(LEAVE_TYPE_SORT_FIELDS).toEqual(['code', 'name', 'default_annual_days', 'monthly_accrual_days', 'is_active']);
+        expect(LEAVE_BALANCE_SORT_FIELDS).toEqual(['year', 'opening_days', 'allocated_days', 'used_days']);
     });
 });

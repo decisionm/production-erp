@@ -162,7 +162,7 @@ export function applyLabel(openCount: number): string {
 /* ------------------------------- leave types ----------------------------- */
 
 /** ListLeaveTypesRequest::SORTABLE. */
-export const LEAVE_TYPE_SORT_FIELDS: readonly string[] = ['code', 'name', 'default_annual_days', 'is_active'];
+export const LEAVE_TYPE_SORT_FIELDS: readonly string[] = ['code', 'name', 'default_annual_days', 'monthly_accrual_days', 'is_active'];
 /** LeaveTypeService orders by name when nothing is asked. */
 export const LEAVE_TYPE_DEFAULT_SORT = 'name';
 
@@ -174,7 +174,7 @@ export const LEAVE_TYPE_LIST_SPEC: ListParamsSpec = {
 /* ------------------------------ leave balances --------------------------- */
 
 /** ListLeaveBalancesRequest::SORTABLE — the stored figures; remaining is computed and not sortable. */
-export const LEAVE_BALANCE_SORT_FIELDS: readonly string[] = ['year', 'allocated_days', 'used_days'];
+export const LEAVE_BALANCE_SORT_FIELDS: readonly string[] = ['year', 'opening_days', 'allocated_days', 'used_days'];
 /** LeaveBalanceService: newest year first. */
 export const LEAVE_BALANCE_DEFAULT_SORT = '-year';
 

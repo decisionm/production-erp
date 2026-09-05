@@ -16,6 +16,8 @@ const leaveTypeSchema = z.object({
     code: z.string().min(1, 'Code is required').max(16),
     name: z.string().min(1, 'Name is required').max(255),
     default_annual_days: z.number().min(0),
+    // 0 means this type does not accrue monthly — how Earned Leave stays annual.
+    monthly_accrual_days: z.number().min(0).max(31),
 });
 type LeaveTypeFormValues = z.infer<typeof leaveTypeSchema>;
 
@@ -45,7 +47,7 @@ export default function LeaveTypesPage() {
 
     const { control, handleSubmit, reset, formState: { errors } } = useForm<LeaveTypeFormValues>({
         resolver: zodResolver(leaveTypeSchema),
-        defaultValues: { code: '', name: '', default_annual_days: 0 },
+        defaultValues: { code: '', name: '', default_annual_days: 0, monthly_accrual_days: 0 },
     });
 
     const mutation = useMutation({
@@ -122,6 +124,16 @@ export default function LeaveTypesPage() {
                         sortOrder: columnSortOrder('default_annual_days', params.sort, LEAVE_TYPE_DEFAULT_SORT),
                     },
                     {
+                        title: 'Monthly Increment',
+                        dataIndex: 'monthly_accrual_days',
+                        key: 'monthly_accrual_days',
+                        sorter: true,
+                        sortOrder: columnSortOrder('monthly_accrual_days', params.sort, LEAVE_TYPE_DEFAULT_SORT),
+                        // A type that does not accrue is a dash, not a 0.00 the eye
+                        // has to read as "none" among columns of real figures.
+                        render: (_, row) => (Number(row.monthly_accrual_days) === 0 ? '—' : row.monthly_accrual_days),
+                    },
+                    {
                         title: 'Active',
                         dataIndex: 'is_active',
                         key: 'is_active',
@@ -147,6 +159,7 @@ export default function LeaveTypesPage() {
                                         code: row.code,
                                         name: row.name,
                                         default_annual_days: Number(row.default_annual_days),
+                                        monthly_accrual_days: Number(row.monthly_accrual_days),
                                     });
                                 }}
                             >
@@ -180,6 +193,13 @@ export default function LeaveTypesPage() {
                             render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
                         />
                     </Form.Item>
+                    <Form.Item label="Monthly Increment">
+                        <Controller
+                            name="monthly_accrual_days"
+                            control={control}
+                            render={({ field }) => <InputNumber {...field} min={0} max={31} step={0.5} style={{ width: '100%' }} />}
+                        />
+                    </Form.Item>
                 </Form>
             </Modal>
 
@@ -206,6 +226,13 @@ export default function LeaveTypesPage() {
                             name="default_annual_days"
                             control={editControl}
                             render={({ field }) => <InputNumber {...field} min={0} style={{ width: '100%' }} />}
+                        />
+                    </Form.Item>
+                    <Form.Item label="Monthly Increment">
+                        <Controller
+                            name="monthly_accrual_days"
+                            control={editControl}
+                            render={({ field }) => <InputNumber {...field} min={0} max={31} step={0.5} style={{ width: '100%' }} />}
                         />
                     </Form.Item>
                 </Form>

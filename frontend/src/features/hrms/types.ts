@@ -30,6 +30,8 @@ export interface LeaveType {
     code: string;
     name: string;
     default_annual_days: string;
+    /** Days added each month. '0.00' means this type does not accrue monthly. */
+    monthly_accrual_days: string;
     is_active: boolean;
     created_at: string;
 }
@@ -39,7 +41,11 @@ export interface LeaveBalance {
     employee?: { id: number; name: string };
     leave_type: LeaveType;
     year: number;
+    /** Carried in from before the ERP held the figure; part OF allocated_days. */
+    opening_days: string;
     allocated_days: string;
+    /** allocated − opening: what the ERP itself granted. */
+    accrued_days: string;
     used_days: string;
     remaining_days: string;
 }
@@ -135,8 +141,19 @@ export interface AttendanceInsights {
  * The caller's OWN range. Same shape as one person's, except that a login
  * with no employee row behind it has no person to name.
  */
+export interface LeaveBalanceSummary {
+    code: string;
+    name: string;
+    opening_days: string;
+    accrued_days: string;
+    used_days: string;
+    remaining_days: string;
+}
+
 export interface AttendanceMine extends Omit<AttendancePersonRange, 'employee'> {
     employee: AttendancePersonRange['employee'] | null;
+    /** For the year the range ends in. Empty when nothing is allocated yet. */
+    leave_balances: LeaveBalanceSummary[];
 }
 
 export interface AttendancePersonRange {

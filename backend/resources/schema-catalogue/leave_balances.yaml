@@ -39,6 +39,10 @@ columns:
     type: datetime
     nullable: true
     meaning: 'when the row was last edited'
+  -
+    name: opening_days
+    type: decimal
+    meaning: 'how much of allocated_days was CARRIED IN from before the ERP held this figure, rather than granted here; accrued = allocated_days - opening_days'
 joins:
   - 'leave_balances.leave_type_id = leave_types.id'
   - 'leave_balances.employee_id = employees.id'

@@ -25,7 +25,7 @@ function request(id: number, employeeName: string): LeaveRequest {
     return {
         id,
         employee: { id, name: employeeName },
-        leave_type: { id: 1, code: 'CL', name: 'Casual leave', default_annual_days: '12.00', is_active: true, created_at: '2026-01-01T00:00:00+05:30' },
+        leave_type: { id: 1, code: 'CL', name: 'Casual leave', default_annual_days: '12.00', monthly_accrual_days: '1.00', is_active: true, created_at: '2026-01-01T00:00:00+05:30' },
         start_date: '2026-08-10',
         end_date: '2026-08-10',
         days: '1.00',

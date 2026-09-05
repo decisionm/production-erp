@@ -20,6 +20,10 @@ const allocateSchema = z.object({
     leave_type_id: z.number({ error: 'Leave type is required' }),
     year: z.number().min(2000).max(2100),
     allocated_days: z.number().min(0).optional(),
+    // Carried in from before the ERP held the figure. Part OF the
+    // allocation, never on top of it — the server refuses one that
+    // exceeds an allocation given explicitly.
+    opening_days: z.number().min(0).optional(),
 });
 type AllocateFormValues = z.infer<typeof allocateSchema>;
 
@@ -102,6 +106,16 @@ export default function LeaveBalancesPage() {
                         sortOrder: columnSortOrder('year', params.sort, LEAVE_BALANCE_DEFAULT_SORT),
                     },
                     {
+                        title: 'Opening',
+                        dataIndex: 'opening_days',
+                        key: 'opening_days',
+                        sorter: true,
+                        sortOrder: columnSortOrder('opening_days', params.sort, LEAVE_BALANCE_DEFAULT_SORT),
+                        // Nothing carried in is a dash: a 0.00 among real figures
+                        // reads as a balance rather than an absence.
+                        render: (_, row) => (Number(row.opening_days) === 0 ? '—' : row.opening_days),
+                    },
+                    {
                         title: 'Allocated',
                         dataIndex: 'allocated_days',
                         key: 'allocated_days',
@@ -115,7 +129,8 @@ export default function LeaveBalancesPage() {
                         sorter: true,
                         sortOrder: columnSortOrder('used_days', params.sort, LEAVE_BALANCE_DEFAULT_SORT),
                     },
-                    // Computed in the resource (allocated − used), not stored: no server sort.
+                    // Both computed in the resource, not stored: no server sort.
+                    { title: 'Accrued', dataIndex: 'accrued_days' },
                     { title: 'Remaining', dataIndex: 'remaining_days' },
                 ]}
             />
@@ -161,6 +176,13 @@ export default function LeaveBalancesPage() {
                             name="year"
                             control={control}
                             render={({ field }) => <InputNumber {...field} style={{ width: '100%' }} />}
+                        />
+                    </Form.Item>
+                    <Form.Item label="Opening Balance (carried in)" validateStatus={errors.opening_days ? 'error' : ''} help={errors.opening_days?.message}>
+                        <Controller
+                            name="opening_days"
+                            control={control}
+                            render={({ field }) => <InputNumber {...field} min={0} step={0.5} style={{ width: '100%' }} />}
                         />
                     </Form.Item>
                     <Form.Item label="Allocated Days (leave blank to use the leave type's default)">

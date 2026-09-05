@@ -1,7 +1,7 @@
 table: leave_types
 module: hrms
 label: 'Leave Types'
-purpose: 'The kinds of leave the factory grants — casual, sick, earned and so on — each with a short code and the default number of days per year.'
+purpose: 'The kinds of leave the factory grants — casual, sick, earned and so on — each with a short code, the default number of days per year, and how many days it adds each month.'
 columns:
   -
     name: id
@@ -38,6 +38,10 @@ columns:
     type: datetime
     nullable: true
     meaning: 'when the leave type was soft-deleted (null = still live); deleted rows are hidden from lists'
+  -
+    name: monthly_accrual_days
+    type: decimal
+    meaning: "days added to this leave type's balance each month (the factory grants 1 casual and 1 sick a month); 0 means it does not accrue monthly"
 joins: {}
 keywords:
   - 'leave type'

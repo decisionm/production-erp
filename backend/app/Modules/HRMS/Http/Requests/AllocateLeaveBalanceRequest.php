@@ -31,6 +31,18 @@ class AllocateLeaveBalanceRequest extends FormRequest
                 ),
             ],
             'allocated_days' => ['nullable', 'numeric', 'min:0'],
+            // Carried in from before this ERP held the figure. It is part
+            // OF the allocation, never on top of it, so it cannot exceed
+            // one that was given explicitly.
+            'opening_days' => [
+                'nullable', 'numeric', 'min:0',
+                function (string $attribute, mixed $value, \Closure $fail): void {
+                    $allocated = $this->input('allocated_days');
+                    if ($allocated !== null && (float) $value > (float) $allocated) {
+                        $fail('The opening balance cannot be more than the days allocated.');
+                    }
+                },
+            ],
         ];
     }
 }

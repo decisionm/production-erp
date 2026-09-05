@@ -17,7 +17,7 @@ use Illuminate\Foundation\Http\FormRequest;
  */
 class ListLeaveTypesRequest extends FormRequest
 {
-    public const SORTABLE = ['code', 'name', 'default_annual_days', 'is_active'];
+    public const SORTABLE = ['code', 'name', 'default_annual_days', 'monthly_accrual_days', 'is_active'];
 
     public const PER_PAGE_MAX = 1000;
 

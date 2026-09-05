@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { Card, Empty } from 'antd';
+import { Card, Empty, Space, Statistic } from 'antd';
 import { getMyAttendance } from '@/features/hrms/api';
 import type { DateRange } from '@/features/hrms/attendanceRange';
 import PersonMonth from './PersonMonth';
@@ -17,6 +17,11 @@ import PersonMonth from './PersonMonth';
  * factory's staff have no login yet, and matching a user to an employee by
  * name would be the one guess that puts somebody else's month on your
  * screen. It fills itself in as logins are linked to employee rows.
+ *
+ * The leave figures ride on the same read for the same reason: how much
+ * casual leave you have left is yours to know, and asking the leave-balance
+ * list for it would need the HRMS permission a packer does not have. A year
+ * with nothing allocated shows no strip at all rather than a row of zeroes.
  */
 export default function MyAttendanceCard({ range }: { range: DateRange }) {
     const mine = useQuery({
@@ -33,11 +38,29 @@ export default function MyAttendanceCard({ range }: { range: DateRange }) {
                     description="This login is not linked to an employee record."
                 />
             ) : (
-                <PersonMonth
-                    data={data?.employee ? { ...data, employee: data.employee } : null}
-                    loading={mine.isFetching}
-                    emptyText="Nothing recorded for you in this period."
-                />
+                <>
+                    {data && data.leave_balances.length > 0 ? (
+                        <Space size="large" wrap style={{ marginBottom: 16 }}>
+                            {data.leave_balances.map((balance) => (
+                                <Statistic
+                                    key={balance.code}
+                                    title={`${balance.name} left`}
+                                    value={balance.remaining_days}
+                                    // Shown exactly as the server sends it. Statistic
+                                    // otherwise splits and regroups the number, which
+                                    // turns a half day into its own decimal span.
+                                    formatter={(value) => String(value)}
+                                    valueStyle={{ fontSize: 20 }}
+                                />
+                            ))}
+                        </Space>
+                    ) : null}
+                    <PersonMonth
+                        data={data?.employee ? { ...data, employee: data.employee } : null}
+                        loading={mine.isFetching}
+                        emptyText="Nothing recorded for you in this period."
+                    />
+                </>
             )}
         </Card>
     );

@@ -39,6 +39,7 @@ const mine = (over: Partial<AttendanceMine> = {}): AttendanceMine => ({
     employee: { id: 9, employee_code: 'SPP-01', name: 'Anand', department: 'Production Department', designation: 'Packing Staff' },
     from: range.from,
     to: range.to,
+    leave_balances: [],
     days: [
         {
             id: null,
@@ -85,6 +86,33 @@ describe('MyAttendanceCard', () => {
         // And the graph, which is what the owner asked to see beside them.
         expect(html).toContain('<svg');
         expect(html).toContain('the month in days');
+    });
+
+    it('shows what leave I have left, without needing the HRMS permission', () => {
+        const html = render(<MyAttendanceCard range={range} />, (client) => {
+            client.setQueryData(['hrms', 'attendance', 'me', range.from, range.to], mine({
+                leave_balances: [
+                    { code: 'CL', name: 'Casual Leave', opening_days: '47.50', accrued_days: '2.00', used_days: '1.50', remaining_days: '48.00' },
+                    { code: 'SL', name: 'Sick Leave', opening_days: '0.00', accrued_days: '2.00', used_days: '0.00', remaining_days: '2.00' },
+                ],
+            }));
+        });
+
+        expect(html).toContain('Casual Leave left');
+        expect(html).toContain('48.00');
+        expect(html).toContain('Sick Leave left');
+        // The month itself is still there — the strip is added to it, not instead of it.
+        expect(html).toContain('1 Jul');
+    });
+
+    it('shows no leave strip at all when nothing is allocated yet', () => {
+        const html = render(<MyAttendanceCard range={range} />, (client) => {
+            client.setQueryData(['hrms', 'attendance', 'me', range.from, range.to], mine({ leave_balances: [] }));
+        });
+
+        // A row of zeroes would read as an entitlement already spent.
+        expect(html).not.toContain('left');
+        expect(html).toContain('Anand');
     });
 
     it('says plainly when a login has no employee record behind it', () => {
