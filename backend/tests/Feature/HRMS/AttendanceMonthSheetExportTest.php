@@ -119,7 +119,7 @@ class AttendanceMonthSheetExportTest extends TestCase
         $this->assertSame('2.15', $anand['ot_hours']);
         $this->assertSame('40', $anand['late_minutes']);
         $this->assertSame('15', $anand['early_out_minutes']);
-        $this->assertSame(['P', 'H', '', 'W'], [$anand['2026-07-01'], $anand['2026-07-02'], $anand['2026-07-03'], $anand['2026-07-04']], 'the open line is blank');
+        $this->assertSame(['P', 'HD', '', 'WO'], [$anand['2026-07-01'], $anand['2026-07-02'], $anand['2026-07-03'], $anand['2026-07-04']], 'the open line is blank');
 
         $bala = $csv['rows'][1];
         $this->assertSame('SPP-02', $bala['employee_code']);
@@ -145,7 +145,7 @@ class AttendanceMonthSheetExportTest extends TestCase
         $this->patchJson("/api/v1/hrms/attendance-imports/{$id}/lines/{$line}", ['resolution' => 'on_leave'])->assertOk();
 
         $csv = $this->csv($this->postJson('/api/v1/exports/attendance_month_sheet', ['attendance_import_id' => $id])->assertOk());
-        $this->assertSame('L', $csv['rows'][0]['2026-07-03']);
+        $this->assertSame('Leave', $csv['rows'][0]['2026-07-03']);
         $this->assertSame('1', $csv['rows'][0]['on_leave']);
     }
 

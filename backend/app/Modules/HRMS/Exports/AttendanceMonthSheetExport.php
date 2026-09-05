@@ -14,9 +14,10 @@ use Illuminate\Support\Enumerable;
 /**
  * The payroll month sheet of one punch-report import: one row per
  * employee with the day counts, hours and minutes, then one column per
- * day of the period carrying the resolved status code — P present, H
- * half day, A absent, L on leave, W week off, blank where the line is
- * still open or the day is not in the file.
+ * day of the period carrying the resolved status code — P present, HD
+ * half day, A absent, Leave on leave, WO week off, blank where the line
+ * is still open or the day is not in the file. Those are the codes the
+ * factory's own paper sheet uses, not one letter each.
  *
  * Produced from the IMPORT LINES, never from `attendances`, so the file is
  * exactly what was reviewed on the screen — week off included, which

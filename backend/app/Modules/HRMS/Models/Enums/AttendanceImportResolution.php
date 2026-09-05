@@ -28,15 +28,24 @@ enum AttendanceImportResolution: string
         };
     }
 
-    /** The one-letter code the month sheet prints. */
+    /**
+     * WHAT THE MONTH SHEET PRINTS IN A DAY'S CELL.
+     *
+     * The factory's own paper sheet is the reference, and it does not use
+     * one letter each: a week off is W/O there and a half day H/D, because
+     * W and H on their own are read wrong across a 31-column grid by
+     * somebody totalling a row by eye. `Leave` is spelled out for the same
+     * reason — an L beside a P and an A is the one a payroll clerk
+     * mistakes.
+     */
     public function sheetCode(): string
     {
         return match ($this) {
             self::Present => 'P',
-            self::HalfDay => 'H',
+            self::HalfDay => 'HD',
             self::Absent => 'A',
-            self::OnLeave => 'L',
-            self::WeekOff => 'W',
+            self::OnLeave => 'Leave',
+            self::WeekOff => 'WO',
         };
     }
 }
