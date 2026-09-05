@@ -21,17 +21,25 @@ class LeaveBalanceService
     }
 
     /**
-     * @param  array{employee_id: int, leave_type_id: int, year: int, allocated_days?: string}  $data
+     * An opening balance is part OF the allocation, not an addition to it:
+     * given one and no explicit allocation, the allocation IS the opening
+     * balance, because nothing has accrued on top of it yet. Given neither,
+     * the type's annual default still applies, exactly as before.
+     *
+     * @param  array{employee_id: int, leave_type_id: int, year: int, allocated_days?: string|null, opening_days?: string|null}  $data
      */
     public function allocate(array $data): LeaveBalance
     {
+        $openingDays = $data['opening_days'] ?? 0;
         $allocatedDays = $data['allocated_days']
-            ?? LeaveType::findOrFail($data['leave_type_id'])->default_annual_days;
+            ?? ($data['opening_days']
+                ?? LeaveType::findOrFail($data['leave_type_id'])->default_annual_days);
 
         return LeaveBalance::create([
             'employee_id' => $data['employee_id'],
             'leave_type_id' => $data['leave_type_id'],
             'year' => $data['year'],
+            'opening_days' => $openingDays,
             'allocated_days' => $allocatedDays,
             'used_days' => 0,
         ])->load(['employee', 'leaveType']);

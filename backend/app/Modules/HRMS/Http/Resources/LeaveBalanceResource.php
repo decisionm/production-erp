@@ -17,7 +17,10 @@ class LeaveBalanceResource extends JsonResource
             ]),
             'leave_type' => LeaveTypeResource::make($this->whenLoaded('leaveType')),
             'year' => $this->year,
+            'opening_days' => $this->opening_days,
             'allocated_days' => $this->allocated_days,
+            // What the ERP itself granted: the total, less what was carried in.
+            'accrued_days' => bcsub($this->allocated_days, $this->opening_days, 2),
             'used_days' => $this->used_days,
             'remaining_days' => bcsub($this->allocated_days, $this->used_days, 2),
         ];

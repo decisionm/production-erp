@@ -10,6 +10,7 @@ use App\Modules\HRMS\Models\Employee;
 use App\Modules\HRMS\Models\Enums\AttendanceImportResolution;
 use App\Modules\HRMS\Models\Enums\AttendanceImportStatus;
 use App\Modules\HRMS\Models\Enums\AttendanceStatus;
+use App\Modules\HRMS\Models\LeaveBalance;
 use App\Support\Lists\ListSort;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -235,10 +236,49 @@ class AttendanceService
                 'to' => $to,
                 'days' => [],
                 'summary' => $this->tally([]),
+                'leave_balances' => [],
             ];
         }
 
-        return $this->personRange($employee, $from, $to);
+        return [
+            ...$this->personRange($employee, $from, $to),
+            'leave_balances' => $this->leaveBalances($employee, (int) substr($to, 0, 4)),
+        ];
+    }
+
+    /**
+     * WHAT THIS PERSON HAS LEFT, for the year the range ends in.
+     *
+     * It rides on `me` rather than the leave-balance list because that list
+     * is behind the HRMS gate, and a packer who may not open Employees still
+     * has a right to know how much casual leave they have — the same reason
+     * `me` itself sits outside the gate. Bounded by the employee the caller
+     * already resolved from their own login, so it can no more reach
+     * somebody else's balance than the days above can.
+     *
+     * A year with no row is an empty list, not a row of zeroes: nothing has
+     * been allocated yet, and a 0.00 would read as an entitlement spent.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function leaveBalances(Employee $employee, int $year): array
+    {
+        return LeaveBalance::query()
+            ->with('leaveType')
+            ->where('employee_id', $employee->id)
+            ->where('year', $year)
+            ->get()
+            ->sortBy(fn (LeaveBalance $balance) => $balance->leaveType?->code ?? '')
+            ->map(fn (LeaveBalance $balance) => [
+                'code' => $balance->leaveType?->code,
+                'name' => $balance->leaveType?->name,
+                'opening_days' => $balance->opening_days,
+                'accrued_days' => bcsub($balance->allocated_days, $balance->opening_days, 2),
+                'used_days' => $balance->used_days,
+                'remaining_days' => bcsub($balance->allocated_days, $balance->used_days, 2),
+            ])
+            ->values()
+            ->all();
     }
 
     /**

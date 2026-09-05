@@ -20,6 +20,8 @@ class UpdateLeaveTypeRequest extends FormRequest
             'code' => ['sometimes', 'string', 'max:16', Rule::unique('leave_types', 'code')->ignore($leaveType)],
             'name' => ['sometimes', 'string', 'max:255'],
             'default_annual_days' => ['sometimes', 'numeric', 'min:0'],
+            // Zero — the default — means this type does not accrue monthly.
+            'monthly_accrual_days' => ['sometimes', 'numeric', 'min:0', 'max:31'],
             'is_active' => ['boolean'],
         ];
     }

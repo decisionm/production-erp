@@ -16,7 +16,7 @@ use Illuminate\Foundation\Http\FormRequest;
  */
 class ListLeaveBalancesRequest extends FormRequest
 {
-    public const SORTABLE = ['year', 'allocated_days', 'used_days'];
+    public const SORTABLE = ['year', 'opening_days', 'allocated_days', 'used_days'];
 
     public function authorize(): bool
     {

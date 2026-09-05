@@ -14,6 +14,7 @@ class LeaveTypeResource extends JsonResource
             'code' => $this->code,
             'name' => $this->name,
             'default_annual_days' => $this->default_annual_days,
+            'monthly_accrual_days' => $this->monthly_accrual_days,
             'is_active' => $this->is_active,
             'created_at' => $this->created_at?->toIso8601String(),
         ];
