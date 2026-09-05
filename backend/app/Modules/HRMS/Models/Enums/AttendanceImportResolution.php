@@ -8,6 +8,12 @@ namespace App\Modules\HRMS\Models\Enums;
  * deliberately NOT an AttendanceStatus (adding a status to the live enum
  * touches payroll's day counting, which Q34 leaves unconfirmed) — it stays
  * on the import line and nothing is written for that day.
+ *
+ * `holiday` follows week_off for exactly that reason. The factory's rule
+ * is that a holiday nobody worked is neither leave nor an absence, which
+ * is what "no AttendanceStatus" already means here — so the calendar is
+ * answered on the import line and `attendances` is left alone, rather than
+ * a fifth status being added to a live enum that payroll counts days from.
  */
 enum AttendanceImportResolution: string
 {
@@ -16,6 +22,7 @@ enum AttendanceImportResolution: string
     case Absent = 'absent';
     case OnLeave = 'on_leave';
     case WeekOff = 'week_off';
+    case Holiday = 'holiday';
 
     public function attendanceStatus(): ?AttendanceStatus
     {
@@ -25,6 +32,7 @@ enum AttendanceImportResolution: string
             self::Absent => AttendanceStatus::Absent,
             self::OnLeave => AttendanceStatus::OnLeave,
             self::WeekOff => null,
+            self::Holiday => null,
         };
     }
 
@@ -46,6 +54,7 @@ enum AttendanceImportResolution: string
             self::Absent => 'A',
             self::OnLeave => 'Leave',
             self::WeekOff => 'WO',
+            self::Holiday => 'HO',
         };
     }
 }

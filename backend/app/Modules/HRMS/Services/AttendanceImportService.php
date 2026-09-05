@@ -70,6 +70,7 @@ class AttendanceImportService
     public function __construct(
         private readonly HrmsListQuery $query,
         private readonly AttendanceService $attendance,
+        private readonly HolidayService $holidays,
     ) {}
 
     // ---- the issue table ------------------------------------------------------
@@ -87,6 +88,7 @@ class AttendanceImportService
         ?string $lastOut,
         int $workedMinutes,
         bool $employeeKnown,
+        bool $isHoliday = false,
     ): array {
         if (! $employeeKnown) {
             return ['issue' => Issue::UnknownEmployee, 'resolution' => null];
@@ -106,8 +108,16 @@ class AttendanceImportService
             return ['issue' => Issue::OutNoIn, 'resolution' => null];
         }
         if (! $in && ! $out) {
-            return $weekOff
-                ? ['issue' => null, 'resolution' => Resolution::WeekOff]
+            // The report names its own week offs; it never names a public
+            // holiday. So the calendar answers the day that would otherwise
+            // be asked about — and a week off the report DID name keeps the
+            // answer it already gave.
+            if ($weekOff) {
+                return ['issue' => null, 'resolution' => Resolution::WeekOff];
+            }
+
+            return $isHoliday
+                ? ['issue' => null, 'resolution' => Resolution::Holiday]
                 : ['issue' => Issue::NoPunch, 'resolution' => null];
         }
 
@@ -212,6 +222,9 @@ class AttendanceImportService
         $now = now();
         $rows = [];
         $seen = [];
+        // One lookup for the period, not one per day: a month of 56 people
+        // is 1,736 days asking 31 distinct questions.
+        $holidays = $this->holidays->datesIn($data['period_from'], $data['period_to']);
         foreach ($data['employees'] as $employee) {
             $code = (string) $employee['employee_code'];
             $employeeId = $known->get($code);
@@ -228,7 +241,14 @@ class AttendanceImportService
                 $firstIn = $this->time($day['first_in'] ?? null);
                 $lastOut = $this->time($day['last_out'] ?? null);
                 $workedMinutes = (int) ($day['worked_minutes'] ?? 0);
-                $verdict = self::classify((string) $day['status'], $firstIn, $lastOut, $workedMinutes, $employeeId !== null);
+                $verdict = self::classify(
+                    (string) $day['status'],
+                    $firstIn,
+                    $lastOut,
+                    $workedMinutes,
+                    $employeeId !== null,
+                    isset($holidays[$day['date']]),
+                );
 
                 $rows[] = [
                     'employee_id' => $employeeId,
@@ -700,12 +720,19 @@ class AttendanceImportService
 
         $changed = 0;
         $checked = 0;
+        // The calendar as it stands NOW. This is how a month already under
+        // review takes account of holidays loaded after it was uploaded:
+        // every day no person has answered is judged again against them.
+        $holidays = $this->holidays->datesIn(
+            $import->period_from->toDateString(),
+            $import->period_to->toDateString(),
+        );
 
-        DB::transaction(function () use ($import, &$changed, &$checked) {
+        DB::transaction(function () use ($import, $holidays, &$changed, &$checked) {
             $import->lines()
                 ->whereNull('resolved_by')
                 ->orderBy('id')
-                ->chunkById(self::RESOLVE_CHUNK, function ($lines) use (&$changed, &$checked) {
+                ->chunkById(self::RESOLVE_CHUNK, function ($lines) use ($holidays, &$changed, &$checked) {
                     foreach ($lines as $line) {
                         $checked++;
                         $verdict = self::classify(
@@ -714,6 +741,7 @@ class AttendanceImportService
                             $line->last_out,
                             (int) $line->worked_minutes,
                             $line->employee_id !== null,
+                            isset($holidays[$line->date->toDateString()]),
                         );
 
                         $wasIssue = $line->issue?->value;
@@ -844,7 +872,14 @@ class AttendanceImportService
             return $line;
         }
 
-        $verdict = self::classify($line->raw_status, $line->first_in, $line->last_out, (int) $line->worked_minutes, true);
+        $verdict = self::classify(
+            $line->raw_status,
+            $line->first_in,
+            $line->last_out,
+            (int) $line->worked_minutes,
+            true,
+            $this->holidays->datesIn($line->date->toDateString(), $line->date->toDateString()) !== [],
+        );
         $line->fill([
             'employee_id' => $employee->id,
             'issue' => $verdict['issue'],

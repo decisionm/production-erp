@@ -79,6 +79,63 @@ class AttendanceImportClassifyTest extends TestCase
         );
     }
 
+    /**
+     * THE CALENDAR ANSWERS THE DAY NOBODY PUNCHED.
+     *
+     * 396 days of the August 2026 report land as "no punch" and wait for a
+     * person, and 130 of those are Sundays. The report only knows a week
+     * off when it says so itself; a public holiday it never mentions. Given
+     * the calendar, a holiday nobody worked answers itself — and answers as
+     * a HOLIDAY, which is neither leave nor an absence.
+     *
+     * A punch ON a holiday is simply the day worked: the clock decides it
+     * like any other day and no issue is raised, because somebody who came
+     * in on a holiday is present, not a query.
+     */
+    public function test_the_holiday_calendar_answers_a_day_nobody_punched(): void
+    {
+        $holiday = fn (string $raw, ?string $in, ?string $out, int $mins) => AttendanceImportService::classify($raw, $in, $out, $mins, true, isHoliday: true);
+
+        $this->assertSame(
+            ['issue' => null, 'resolution' => Resolution::Holiday],
+            $holiday('Absent', null, null, 0),
+            'a holiday nobody punched is a holiday, not an absence',
+        );
+
+        $this->assertSame(
+            ['issue' => null, 'resolution' => Resolution::Present],
+            $holiday('FD', '09:00', '18:00', 480),
+            'a full shift worked on a holiday is present, and is not queried',
+        );
+
+        $this->assertSame(
+            ['issue' => null, 'resolution' => Resolution::HalfDay],
+            $holiday('HD', '10:00', '14:00', 240),
+            'half a shift on a holiday is a half day',
+        );
+
+        $this->assertSame(
+            ['issue' => null, 'resolution' => Resolution::WeekOff],
+            $holiday('Week Off', null, null, 0),
+            'a day the report itself calls a week off keeps that answer; the calendar only rescues days that would otherwise be asked about',
+        );
+
+        $this->assertSame(
+            ['issue' => Issue::NoPunch, 'resolution' => null],
+            AttendanceImportService::classify('Absent', null, null, 0, true),
+            'and without the calendar the same day is still asked about',
+        );
+    }
+
+    public function test_a_holiday_writes_nothing_to_attendances(): void
+    {
+        // The whole reason holiday follows week_off rather than becoming a
+        // fifth AttendanceStatus: payroll counts days off that enum.
+        $this->assertNull(Resolution::Holiday->attendanceStatus());
+        $this->assertNull(Resolution::WeekOff->attendanceStatus());
+        $this->assertSame('HO', Resolution::Holiday->sheetCode());
+    }
+
     public function test_the_thresholds_are_the_owners_two_anchors(): void
     {
         // Eight hours is a full day and four hours is a half day
