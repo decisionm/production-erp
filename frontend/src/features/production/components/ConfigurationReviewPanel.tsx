@@ -12,6 +12,7 @@ import {
     missingWords,
     packagingCountsSummary,
     tallyIdentityLabel,
+    tallyIdentityLabelMarkingArchived,
 } from '@/features/production/productStandardsConfig';
 import type {
     ConfigurationReviewCandidate,
@@ -79,12 +80,17 @@ import type {
  *    the guard that stops NEW ones of these lives on the write endpoints and
  *    at Start Batch, and nothing already recorded is undone by this screen.
  *
- * An `item` on a separate-product row may name an ARCHIVED catalogue row: the
- * packing is active and its identity is set, and only the item it points at
- * has since been retired. The server resolves it anyway, because the finding
- * is about the stored column and "posts as no Tally identity" over an
- * identity that is plainly set would be false. The coexisting
- * `packaging_no_identity` row is what says it cannot post today.
+ * An `item` (or `product_item`) on a separate-product row may name an
+ * ARCHIVED catalogue row: the packing is active and its identity is set, and
+ * only the item it points at has since been retired. The server resolves it
+ * anyway, because the finding is about the stored column and "posts as no
+ * Tally identity" over an identity that is plainly set would be false — and
+ * it says the retirement out loud (`archived`), worn here as an "(archived)"
+ * marker on the label. The marker is the row's own honesty, not a nicety:
+ * the coexisting `packaging_no_identity` row also says the packing cannot
+ * post today, but past ten rows the table paginates and that row can sit on
+ * a page the reader never opens — "posts as sku · name" alone would then be
+ * the panel's only claim, and a false one.
  *
  * On a backend that predates the endpoint (404) the panel renders nothing,
  * so the workspace it sits in is unchanged for it.
@@ -197,6 +203,48 @@ export function linkPlanFor(row: ConfigurationReviewRow, itemId: number): LinkPl
 }
 
 /**
+ * THE ALERT'S ONE-LINE COUNT — pure for the same reason linkPlanFor() is.
+ *
+ * Separate-product rows used to be folded into "N packing identities still
+ * waiting on a person", which was wrong twice over: their identity is not
+ * missing (the identity IS the finding), and one packing can raise a
+ * separate-product row AND a no-identity row AND an ambiguity row at once —
+ * the kinds deliberately coexist — so a single packing could read as three
+ * waiting identities on the panel's one always-visible line. They are their
+ * own segment now, named for what the kind says (the packing is configured
+ * under the wrong product). And the identity count counts IDENTITIES, not
+ * rows: a no-identity row and a shared-name row about the same packing are
+ * two questions about one unsettled identity, deduped by the identity they
+ * ask about.
+ */
+export function reviewHeadline(rows: readonly ConfigurationReviewRow[]): string {
+    const separate = rows.filter((r) => r.kind === 'packaging_separate_product').length;
+    const skus = rows.filter((r) => r.kind === 'item_provisional_sku').length;
+
+    // IDENTITIES, NOT ROWS. A no-identity row and a shared-name row about
+    // the SAME packing are two questions about ONE unsettled identity — the
+    // kinds deliberately coexist — and counting rows announced "2 packing
+    // identities" over a single packing. Deduped by the identity the row
+    // asks about: the packing's own, or the standard's when no packaging
+    // carries the question.
+    const identities = new Set(
+        rows
+            .filter((r) => r.kind === 'packaging_no_identity' || r.kind === 'packaging_ambiguous')
+            .map((r) => `${r.standard?.id ?? 's'}:${r.packaging?.id ?? 'p'}`),
+    ).size;
+
+    const parts = [
+        separate > 0 ? `${separate} packing${separate === 1 ? '' : 's'} under the wrong product` : null,
+        identities > 0 ? `${identities} packing identit${identities === 1 ? 'y' : 'ies'}` : null,
+        skus > 0 ? `${skus} provisional SKU${skus === 1 ? '' : 's'}` : null,
+    ].filter((part): part is string => part !== null);
+
+    if (parts.length <= 1) return parts[0] ?? '';
+
+    return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+}
+
+/**
  * THE ACTION CELL — what, if anything, a person may do about one row.
  *
  * Lifted out of the table column unchanged so it can be called as a plain
@@ -239,13 +287,36 @@ export function ConfigurationReviewFixCell({
     // from the server, and this branch returns before any candidate could be
     // read, so a payload that carried some anyway still offers none.
     if (target === 'separate_product') {
+        // ONE WORDING, TRUE IN EVERY STATE — deliberately not conditional.
+        // The old sentence ("nothing here links it: the item that closes
+        // this is a separate PRODUCT") overclaimed in the migration-window
+        // state, where attaching the product's real item can make the two
+        // ends equal and close the row without any split. A first fix keyed
+        // a softer sentence on "an attach row for this standard sits in this
+        // same list", and an adversarial pass broke that in both directions:
+        // the attach row's existence neither implies an attach could close
+        // this row (a sibling packing with its own different identity —
+        // trashed ones included — makes the backend refuse every attach; an
+        // archived identity cannot be attached at all) nor is it implied by
+        // it (a sibling that INHERITS carries the product's gap on its own
+        // row, so the attach row vanishes while the drawer's attach still
+        // closes this one). No signal this panel holds tracks the truth, so
+        // the cell states only what is true everywhere: nothing links from
+        // THIS row; a genuine two-item split is closed by a separate
+        // product; and the verdict is re-judged whenever the product end
+        // changes — the arithmetic, never a promise that any particular
+        // attach will be accepted (the writers guard that, and their
+        // refusals name the reason).
         return (
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                {SEPARATE_PRODUCT_REQUIRED_DETAIL} Nothing here links it: the item that closes this is a separate
-                PRODUCT, which this screen does not create. This review is advisory — it changes neither the
-                configuration you see nor anything already posted. The identity is left exactly as it is; completed
-                runs keep the identity they froze at completion, queued and posted vouchers are unaffected, and
-                history is never rewritten.
+                {SEPARATE_PRODUCT_REQUIRED_DETAIL} Nothing on this row links it: if Tally truly carries two stock
+                items, the one that closes this is a separate PRODUCT, which this screen does not create. The
+                verdict is re-judged from the stored columns on every read — while the product this packing sits
+                under still posts as a placeholder, attaching that product&rsquo;s real Tally item re-asks the
+                question, and the same item at both ends is one product, not two. This review is advisory — it
+                changes neither the configuration you see nor anything already posted. The identity is left
+                exactly as it is; completed runs keep the identity they froze at completion, queued and posted
+                vouchers are unaffected, and history is never rewritten.
             </Typography.Text>
         );
     }
@@ -496,14 +567,7 @@ export default function ConfigurationReviewPanel({
         );
     }
 
-    const configRows = rows.filter((r) => r.kind !== 'item_provisional_sku').length;
-    const itemRows = rows.length - configRows;
-    const headline = [
-        configRows > 0 ? `${configRows} packing identit${configRows === 1 ? 'y' : 'ies'}` : null,
-        itemRows > 0 ? `${itemRows} provisional SKU${itemRows === 1 ? '' : 's'}` : null,
-    ]
-        .filter(Boolean)
-        .join(' and ');
+    const headline = reviewHeadline(rows);
 
     const busy = linkPackaging.isPending || attachProduct.isPending;
     const busyRow = linkPackaging.isPending ? linkPackaging.variables?.row : attachProduct.variables?.row;
@@ -593,11 +657,13 @@ export default function ConfigurationReviewPanel({
                                             // BOTH ENDS OF THE RELATION, because either alone
                                             // reads as ordinary: the item this packing posts
                                             // as, and the product it is filed under. Seeing
-                                            // them side by side IS the finding.
+                                            // them side by side IS the finding. Either end may
+                                            // name a retired row — the label wears "(archived)"
+                                            // rather than passing it off as a live identity.
                                             <Space direction="vertical" size={0}>
-                                                <Typography.Text>posts as {tallyIdentityLabel(r.item)}</Typography.Text>
+                                                <Typography.Text>posts as {tallyIdentityLabelMarkingArchived(r.item)}</Typography.Text>
                                                 <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                                                    under the product {tallyIdentityLabel(r.product_item)}
+                                                    under the product {tallyIdentityLabelMarkingArchived(r.product_item)}
                                                 </Typography.Text>
                                             </Space>
                                         ) : (

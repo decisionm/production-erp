@@ -2882,15 +2882,19 @@ export interface ConfigurationReviewRow {
      * On `packaging_separate_product` ONLY it is the packing's own stored
      * identity, and it may name an ARCHIVED catalogue row — the finding is
      * about the stored column, and a retired item row does not unset it.
+     * `archived` (that kind alone, here and on `product_item`) says so out
+     * loud: without it the panel printed "posts as X" over an item no
+     * voucher can name any more, and the packaging_no_identity row that
+     * corrects the claim can sit a table page away.
      */
-    item: { id: number; sku: string | null; name: string } | null;
+    item: { id: number; sku: string | null; name: string; archived?: boolean } | null;
     /**
      * `packaging_separate_product` ONLY — the product the packing currently
      * sits under, beside `item` (the different thing it posts as). The reader
      * needs both ends of the relation to see the conflict. Absent on every
      * kind that predates DEC-20260821-001, whose payloads are unchanged.
      */
-    product_item?: { id: number; sku: string | null; name: string } | null;
+    product_item?: { id: number; sku: string | null; name: string; archived?: boolean } | null;
     /** The server's keys for what is missing — same vocabulary as ConfigurationCompleteness.missing. */
     missing: string[];
     ambiguity?: { shared_name_count: number } | null;

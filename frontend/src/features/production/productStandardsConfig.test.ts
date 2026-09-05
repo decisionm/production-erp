@@ -14,6 +14,7 @@ import {
     provisionalSkuTag,
     standardSpec,
     tallyIdentityLabel,
+    tallyIdentityLabelMarkingArchived,
 } from './productStandardsConfig';
 import type { ProductStandardsWorkspaceRow, StandardPackaging } from './types';
 
@@ -228,6 +229,30 @@ describe('tallyIdentityLabel', () => {
         expect(tallyIdentityLabel(null)).toBe('no Tally identity');
         expect(tallyIdentityLabel(undefined)).toBe('no Tally identity');
         expect(tallyIdentityLabel({ id: 1, name: '  ', sku: '' })).toBe('no Tally identity');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// tallyIdentityLabelMarkingArchived — the same label, retirement said out loud
+// ---------------------------------------------------------------------------
+
+describe('tallyIdentityLabelMarkingArchived', () => {
+    it('appends the retirement to the label', () => {
+        // A separate-product review row may name a soft-deleted catalogue row
+        // on purpose; "posts as BTL-G-T · Bottle G - Tray" with no marker
+        // reads as a live identity over an item no voucher can name.
+        expect(
+            tallyIdentityLabelMarkingArchived({ id: 1, sku: 'BTL-G-T', name: 'Bottle G - Tray', archived: true }),
+        ).toBe('BTL-G-T · Bottle G - Tray (archived)');
+    });
+
+    it('is exactly tallyIdentityLabel for a live or unflagged row', () => {
+        expect(tallyIdentityLabelMarkingArchived({ id: 1, sku: 'BTL-G-T', name: 'Bottle G - Tray', archived: false })).toBe(
+            'BTL-G-T · Bottle G - Tray',
+        );
+        expect(tallyIdentityLabelMarkingArchived({ id: 1, sku: 'KID-500', name: 'KID-500' })).toBe('KID-500');
+        expect(tallyIdentityLabelMarkingArchived(null)).toBe('no Tally identity');
+        expect(tallyIdentityLabelMarkingArchived(undefined)).toBe('no Tally identity');
     });
 });
 

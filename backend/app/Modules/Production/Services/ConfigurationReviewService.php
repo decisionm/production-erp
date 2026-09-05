@@ -219,7 +219,11 @@ class ConfigurationReviewService
      * row a person is very much being asked to look at, so the identity is
      * resolved through `tallyItemIncludingArchived` and named. Eager-loaded
      * with the rest (review()), so this adds one constant query, never one
-     * per row.
+     * per row. And the payload SAYS the retirement (`archived`, this kind
+     * alone, both ends): handed only {sku, name}, the panel printed
+     * "posts as X" over an item no voucher can name any more, with the
+     * packaging_no_identity row that corrects the claim possibly a table
+     * page away.
      *
      * READ-ONLY, AND NOT A REFUSAL. These rows already exist and may already
      * have posted vouchers. Nothing here clears an identity, proposes a
@@ -261,6 +265,8 @@ class ConfigurationReviewService
                     continue;
                 }
 
+                $identity = $packaging->tallyItemIncludingArchived;
+
                 $rows[] = [
                     ...$this->row(
                         self::KIND_PACKAGING_SEPARATE_PRODUCT,
@@ -281,7 +287,7 @@ class ConfigurationReviewService
                         // plainly set. No fallback is lost: the predicate is
                         // false unless `item_id` is non-null, so identityFor()
                         // could never have reached its product fallback here.
-                        $packaging->tallyItemIncludingArchived,
+                        $identity,
                         // The `missing` vocabulary is unchanged (P5-06: a new
                         // word there is a contract change for two screens).
                         // This row's own fact is the KIND, and it says nothing
@@ -301,10 +307,27 @@ class ConfigurationReviewService
                     // rows this PR does not touch. The reader needs BOTH ends
                     // of the relation to see the conflict — the product the
                     // packing sits under, beside the item it actually posts as.
+                    //
+                    // `archived` — this kind alone, BOTH ends — is the
+                    // retirement said out loud. Each relation here resolves a
+                    // soft-deleted row on purpose (that is what the
+                    // ...IncludingArchived pair is for), and a payload of only
+                    // {sku, name} had the panel print "posts as X" over an
+                    // item no voucher can name any more — with the
+                    // packaging_no_identity row that corrects the claim
+                    // possibly a table page away. trashed() reads the loaded
+                    // row's own deleted_at: no extra query.
+                    'item' => $identity === null ? null : [
+                        'id' => (int) $identity->id,
+                        'sku' => (string) $identity->sku,
+                        'name' => (string) $identity->name,
+                        'archived' => $identity->trashed(),
+                    ],
                     'product_item' => $product === null ? null : [
                         'id' => (int) $product->id,
                         'sku' => (string) $product->sku,
                         'name' => (string) $product->name,
+                        'archived' => $product->trashed(),
                     ],
                 ];
             }
