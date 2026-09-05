@@ -27,6 +27,7 @@ branch for the highest id before minting, or re-mint at merge time (this
 happened again with DEC-20260807-001.., three branches deep, 07-Aug).
 DEC-20260807-014 is the granularity-flip execution record on main;
 PR #148's colliding -014 was re-minted as -015 at merge, per this rule.
+Q100 is claimed by the demo-employee branch (05-Sep, archived not deleted).
 Q29-Q31 landed with PR #155 (finance-pull discovery, merged 16-Aug); Q32 by the
 report-down backdate PR (#159). Q33 is claimed by the packaging-Tally-identity
 branch (DEC-20260821-001, which supersedes DEC-20260810-003). Q34-Q37 are claimed by the 12-Aug overnight
@@ -3085,3 +3086,48 @@ the exact guess that rule exists to prevent, so the tiles wait for the count.
 and the Store's is the one the chapter specifies. What is blocked is knowing
 whether the other five are the right five.
 *Open since 2026-09-04.*
+
+## Q100 · Ten real production entries name a demo employee as their operator — leave them as they stand, or correct the operator?
+
+`BottleManufacturingDemoSeeder` creates seven fabricated people, EMP-001 to
+EMP-007. It is not in the deploy's seeder list and never has been, but a
+commented-'optional' line in the one-time server bootstrap offered it, and
+they reached the live database. The `Remove demo employees` workflow exists
+to take them out; four are already gone.
+
+**What the 05-Sep-2026 dry run found.** Three cannot be removed, and the
+workflow is right to refuse them:
+
+- **EMP-001 (Karthik Subramaniam)** — 9 rows in
+  `shift_production_entries.operator_id`; also a salary structure.
+- **EMP-006 (Divya Chandran)** — 1 row in `shift_production_entries.operator_id`.
+- **EMP-005 (Bala Krishnan)** — a maintenance work order.
+
+**Why the production rows are the question.** The salary structure and the
+work order are created by the demo seeder itself, so they are fabricated too
+and go when it goes. The shift production entries are NOT: no seeder in the
+repo creates a `shift_production_entry` — checked across all eight seeders.
+So those ten rows were made through the app, on real shifts, by somebody
+choosing a demo name from the operator list. The operator on ten real
+production records is a person who does not exist.
+
+**What was done instead, and why.** All three were ARCHIVED on 05-Sep-2026,
+not deleted: archiving keeps the code and the history and only stops them
+being offered for new work, so the ten entries still read exactly as they
+did. Deleting would have blanked the operator on real production records,
+which this repo does not do to posted work. Active headcount went 66 → 63,
+and a search for "Karthik" now returns one active person, SPP-115 Karthik
+Manikandan, which was the duplicate that prompted the check.
+
+**The question is what those ten entries should say.** Three possibilities,
+and only the owner can pick: leave them as they are and accept that ten
+entries name an archived non-person; have the supervisor identify who
+actually ran those shifts and correct the operator; or decide the entries
+are themselves not real work and should be withdrawn. Nothing should be
+changed on the strength of a guess about who was on the machine.
+
+**Blocks:** nothing on the floor, and nothing in the leave build — the three
+are archived, so they cannot be given an opening balance or accrue leave.
+What is blocked is whether production history is right, and whether
+EMP-001/005/006 can ever be removed rather than left archived for good.
+*Open since 2026-09-05.*
