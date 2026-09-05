@@ -22,6 +22,7 @@ use App\Modules\Finance\Http\Controllers\JournalEntryController;
 use App\Modules\HRMS\Http\Controllers\AttendanceController;
 use App\Modules\HRMS\Http\Controllers\AttendanceImportController;
 use App\Modules\HRMS\Http\Controllers\EmployeeController;
+use App\Modules\HRMS\Http\Controllers\HolidayController;
 use App\Modules\HRMS\Http\Controllers\LeaveBalanceController;
 use App\Modules\HRMS\Http\Controllers\LeaveRequestController;
 use App\Modules\HRMS\Http\Controllers\LeaveTypeController;
@@ -981,6 +982,13 @@ Route::prefix('v1')->group(function () {
             Route::post('employees/{employee}/archive', [EmployeeController::class, 'archive']);
             Route::post('employees/{employee}/activate', [EmployeeController::class, 'activate']);
             Route::delete('employees/{employee}', [EmployeeController::class, 'destroy']);
+
+            // The factory's calendar. Read a year at a time; `replace` takes
+            // an uploaded list and says what it changed.
+            Route::get('holidays', [HolidayController::class, 'index']);
+            Route::post('holidays', [HolidayController::class, 'store']);
+            Route::post('holidays/replace', [HolidayController::class, 'replace']);
+            Route::delete('holidays/{holiday}', [HolidayController::class, 'destroy']);
 
             Route::apiResource('leave-types', LeaveTypeController::class)->only(['index', 'store', 'update']);
 

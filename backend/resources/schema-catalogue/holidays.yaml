@@ -1,0 +1,46 @@
+table: holidays
+module: hrms
+label: Holidays
+purpose: 'The days the factory is shut. One row per date. The punch report never names a public holiday, so without this a holiday nobody worked arrives as a day somebody has to answer by hand; with it the day answers itself as a holiday — neither leave nor an absence.'
+columns:
+  -
+    name: id
+    type: integer
+    meaning: 'row id'
+  -
+    name: date
+    type: date
+    meaning: 'the day the factory is shut; unique, and the YEAR is read off this rather than stored separately'
+  -
+    name: name
+    type: string
+    meaning: 'what the holiday is called (e.g. Independence Day, Pongal)'
+  -
+    name: created_at
+    type: datetime
+    nullable: true
+    meaning: 'when the row was added'
+  -
+    name: updated_at
+    type: datetime
+    nullable: true
+    meaning: 'when the row was last edited'
+  -
+    name: deleted_at
+    type: datetime
+    nullable: true
+    meaning: "when the holiday was withdrawn (null = still observed); withdrawn rows are hidden from lists but kept, because a past month's sheet was built on them"
+joins: {}
+keywords:
+  - holiday
+  - holidays
+  - 'public holiday'
+  - 'national holiday'
+  - festival
+  - 'factory shut'
+  - closed
+  - calendar
+questions:
+  - 'Which days is the factory shut this year?'
+  - 'How many holidays fall in August?'
+  - 'Is a given date a holiday?'
